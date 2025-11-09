@@ -36,7 +36,25 @@ S3_BUCKET_NAME=ayryx-adsb-history
 
 ### 3. Download Recent Week of Data
 
-Download the most recent 7 days of data:
+**Option A: Automated EC2 (Recommended)**
+
+Launch an EC2 instance that automatically downloads and uploads to S3:
+
+```bash
+./scripts/provision-ec2-downloader.sh --start-date 2025-11-02 --days 7
+```
+
+The EC2 instance will self-terminate when complete. See [EC2_INGESTION_README.md](./EC2_INGESTION_README.md) for details.
+
+**Benefits:**
+- No local disk space required
+- Fast network transfer (EC2 → S3)
+- Auto-terminates when complete
+- Cost: < $0.10 per run
+
+**Option B: Local Machine**
+
+If you have 30GB+ free disk space:
 
 ```bash
 npm run download-week
@@ -56,11 +74,14 @@ This will:
 Download specific dates:
 
 ```bash
-# Download from Nov 2 to Nov 8, 2025
+# Using EC2 (recommended)
+./scripts/provision-ec2-downloader.sh --start-date 2025-11-02 --days 7
+
+# Using local machine (requires 30GB+ disk space)
 node scripts/download-week.js --start-date 2025-11-02 --days 7
 
 # Download just 3 days
-node scripts/download-week.js --start-date 2025-11-06 --days 3
+./scripts/provision-ec2-downloader.sh --start-date 2025-11-06 --days 3
 ```
 
 ## 📂 Directory Structure
