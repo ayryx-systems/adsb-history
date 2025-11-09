@@ -11,11 +11,12 @@
 
 ## Active EC2 Instance
 
-**Instance ID:** `i-0415a78563030a3bb`  
+**Instance ID:** `i-02231da1d6d8c47a5`  
 **Region:** us-west-1  
 **Type:** t3.medium  
 **Task:** Downloading 7 days (2025-11-02 to 2025-11-08)  
-**Started:** 2025-11-09 21:39 UTC  
+**Started:** 2025-11-10 00:32 UTC  
+**Status:** ✅ Working! (2/7 days complete)  
 **Expected completion:** ~30-60 minutes  
 **Will auto-terminate:** Yes (on success)
 
@@ -26,7 +27,7 @@
 aws s3 ls s3://ayryx-adsb-history/raw/2025/11/ --recursive --human-readable
 
 # Check instance status
-aws ec2 describe-instances --instance-ids i-0415a78563030a3bb \
+aws ec2 describe-instances --instance-ids i-02231da1d6d8c47a5 \
   --region us-west-1 --query 'Reservations[0].Instances[0].State.Name'
 
 # Auto-monitor

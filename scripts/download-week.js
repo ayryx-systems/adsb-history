@@ -110,12 +110,11 @@ async function main() {
     dates,
   });
 
-  // Validate AWS credentials if S3 upload is enabled
+  // AWS credentials validation
+  // Note: On EC2 with IAM role, credentials are automatically provided
+  // On local machine, credentials can come from env vars or ~/.aws/credentials
   if (!options.skipS3Upload) {
-    if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
-      logger.error('AWS credentials not configured. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file');
-      process.exit(1);
-    }
+    logger.info('AWS SDK will use IAM role (EC2) or configured credentials');
   }
 
   // Process each date

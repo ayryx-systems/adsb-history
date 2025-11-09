@@ -8,17 +8,25 @@ import logger from './logger.js';
  * S3 utility functions for uploading and managing ADSB historical data
  */
 class S3Manager {
-  constructor(config) {
-    this.bucketName = config.bucketName || process.env.S3_BUCKET_NAME;
-    this.region = config.region || process.env.AWS_REGION;
+  constructor(config = {}) {
+    this.bucketName = config.bucketName || process.env.S3_BUCKET_NAME || 'ayryx-adsb-history';
+    this.region = config.region || process.env.AWS_REGION || 'us-west-1';
     
-    this.client = new S3Client({
+    //Note: On EC2 with IAM role, credentials are automatically provided by AWS SDK
+    // On local machine, credentials come from env vars or ~/.aws/credentials
+    const clientConfig = {
       region: this.region,
-      credentials: {
+    };
+    
+    // Only set explicit credentials if they're provided (local development)
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      clientConfig.credentials = {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      },
-    });
+      };
+    }
+    
+    this.client = new S3Client(clientConfig);
     
     logger.info('S3Manager initialized', { bucket: this.bucketName, region: this.region });
   }

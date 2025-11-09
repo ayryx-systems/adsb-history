@@ -1,7 +1,7 @@
 #!/bin/bash
 # Monitor the EC2 downloader instance
 
-INSTANCE_ID=${1:-"i-0415a78563030a3bb"}
+INSTANCE_ID=${1:-"i-02231da1d6d8c47a5"}
 REGION=${2:-"us-west-1"}
 
 echo "Monitoring EC2 instance: $INSTANCE_ID"
