@@ -1,6 +1,6 @@
 {
   "s3": {
-    "bucketName": "ayryx-adsb-history",
+    "bucketName": "ayryx-adsb-history-654654263702",
     "region": "us-west-2",
     "paths": {
       "raw": "raw/",

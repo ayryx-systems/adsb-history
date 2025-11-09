@@ -132,6 +132,7 @@ EOF
     --region "$REGION"
   
   # Create and attach S3 policy
+  S3_BUCKET_FOR_POLICY="ayryx-adsb-history-${ACCOUNT_ID}"
   cat > /tmp/s3-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -144,8 +145,8 @@ EOF
         "s3:ListBucket"
       ],
       "Resource": [
-        "arn:aws:s3:::ayryx-adsb-history",
-        "arn:aws:s3:::ayryx-adsb-history/*"
+        "arn:aws:s3:::${S3_BUCKET_FOR_POLICY}",
+        "arn:aws:s3:::${S3_BUCKET_FOR_POLICY}/*"
       ]
     }
   ]
@@ -213,8 +214,59 @@ else
 fi
 echo ""
 
-# Step 3: Create user data script
-echo "Step 3: Preparing user data script..."
+# Step 3: Ensure S3 bucket exists
+echo "Step 3: Checking S3 bucket..."
+S3_BUCKET="ayryx-adsb-history-${ACCOUNT_ID}"
+
+if aws s3 ls "s3://$S3_BUCKET" --region "$REGION" > /dev/null 2>&1; then
+  echo "✓ S3 bucket exists: $S3_BUCKET"
+else
+  echo "Creating S3 bucket: $S3_BUCKET"
+  if [ "$REGION" == "us-east-1" ]; then
+    # us-east-1 doesn't need LocationConstraint
+    aws s3api create-bucket --bucket "$S3_BUCKET" --region "$REGION"
+  else
+    aws s3api create-bucket \
+      --bucket "$S3_BUCKET" \
+      --region "$REGION" \
+      --create-bucket-configuration LocationConstraint="$REGION"
+  fi
+  
+  # Enable versioning for data protection
+  aws s3api put-bucket-versioning \
+    --bucket "$S3_BUCKET" \
+    --versioning-configuration Status=Enabled \
+    --region "$REGION"
+  
+  echo "✓ S3 bucket created: $S3_BUCKET"
+fi
+echo ""
+
+# Step 4: Package and upload code to S3
+echo "Step 4: Packaging code..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CODE_PACKAGE=$("$SCRIPT_DIR/package-code.sh")
+
+if [ ! -f "$CODE_PACKAGE" ]; then
+  echo "ERROR: Failed to package code"
+  exit 1
+fi
+
+echo "Uploading code package to S3..."
+S3_CODE_KEY="bootstrap/adsb-history-code.tar.gz"
+aws s3 cp "$CODE_PACKAGE" "s3://$S3_BUCKET/$S3_CODE_KEY" --region "$REGION"
+
+# Clean up temporary package directory
+TEMP_PACKAGE_DIR="$(dirname "$(dirname "$CODE_PACKAGE")")"
+if [[ "$TEMP_PACKAGE_DIR" == *".temp-package"* ]]; then
+  rm -rf "$TEMP_PACKAGE_DIR"
+fi
+
+echo "✓ Code uploaded to s3://$S3_BUCKET/$S3_CODE_KEY"
+echo ""
+
+# Step 5: Create user data script
+echo "Step 5: Preparing user data script..."
 cat > /tmp/user-data.sh <<'USERDATA_EOF'
 #!/bin/bash
 set -e
@@ -229,99 +281,23 @@ echo "=========================================="
 # Install Node.js 20.x
 echo "Installing Node.js..."
 curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-dnf install -y nodejs git
+dnf install -y nodejs
 
 # Verify installation
 node --version
 npm --version
 
-# Create working directory
-mkdir -p /opt/adsb-history
-cd /opt/adsb-history
+# Download code from S3
+echo "Downloading code package from S3..."
+cd /opt
+aws s3 cp s3://S3_BUCKET_PLACEHOLDER/bootstrap/adsb-history-code.tar.gz . --region AWS_REGION_PLACEHOLDER
 
-# Clone the repository (or download the code)
-echo "Fetching code..."
-cat > package.json <<'PKG_EOF'
-{
-  "name": "adsb-history",
-  "version": "1.0.0",
-  "type": "module",
-  "dependencies": {
-    "dotenv": "^16.0.3",
-    "winston": "^3.11.0",
-    "@aws-sdk/client-s3": "^3.450.0",
-    "@aws-sdk/lib-storage": "^3.450.0",
-    "tar": "^6.2.0",
-    "axios": "^1.6.0",
-    "p-limit": "^5.0.0"
-  }
-}
-PKG_EOF
+echo "Extracting code..."
+tar xzf adsb-history-code.tar.gz
+cd adsb-history
 
 echo "Installing dependencies..."
 npm install
-
-# Create minimal implementation
-mkdir -p src/ingestion src/utils config
-
-# Download configuration
-cat > config/airports.json <<'AIRPORTS_EOF'
-[
-  {
-    "icao": "KLAX",
-    "name": "Los Angeles International",
-    "lat": 33.9425,
-    "lon": -118.408
-  }
-]
-AIRPORTS_EOF
-
-cat > config/aws-config.json <<'AWS_CONFIG_EOF'
-{
-  "region": "us-west-2",
-  "bucket": "ayryx-adsb-history"
-}
-AWS_CONFIG_EOF
-
-# We'll inject the actual source files from the repository
-USERDATA_EOF
-
-# Inject the source files content into user data
-echo 'echo "Creating source files..."' >> /tmp/user-data.sh
-
-# Read and inject GitHubReleaseDownloader.js
-echo "cat > src/ingestion/GitHubReleaseDownloader.js <<'GITHUB_EOF'" >> /tmp/user-data.sh
-cat /Users/allredj/git/ayryx/adsb-history/src/ingestion/GitHubReleaseDownloader.js >> /tmp/user-data.sh
-echo 'GITHUB_EOF' >> /tmp/user-data.sh
-
-# Read and inject S3Uploader.js  
-echo "cat > src/ingestion/S3Uploader.js <<'S3_EOF'" >> /tmp/user-data.sh
-cat /Users/allredj/git/ayryx/adsb-history/src/ingestion/S3Uploader.js >> /tmp/user-data.sh
-echo 'S3_EOF' >> /tmp/user-data.sh
-
-# Read and inject DataExtractor.js
-echo "cat > src/ingestion/DataExtractor.js <<'EXTRACTOR_EOF'" >> /tmp/user-data.sh
-cat /Users/allredj/git/ayryx/adsb-history/src/ingestion/DataExtractor.js >> /tmp/user-data.sh
-echo 'EXTRACTOR_EOF' >> /tmp/user-data.sh
-
-# Read and inject logger.js
-echo "cat > src/utils/logger.js <<'LOGGER_EOF'" >> /tmp/user-data.sh
-cat /Users/allredj/git/ayryx/adsb-history/src/utils/logger.js >> /tmp/user-data.sh
-echo 'LOGGER_EOF' >> /tmp/user-data.sh
-
-# Read and inject s3.js
-echo "cat > src/utils/s3.js <<'S3UTIL_EOF'" >> /tmp/user-data.sh
-cat /Users/allredj/git/ayryx/adsb-history/src/utils/s3.js >> /tmp/user-data.sh
-echo 'S3UTIL_EOF' >> /tmp/user-data.sh
-
-# Read and inject download-week.js
-echo "cat > scripts/download-week.js <<'DOWNLOAD_EOF'" >> /tmp/user-data.sh
-cat /Users/allredj/git/ayryx/adsb-history/scripts/download-week.js >> /tmp/user-data.sh
-echo 'DOWNLOAD_EOF' >> /tmp/user-data.sh
-echo 'mkdir -p scripts' >> /tmp/user-data.sh
-
-# Add the execution part
-cat >> /tmp/user-data.sh <<'USERDATA_EOF2'
 
 # Set AWS region (credentials come from IAM role)
 export AWS_REGION=AWS_REGION_PLACEHOLDER
@@ -351,18 +327,19 @@ else
   echo "✗ Download failed. Instance will remain running for debugging."
   echo "Check logs at /var/log/user-data.log"
 fi
-USERDATA_EOF2
+USERDATA_EOF
 
 # Replace placeholders (macOS compatible)
 sed -i '' "s/AWS_REGION_PLACEHOLDER/$REGION/g" /tmp/user-data.sh
+sed -i '' "s/S3_BUCKET_PLACEHOLDER/$S3_BUCKET/g" /tmp/user-data.sh
 sed -i '' "s/START_DATE_PLACEHOLDER/$START_DATE/g" /tmp/user-data.sh
 sed -i '' "s/DAYS_PLACEHOLDER/$DAYS/g" /tmp/user-data.sh
 
 echo "✓ User data script prepared"
 echo ""
 
-# Step 4: Launch EC2 instance
-echo "Step 4: Launching EC2 instance..."
+# Step 6: Launch EC2 instance
+echo "Step 6: Launching EC2 instance..."
 
 KEY_NAME_PARAM=""
 if [ -n "$KEY_NAME" ]; then

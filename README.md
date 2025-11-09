@@ -31,7 +31,7 @@ Edit `.env` and add your AWS credentials:
 AWS_REGION=us-west-2
 AWS_ACCESS_KEY_ID=your_access_key_here
 AWS_SECRET_ACCESS_KEY=your_secret_key_here
-S3_BUCKET_NAME=ayryx-adsb-history
+S3_BUCKET_NAME=ayryx-adsb-history-654654263702
 ```
 
 ### 3. Download Recent Week of Data
@@ -111,7 +111,7 @@ adsb-history/
 Data is organized in S3 as:
 
 ```
-s3://ayryx-adsb-history/
+s3://ayryx-adsb-history-654654263702/
 ├── raw/                          # Tar archives only (~3GB/day, ~1TB/year)
 │   └── 2025/
 │       └── 11/
