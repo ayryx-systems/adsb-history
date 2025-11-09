@@ -1,193 +1,123 @@
 # EC2 Automated Data Ingestion
 
-This directory contains scripts to automatically provision an EC2 instance that downloads ADSB historical data from GitHub and uploads it to S3.
+Automatically provision an EC2 instance to download ADSB historical data from GitHub and upload to S3.
 
 ## Why EC2?
 
-- **Disk space**: Each day of data is ~3GB compressed. Downloading a week requires ~21GB of temporary storage.
-- **Network**: EC2 to S3 transfers are fast and free within the same AWS region.
-- **Cost-effective**: Instance auto-terminates when complete, you only pay for ~30-60 minutes of compute.
-- **Automation-ready**: Can be triggered daily via cron/Lambda for ongoing ingestion.
+- **No local disk space needed** - Each day is ~3GB, a week requires ~21GB
+- **Fast & free** - EC2 to S3 transfers in same region (us-west-1) are free
+- **Cost-effective** - Instance auto-terminates when done (~30-60 min runtime)
+- **Automation-ready** - Can run daily for ongoing ingestion
 
 ## Prerequisites
 
-1. **AWS CLI configured** with credentials that have permissions to:
-   - Launch EC2 instances
-   - Create IAM roles and policies
-   - Create security groups
-   - Upload to S3
+1. **AWS CLI configured** with admin or sufficient permissions
+2. **S3 bucket** `ayryx-adsb-history` in us-west-1 with proper bucket policy
 
-2. **Check your AWS configuration**:
-   ```bash
-   aws sts get-caller-identity
-   ```
+**Verify setup:**
+
+```bash
+aws sts get-caller-identity
+aws s3 ls s3://ayryx-adsb-history/
+```
 
 ## Quick Start
-
-### Download a Week of Data
-
-Download 7 days of data (2025-11-02 through 2025-11-08):
 
 ```bash
 cd adsb-history
 ./scripts/provision-ec2-downloader.sh --start-date 2025-11-02 --days 7
 ```
 
-**That's it!** The script will:
-1. Create necessary IAM roles (if they don't exist)
-2. Create security group (if it doesn't exist)
-3. Launch an EC2 instance with 30GB storage
-4. Automatically download and upload data
+**The script will:**
+
+1. Create IAM role & security group (if needed)
+2. Package and upload code to S3
+3. Launch EC2 instance (us-west-1, t3.medium, 30GB)
+4. Download 7 days from GitHub → Upload to S3
 5. Self-terminate when complete
 
 ### Monitor Progress
 
-Get instance state:
+**Check S3 uploads:**
 
 ```bash
-# Replace <instance-id> with the ID printed by the script
-aws ec2 describe-instances --instance-ids <instance-id> --region us-west-2 --query 'Reservations[0].Instances[0].State.Name'
+aws s3 ls s3://ayryx-adsb-history/raw/2025/11/ --recursive --human-readable
 ```
 
-View CloudWatch logs (after ~5 minutes):
+**Check instance status:**
 
 ```bash
-aws logs tail /aws/ec2/adsb-history-downloader --follow --region us-west-2
+aws ec2 describe-instances --instance-ids <instance-id> \
+  --region us-west-1 --query 'Reservations[0].Instances[0].State.Name'
 ```
 
-### Custom Options
+**Auto-monitor:**
 
 ```bash
-# Download specific date range
+./scripts/monitor-ec2.sh
+```
+
+### Options
+
+```bash
+# Different date range
 ./scripts/provision-ec2-downloader.sh --start-date 2025-10-01 --days 14
 
-# Use different region
-./scripts/provision-ec2-downloader.sh --region us-east-1
-
-# Enable SSH access for debugging (requires existing key pair)
-./scripts/provision-ec2-downloader.sh --key-name my-key-pair
+# Download single day (for daily automation)
+./scripts/provision-ec2-downloader.sh --days 1
 ```
 
 ## How It Works
 
-### Infrastructure Created
+**Infrastructure:**
 
-**IAM Role** (`adsb-history-downloader-role`):
-- Allows EC2 instance to assume role
-- Grants S3 read/write access to `ayryx-adsb-history` bucket
+- **IAM Role** - Grants EC2 access to S3 bucket
+- **Security Group** - Egress only (no inbound access)
+- **EC2 Instance** - t3.medium, 30GB storage, Amazon Linux 2023, us-west-1
 
-**Security Group** (`adsb-history-downloader`):
-- Outbound traffic only (no inbound ports open)
-- Instance has no public access
+**Execution:**
 
-**EC2 Instance**:
-- Instance type: `t3.medium` (2 vCPU, 4GB RAM)
-- Root volume: 30GB GP3 SSD
-- AMI: Amazon Linux 2023 (latest)
-- Region: us-west-2 (configurable)
+1. Boot → Install Node.js → Download code from S3
+2. Download each day from GitHub (`.tar.aa` + `.tar.ab`)
+3. Concatenate → Upload to S3 `raw/YYYY/MM/DD/`
+4. Self-terminate on success (or stay running if failed for debugging)
 
-### Execution Flow
+**Cost:**
 
-1. **Launch**: EC2 instance boots with user-data script
-2. **Setup**: Install Node.js, npm, dependencies
-3. **Download**: Run `download-week.js` script
-   - Download split tar files from GitHub releases
-   - Concatenate `.tar.aa` + `.tar.ab` → `.tar`
-   - Upload to S3 `raw/YYYY/MM/DD/`
-   - Extract temporarily to verify structure
-   - Clean up local files
-4. **Terminate**: Instance self-terminates on success
+- **Per run**: ~$0.05 (EC2) + $0 (data transfer in same region) = **< $0.10**
+- **S3 storage**: ~$0.023/GB/month → $0.70/day or $21/month for a week
 
-### Cost Estimate
+## Daily Automation
 
-- **EC2**: ~$0.05/hour × 0.5-1 hour = **$0.025-0.05 per run**
-- **Data transfer**: Free (EC2 to S3 in same region)
-- **S3 storage**: ~$0.023/GB/month = **$0.70/day or $21/month**
-
-Total for one-time 7-day backfill: **< $0.10**
-
-## Daily Automation (Future)
-
-To set up daily ingestion:
+Run daily to keep data current:
 
 ```bash
-# Option 1: Cron job (run from local machine or bastion)
-0 6 * * * /path/to/provision-ec2-downloader.sh --days 1
-
-# Option 2: Lambda + EventBridge (recommended)
-# Trigger Lambda daily that calls this script or replicates logic
+# Cron (local machine or bastion)
+0 6 * * * cd /path/to/adsb-history && ./scripts/provision-ec2-downloader.sh --days 1
 ```
 
 ## Troubleshooting
 
-### Script fails with "AWS CLI is not configured"
+**S3 Access Denied:**
 
-Run:
-```bash
-aws configure
-```
+- Ensure bucket policy grants access to your IAM user and EC2 role
+- Check: `aws s3 ls s3://ayryx-adsb-history/`
 
-Enter your AWS access key, secret key, and default region.
+**Instance doesn't terminate:**
 
-### IAM permissions error
+- Download likely failed - instance stays running for debugging
+- Check S3 to see what uploaded
+- Manually terminate: `aws ec2 terminate-instances --instance-ids <id> --region us-west-1`
 
-Your AWS user needs these permissions:
-- `ec2:RunInstances`, `ec2:DescribeInstances`, `ec2:CreateSecurityGroup`
-- `iam:CreateRole`, `iam:PutRolePolicy`, `iam:CreateInstanceProfile`
-- `s3:PutObject`, `s3:ListBucket` on `ayryx-adsb-history` bucket
+**GitHub rate limit (60/hour):**
 
-### Instance doesn't terminate
-
-If the download fails, the instance will remain running for debugging. To view logs:
-
-1. Get the instance's public IP:
-   ```bash
-   aws ec2 describe-instances --instance-ids <instance-id> --query 'Reservations[0].Instances[0].PublicIpAddress'
-   ```
-
-2. SSH into the instance (requires `--key-name` option):
-   ```bash
-   ssh ec2-user@<public-ip>
-   tail -f /var/log/user-data.log
-   ```
-
-3. Manually terminate when done:
-   ```bash
-   aws ec2 terminate-instances --instance-ids <instance-id> --region us-west-2
-   ```
-
-### GitHub rate limit exceeded
-
-GitHub allows 60 API requests/hour without authentication. Each date requires 1 request. If you hit the limit, wait an hour or configure a GitHub personal access token:
-
-```bash
-# Set in the script or export before running
-export GITHUB_TOKEN=your_token_here
-```
-
-## Files
-
-- `scripts/provision-ec2-downloader.sh` - Main provisioning script
-- `scripts/download-week.js` - Download script that runs on EC2
-- `src/ingestion/GitHubReleaseDownloader.js` - GitHub API client
-- `src/ingestion/S3Uploader.js` - S3 upload client
-- `src/ingestion/DataExtractor.js` - Tar extraction utilities
-
-## Security Notes
-
-- ✅ IAM roles used for credentials (no hardcoded keys)
-- ✅ No inbound network access
-- ✅ Minimal IAM permissions (S3 bucket-specific)
-- ✅ Auto-terminate prevents runaway costs
-- ✅ All resources tagged for tracking
+- Wait 1 hour, or set `GITHUB_TOKEN` environment variable with PAT
 
 ## Next Steps
 
-After data is in S3:
-1. Implement processing pipeline (flight track building, metrics)
-2. Generate pre-computed JSON files
-3. Deploy to CloudFront CDN
-4. Integrate with `planning-app`
+After data is in S3, see [ARCHITECTURE.md](./ARCHITECTURE.md) for:
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for complete system design.
-
+- Processing pipeline (flight track building, metrics)
+- Pre-computed JSON generation
+- CloudFront CDN deployment
+- Integration with planning-app

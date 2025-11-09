@@ -28,10 +28,10 @@ cp .env.example .env
 Edit `.env` and add your AWS credentials:
 
 ```env
-AWS_REGION=us-west-2
+AWS_REGION=us-west-1
 AWS_ACCESS_KEY_ID=your_access_key_here
 AWS_SECRET_ACCESS_KEY=your_secret_key_here
-S3_BUCKET_NAME=ayryx-adsb-history-654654263702
+S3_BUCKET_NAME=ayryx-adsb-history
 ```
 
 ### 3. Download Recent Week of Data
@@ -44,13 +44,13 @@ Launch an EC2 instance that automatically downloads and uploads to S3:
 ./scripts/provision-ec2-downloader.sh --start-date 2025-11-02 --days 7
 ```
 
-The EC2 instance will self-terminate when complete. See [EC2_INGESTION_README.md](./EC2_INGESTION_README.md) for details.
-
-**Benefits:**
-- No local disk space required
-- Fast network transfer (EC2 → S3)
-- Auto-terminates when complete
+**What it does:**
+- Launches EC2 instance in us-west-1 (same region as S3 bucket)
+- Downloads data from GitHub, uploads to S3
+- Auto-terminates when complete (~30-60 minutes)
 - Cost: < $0.10 per run
+
+See [EC2_INGESTION_README.md](./EC2_INGESTION_README.md) for troubleshooting.
 
 **Option B: Local Machine**
 
@@ -111,7 +111,7 @@ adsb-history/
 Data is organized in S3 as:
 
 ```
-s3://ayryx-adsb-history-654654263702/
+s3://ayryx-adsb-history/
 ├── raw/                          # Tar archives only (~3GB/day, ~1TB/year)
 │   └── 2025/
 │       └── 11/

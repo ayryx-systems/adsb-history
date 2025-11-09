@@ -1,8 +1,8 @@
 #!/bin/bash
 # Monitor the EC2 downloader instance
 
-INSTANCE_ID=${1:-"i-082027a078ce349c6"}
-REGION=${2:-"us-west-2"}
+INSTANCE_ID=${1:-"i-0415a78563030a3bb"}
+REGION=${2:-"us-west-1"}
 
 echo "Monitoring EC2 instance: $INSTANCE_ID"
 echo "=========================================="
@@ -40,7 +40,7 @@ while true; do
       echo "[$TIMESTAMP] ✅ Instance terminated - Job complete!"
       echo ""
       echo "Checking S3 for uploaded data..."
-      aws s3 ls s3://ayryx-adsb-history-654654263702/raw/2025/11/ --recursive --human-readable --region "$REGION"
+      aws s3 ls s3://ayryx-adsb-history/raw/2025/11/ --recursive --human-readable --region "$REGION"
       break
       ;;
     "terminating")

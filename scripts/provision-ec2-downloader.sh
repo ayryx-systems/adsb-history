@@ -10,7 +10,7 @@ set -e
 INSTANCE_TYPE="t3.medium"  # 2 vCPU, 4GB RAM - good for download/upload
 ROOT_VOLUME_SIZE=30        # GB - enough for 7 days of data
 AMI_ID=""                  # Will be auto-detected for Amazon Linux 2023
-REGION="us-west-2"
+REGION="us-west-1"
 SECURITY_GROUP_NAME="adsb-history-downloader"
 IAM_ROLE_NAME="adsb-history-downloader-role"
 IAM_INSTANCE_PROFILE="adsb-history-downloader-profile"
@@ -132,7 +132,7 @@ EOF
     --region "$REGION"
   
   # Create and attach S3 policy
-  S3_BUCKET_FOR_POLICY="ayryx-adsb-history-${ACCOUNT_ID}"
+  S3_BUCKET_FOR_POLICY="ayryx-adsb-history"
   cat > /tmp/s3-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -214,32 +214,10 @@ else
 fi
 echo ""
 
-# Step 3: Ensure S3 bucket exists
-echo "Step 3: Checking S3 bucket..."
-S3_BUCKET="ayryx-adsb-history-${ACCOUNT_ID}"
-
-if aws s3 ls "s3://$S3_BUCKET" --region "$REGION" > /dev/null 2>&1; then
-  echo "✓ S3 bucket exists: $S3_BUCKET"
-else
-  echo "Creating S3 bucket: $S3_BUCKET"
-  if [ "$REGION" == "us-east-1" ]; then
-    # us-east-1 doesn't need LocationConstraint
-    aws s3api create-bucket --bucket "$S3_BUCKET" --region "$REGION"
-  else
-    aws s3api create-bucket \
-      --bucket "$S3_BUCKET" \
-      --region "$REGION" \
-      --create-bucket-configuration LocationConstraint="$REGION"
-  fi
-  
-  # Enable versioning for data protection
-  aws s3api put-bucket-versioning \
-    --bucket "$S3_BUCKET" \
-    --versioning-configuration Status=Enabled \
-    --region "$REGION"
-  
-  echo "✓ S3 bucket created: $S3_BUCKET"
-fi
+# Step 3: Use existing S3 bucket
+echo "Step 3: Using S3 bucket..."
+S3_BUCKET="ayryx-adsb-history"
+echo "✓ Using bucket: $S3_BUCKET (in $REGION)"
 echo ""
 
 # Step 4: Package and upload code to S3
