@@ -152,8 +152,9 @@ async function main() {
         extractedInfo = await extractor.analyzeExtractedData(extractDir);
         
         logger.info('Extraction complete', {
-          chunkDirs: extractedInfo.chunkDirs.length,
-          aircraftFile: !!extractedInfo.aircraftFile,
+          traceDirs: extractedInfo.traceDirs.length,
+          traceFiles: extractedInfo.traceFiles,
+          acasFiles: extractedInfo.acasFiles.length,
         });
 
         // Optional: Upload extracted data to S3 (currently disabled to save space)

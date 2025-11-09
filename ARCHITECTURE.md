@@ -5,6 +5,7 @@
 Download, process, and serve historical ADS-B data from [adsb.lol/globe_history_2025](https://github.com/adsblol/globe_history_2025) to provide statistical analysis of flight operations for the `planning-app`.
 
 Primary metrics:
+
 - Approach times (100nm → touchdown) by conditions
 - Go-around and diversion rates
 - Flight pattern analysis
@@ -103,25 +104,21 @@ ayryx-adsb-history/
 ```
 s3://ayryx-adsb-history/
 │
-├── raw/                                    # Keep forever, global data
+├── raw/                                    # Keep forever, tar archives only
 │   ├── 2025/
 │   │   ├── 01/
 │   │   │   ├── 15/
-│   │   │   │   ├── planes-readsb-staging-0.tar.gz    # ~2GB compressed
-│   │   │   │   ├── planes-readsb-mlatonly-0.tar.gz   # ~2GB compressed
-│   │   │   │   └── extracted/                         # ~20GB uncompressed
-│   │   │   │       ├── chunks/
-│   │   │   │       │   ├── 000/
-│   │   │   │       │   │   ├── trace_full_A00001.json  # gzipped despite .json extension
-│   │   │   │       │   │   ├── trace_full_A00002.json
-│   │   │   │       │   │   └── ...
-│   │   │   │       │   ├── 001/
-│   │   │   │       │   └── ...
-│   │   │   │       └── aircraft.json
+│   │   │   │   └── v2025.01.15-planes-readsb-prod-0.tar  # ~3GB (concatenated from .tar.aa + .tar.ab)
 │   │   │   ├── 16/
 │   │   │   └── ...
 │   │   └── 02/
 │   └── 2024/
+│
+│   # Note: Extract tar files on-demand during processing, not stored in S3
+│   # Extracted structure (temporary):
+│   #   ./traces/d0/, ./traces/d1/, ... ./traces/ff/  (256 subdirs by hex)
+│   #     └── trace_full_<icao>.json  (one file per aircraft)
+│   #   ./acas/acas.csv.gz, acas.json.gz  (collision avoidance data)
 │
 ├── processed/                              # Intermediate processing artifacts
 │   └── flights/                            # Optional: full flight tracks
@@ -187,17 +184,21 @@ s3://ayryx-adsb-history/
 ## 💾 Data Organization
 
 ### Input Configuration
+
 - **Airports**: List of airports to analyze with coordinates, runways, and analysis radius
 - **Processing parameters**: Thresholds and settings (determined during implementation)
 
 ### Output Data Structure
+
 Pre-computed JSON files organized by:
+
 - **Airport** (KLAX, KSFO, etc.)
 - **Time period** (all-time, by-year, by-month, daily)
 - **Conditions** (weather, time-of-day)
 - **Event types** (approaches, go-arounds, diversions)
 
 Content includes:
+
 - Statistical aggregates (percentiles, means, counts)
 - Event rates and patterns
 - Sample flights for reference
@@ -210,6 +211,7 @@ Content includes:
 Downloads and stores raw ADS-B data from GitHub.
 
 **Components**:
+
 - **GitHub Downloader**: Fetch daily releases (2 tar files per day, ~4GB total)
 - **Data Extractor**: Extract tar archives and decompress gzipped JSON files
 - **S3 Uploader**: Organize and upload raw data to S3
@@ -221,6 +223,7 @@ Downloads and stores raw ADS-B data from GitHub.
 Transforms raw position data into flight metrics and statistics.
 
 **Components**:
+
 - **Flight Track Builder**: Group position reports by aircraft, identify flight type (arrival/departure/overflight)
 - **Approach Analyzer**: Calculate approach times and metrics (reuse logic from `atc-backend`)
 - **Event Detector**: Identify go-arounds, diversions, and holding patterns (reuse logic from `atc-backend`)
@@ -228,6 +231,7 @@ Transforms raw position data into flight metrics and statistics.
 - **JSON Generator**: Create pre-computed output files
 
 **Key Operations**:
+
 - Spatial filtering (extract flights near configured airports)
 - Flight phase detection
 - Statistical aggregation by conditions
@@ -236,13 +240,16 @@ Transforms raw position data into flight metrics and statistics.
 ### 3. Shared Utilities (from `atc-backend`)
 
 Reuse existing aviation logic for consistency:
+
 - **aviation.js**: Approach detection, event detection, flight phases
 - **geo.js**: Distance calculations, bearings, spatial filtering
 
 ## 🔄 Processing Workflows
 
 ### Daily Incremental Update
+
 Run daily (scheduled cron) to process new data:
+
 1. Check for new GitHub releases
 2. Download and extract new day's data
 3. Process for each configured airport
@@ -250,13 +257,17 @@ Run daily (scheduled cron) to process new data:
 5. Upload to S3 and invalidate CloudFront CDN
 
 ### Historical Backfill
+
 One-time bulk processing of historical data:
+
 - Identify missing date ranges
 - Download and process in parallel
 - Generate complete aggregate statistics
 
 ### Reprocess Airport
+
 On-demand reprocessing when needed:
+
 - New airport added to configuration
 - Improved processing logic requiring recalculation
 - Bug fixes or data corrections
@@ -266,10 +277,12 @@ On-demand reprocessing when needed:
 ### AWS Infrastructure
 
 **Storage**:
+
 - **S3**: Raw data, processed data, and API files
 - **CloudFront**: CDN for serving pre-computed JSON to frontend
 
 **Processing** (choose based on scale):
+
 - **Lambda**: Serverless, event-triggered (suitable for daily updates)
 - **EC2 Spot**: More cost-effective for large backfills
 - **EventBridge**: Scheduled cron triggers
@@ -278,8 +291,9 @@ On-demand reprocessing when needed:
 
 ## 💰 Estimated Costs
 
-**Monthly (steady state)**: ~$75-100
-- S3 storage: ~$70/month (7TB/year accumulated raw data)
+**Monthly (steady state)**: ~$15-20
+
+- S3 storage: ~$10/month (1TB/year for tar files only)
 - CloudFront: ~$5/month (frontend API delivery)
 - Lambda/compute: ~$5-10/month (daily processing)
 
@@ -288,6 +302,7 @@ On-demand reprocessing when needed:
 ## 🔐 Configuration
 
 Environment variables and config files to define:
+
 - AWS credentials and resource names
 - GitHub API tokens (optional, for rate limits)
 - Processing parameters (parallelism, temp directories, log levels)
@@ -296,22 +311,26 @@ Environment variables and config files to define:
 ## 📝 Key Design Decisions
 
 ### 1. No Database for Frontend Data
+
 - **Decision**: Pre-compute all statistics, serve as static JSON via CDN
-- **Rationale**: 
+- **Rationale**:
   - Frontend requires instant loading, no query delays
   - Historical data changes infrequently (only new days added)
   - Static files are cheaper and more scalable than database queries
 - **Trade-off**: Less flexible querying, but frontend doesn't need it
 
-### 2. Keep Raw Data Forever
-- **Decision**: Store all raw global data in S3 indefinitely
+### 2. Keep Raw Tar Files Forever, Extract On-Demand
+
+- **Decision**: Store tar archives in S3, extract temporarily during processing
 - **Rationale**:
   - Can reprocess with improved logic later
   - Can add new airports without re-downloading
-  - Storage is cheap (~$70/month for 7TB/year)
-- **Trade-off**: Higher storage costs, but worth it for flexibility
+  - Storage is cheap (~$10/month for 1TB/year of compressed tars)
+  - Extract on-demand saves 7x storage costs (3GB tar vs 20GB extracted)
+- **Trade-off**: Slight processing overhead to extract, but major cost savings
 
 ### 3. Stateless Processing (No DynamoDB)
+
 - **Decision**: Use S3 itself as "database" for processing state
 - **Rationale**:
   - Simpler architecture, fewer moving parts
@@ -320,6 +339,7 @@ Environment variables and config files to define:
 - **Trade-off**: Slower status queries, but not needed for this use case
 
 ### 4. Spatial Filtering at Processing Time
+
 - **Decision**: Store global raw data, filter to airports during processing
 - **Rationale**:
   - Easy to add new airports (just reprocess)
@@ -328,6 +348,7 @@ Environment variables and config files to define:
 - **Trade-off**: Can't analyze arbitrary locations without reprocessing
 
 ### 5. Port Logic from atc-backend
+
 - **Decision**: Reuse existing aviation logic for approach detection, event detection
 - **Rationale**:
   - Proven logic already working in production
@@ -354,20 +375,24 @@ Environment variables and config files to define:
 ## 🔗 Integration
 
 ### Reuses from `atc-backend`
+
 - Aviation utilities (approach detection, event detection, geo calculations)
 - Airport definitions and runway data
 - Flight phase detection logic
 
 ### Serves to `planning-app`
+
 - Pre-computed statistics via CloudFront CDN
 - Replaces mock data with real historical analysis
 
 ### Other Potential Consumers
+
 - `pilot-app`, `atc-dashboard`, analytics platforms
 
 ## 📖 Data Source
 
 **adsb.lol globe_history**: https://github.com/adsblol/globe_history_2025/releases
+
 - License: Open Database License (ODbL) + CC0
 - Format: Daily tar archives of readsb JSON position reports
 
@@ -384,4 +409,3 @@ Environment variables and config files to define:
 7. Integrate with `planning-app` frontend
 
 **Key Principle**: Build incrementally, test with small datasets first, ensure idempotent processing.
-

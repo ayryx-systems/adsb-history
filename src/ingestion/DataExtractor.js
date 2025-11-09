@@ -112,7 +112,8 @@ class DataExtractor {
   }
 
   /**
-   * Process extracted directory: find trace files and aircraft.json
+   * Process extracted directory: find trace files and ACAS data
+   * Structure: ./traces/d0/, ./traces/d1/, ... ./traces/ff/ (256 hex subdirs)
    * @param {string} extractDir - Directory containing extracted data
    * @returns {object} Information about extracted files
    */
@@ -121,48 +122,47 @@ class DataExtractor {
 
     const info = {
       extractDir,
-      traceFiles: [],
-      aircraftFile: null,
-      chunkDirs: [],
+      traceFiles: 0,
+      traceDirs: [],
+      acasFiles: [],
     };
 
     try {
-      // Look for chunks directory
-      const chunksDir = path.join(extractDir, 'chunks');
+      // Look for traces directory
+      const tracesDir = path.join(extractDir, 'traces');
       
-      if (!fs.existsSync(chunksDir)) {
-        logger.warn('No chunks directory found', { extractDir });
+      if (!fs.existsSync(tracesDir)) {
+        logger.warn('No traces directory found', { extractDir });
         return info;
       }
 
-      // List chunk subdirectories (000, 001, 002, ...)
-      const chunkSubdirs = fs.readdirSync(chunksDir)
+      // List trace subdirectories (d0, d1, d2, ..., ff - organized by last 2 hex digits)
+      const traceSubdirs = fs.readdirSync(tracesDir)
         .filter(name => {
-          const fullPath = path.join(chunksDir, name);
+          const fullPath = path.join(tracesDir, name);
           return fs.statSync(fullPath).isDirectory();
         })
         .sort();
 
-      info.chunkDirs = chunkSubdirs.map(name => path.join(chunksDir, name));
+      info.traceDirs = traceSubdirs.map(name => path.join(tracesDir, name));
 
       // Count trace files
-      let totalTraceFiles = 0;
-      for (const chunkDir of info.chunkDirs) {
-        const files = fs.readdirSync(chunkDir)
+      for (const traceDir of info.traceDirs) {
+        const files = fs.readdirSync(traceDir)
           .filter(f => f.startsWith('trace_full_') && f.endsWith('.json'));
-        totalTraceFiles += files.length;
+        info.traceFiles += files.length;
       }
 
       logger.info('Found trace files', {
-        chunkDirs: info.chunkDirs.length,
-        traceFiles: totalTraceFiles,
+        traceDirs: info.traceDirs.length,
+        traceFiles: info.traceFiles,
       });
 
-      // Look for aircraft.json
-      const aircraftPath = path.join(extractDir, 'aircraft.json');
-      if (fs.existsSync(aircraftPath)) {
-        info.aircraftFile = aircraftPath;
-        logger.info('Found aircraft.json', { path: aircraftPath });
+      // Look for ACAS data
+      const acasDir = path.join(extractDir, 'acas');
+      if (fs.existsSync(acasDir)) {
+        info.acasFiles = fs.readdirSync(acasDir);
+        logger.info('Found ACAS data', { files: info.acasFiles });
       }
 
       return info;
@@ -176,29 +176,33 @@ class DataExtractor {
   }
 
   /**
-   * Stream process trace files from a chunk directory
-   * Yields decompressed JSON objects one at a time to conserve memory
-   * @param {string} chunkDir - Path to chunk directory (e.g., chunks/000)
-   * @yields {object} { filename, data } - Decompressed trace data
+   * Stream process trace files from a trace directory
+   * Note: Files are plain JSON (not gzipped)
+   * @param {string} traceDir - Path to trace directory (e.g., traces/d0)
+   * @yields {object} { filename, data, icao } - Parsed trace data
    */
-  async *streamTraceFiles(chunkDir) {
-    const files = fs.readdirSync(chunkDir)
+  async *streamTraceFiles(traceDir) {
+    const files = fs.readdirSync(traceDir)
       .filter(f => f.startsWith('trace_full_') && f.endsWith('.json'))
       .sort();
 
     logger.info('Streaming trace files', {
-      chunkDir: path.basename(chunkDir),
+      traceDir: path.basename(traceDir),
       count: files.length,
     });
 
     for (const filename of files) {
-      const filePath = path.join(chunkDir, filename);
+      const filePath = path.join(traceDir, filename);
       
       try {
-        const jsonString = await this.decompressJSONString(filePath);
+        // Files are plain JSON (not gzipped)
+        const jsonString = fs.readFileSync(filePath, 'utf-8');
         const data = JSON.parse(jsonString);
         
-        yield { filename, data, path: filePath };
+        // Extract ICAO from filename: trace_full_781ed0.json -> 781ed0
+        const icao = filename.replace('trace_full_', '').replace('.json', '');
+        
+        yield { filename, data, icao, path: filePath };
       } catch (error) {
         logger.error('Failed to process trace file', {
           file: filename,

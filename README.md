@@ -43,10 +43,13 @@ npm run download-week
 ```
 
 This will:
-1. Download split tar files (`.tar.aa` + `.tar.ab`) from GitHub releases
-2. Concatenate and upload to S3 (`raw/YYYY/MM/DD/`)
-3. Extract tar files to analyze structure
-4. Clean up temporary files
+1. Download split tar files (`.tar.aa` + `.tar.ab`) from GitHub releases (~3GB)
+2. Concatenate into single tar file
+3. Upload to S3 at `raw/YYYY/MM/DD/` (tar only, not extracted)
+4. Extract temporarily to verify structure
+5. Clean up all temporary files
+
+**Note:** We only store the compressed tar files in S3 (~3GB per day). Extracted data (~20GB per day) is generated on-demand during processing to save storage costs.
 
 ### 4. Custom Date Ranges
 
@@ -88,12 +91,21 @@ Data is organized in S3 as:
 
 ```
 s3://ayryx-adsb-history/
-└── raw/
-    └── 2025/
-        └── 11/
-            └── 08/
-                └── v2025.11.08-planes-readsb-prod-0.tar
+├── raw/                          # Tar archives only (~3GB/day, ~1TB/year)
+│   └── 2025/
+│       └── 11/
+│           └── 08/
+│               └── v2025.11.08-planes-readsb-prod-0.tar
+│
+└── api/                          # Pre-computed stats (coming soon)
+    └── KLAX/
+        └── approaches/
+            └── all-time.json
 ```
+
+**Tar contents** (extracted on-demand during processing):
+- `./traces/d0/`, `./traces/d1/`, ... `./traces/ff/` - Flight traces by ICAO hex
+- `./acas/` - Collision avoidance data
 
 ## 🔧 Available Scripts
 
