@@ -13,13 +13,11 @@ import logger from '../utils/logger.js';
 class GitHubReleaseDownloader {
   constructor(config = {}) {
     this.repo = config.repo || process.env.GITHUB_REPO || 'adsblol/globe_history_2025';
-    this.token = config.token || process.env.GITHUB_TOKEN;
     this.tempDir = config.tempDir || process.env.TEMP_DIR || './temp';
     
     this.axiosConfig = {
       headers: {
         'Accept': 'application/vnd.github+json',
-        ...(this.token && { 'Authorization': `Bearer ${this.token}` }),
       },
       timeout: 60000, // 60 second timeout
     };
@@ -37,10 +35,17 @@ class GitHubReleaseDownloader {
    * @returns {string} Formatted as v2025.11.08
    */
   formatReleaseTag(date) {
-    const d = typeof date === 'string' ? new Date(date) : date;
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
+    let dateStr;
+    if (typeof date === 'string') {
+      // If already a string in YYYY-MM-DD format, use it directly
+      dateStr = date;
+    } else {
+      // Convert Date to ISO string and extract date part
+      dateStr = date.toISOString().split('T')[0];
+    }
+    
+    // Parse the date string to avoid timezone issues
+    const [year, month, day] = dateStr.split('-');
     return `v${year}.${month}.${day}-planes-readsb-prod-0`;
   }
 
@@ -87,7 +92,7 @@ class GitHubReleaseDownloader {
         url: asset.browser_download_url,
         responseType: 'stream',
         headers: {
-          ...(this.token && { 'Authorization': `Bearer ${this.token}` }),
+          'Accept': 'application/octet-stream',
         },
         timeout: 0, // No timeout for large downloads
       });

@@ -130,11 +130,7 @@ rm -rf temp/
 
 ### GitHub Rate Limits
 
-If you hit GitHub API rate limits, add a GitHub token to `.env`:
-
-```env
-GITHUB_TOKEN=your_github_personal_access_token
-```
+GitHub allows 60 API requests per hour for unauthenticated requests. This should be sufficient for downloading a few days of data at a time. If you need to download more frequently, space out your downloads.
 
 ## 📖 Next Steps
 
