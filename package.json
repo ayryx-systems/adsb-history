@@ -1,44 +1,33 @@
 {
   "name": "ayryx-adsb-history",
-  "version": "0.1.0",
-  "description": "Historical ADS-B data collection and analysis system for Ayryx",
-  "main": "src/index.js",
+  "version": "1.0.0",
+  "description": "Historical ADS-B data collection and analysis for flight statistics",
   "type": "module",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "daily-update": "node scripts/daily-update.js",
+    "download-week": "node scripts/download-week.js",
     "backfill": "node scripts/backfill-historical.js",
-    "reprocess": "node scripts/reprocess-airport.js",
-    "verify": "node scripts/verify-data-integrity.js",
-    "test": "echo \"Error: no tests yet\" && exit 1"
+    "daily-update": "node scripts/daily-update.js",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
   },
   "keywords": [
     "adsb",
     "aviation",
-    "flight-tracking",
-    "historical-data",
-    "analysis"
+    "flight-tracking"
   ],
-  "author": "Ayryx Team",
+  "author": "",
   "license": "ISC",
   "dependencies": {
-    "aws-sdk": "^2.1500.0",
+    "@aws-sdk/client-s3": "^3.490.0",
+    "@aws-sdk/lib-storage": "^3.490.0",
+    "axios": "^1.6.5",
     "dotenv": "^16.3.1",
+    "p-limit": "^5.0.0",
     "tar": "^6.2.0",
-    "node-fetch": "^3.3.2",
-    "pako": "^2.1.0"
+    "zlib": "^1.0.5",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
-    "eslint": "^8.54.0",
-    "prettier": "^3.1.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/yourusername/ayryx.git",
-    "directory": "ayryx-adsb-history"
+    "jest": "^29.7.0"
   }
 }
-

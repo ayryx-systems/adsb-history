@@ -1,183 +1,152 @@
-# ADS-B Historical Data Collection & Analysis
+# ADS-B Historical Data Collection
 
-A system for downloading, processing, and serving historical ADS-B flight data from [adsb.lol](https://github.com/adsblol/globe_history_2025) to power statistical analysis of flight operations.
+Download, process, and analyze historical ADS-B data from [adsb.lol/globe_history_2025](https://github.com/adsblol/globe_history_2025).
 
-## 📋 Project Status
+## 📋 Prerequisites
 
-**Status**: Architecture phase - implementation pending
-
-This project is currently in the planning stage. The architecture has been designed and documented in `ARCHITECTURE.md`.
-
-## 🎯 Purpose
-
-This system will:
-- Download daily global ADS-B position data from GitHub (~4GB/day compressed)
-- Process and analyze flight tracks for specific airports (KLAX, KSFO, etc.)
-- Calculate approach times (100nm → touchdown) under various conditions
-- Detect go-arounds, diversions, and holding patterns
-- Generate pre-computed statistics served via CDN for instant frontend loading
-- Power the `planning-app` with real historical data (replacing mock data)
-
-## 🗂️ Project Structure
-
-See `ARCHITECTURE.md` for complete details.
-
-```
-ayryx-adsb-history/
-├── ARCHITECTURE.md      # Complete system architecture (READ THIS FIRST)
-├── README.md           # This file
-├── config/             # Configuration files (airports, processing params)
-├── src/
-│   ├── ingestion/      # Download and extract data from GitHub
-│   ├── processing/     # Build tracks, calculate metrics, detect events
-│   └── utils/          # Shared utilities (aviation, geo, S3)
-└── scripts/            # Operational scripts (daily-update, backfill)
-```
+- Node.js 18+
+- AWS Account with S3 access
+- ~20GB disk space for temporary downloads (per week of data)
 
 ## 🚀 Quick Start
 
-> **Note**: Implementation not yet complete. These instructions are for future reference.
-
-### Prerequisites
-
-- Node.js 18+
-- AWS account with S3 and CloudFront access
-- AWS CLI configured
-
-### Installation
+### 1. Install Dependencies
 
 ```bash
+cd adsb-history
 npm install
+```
+
+### 2. Configure AWS Credentials
+
+Create `.env` file from the example:
+
+```bash
 cp .env.example .env
-# Edit .env with your AWS credentials
 ```
 
-### Configuration
+Edit `.env` and add your AWS credentials:
 
-Edit `config/airports.json` to specify which airports to analyze:
-
-```json
-{
-  "airports": [
-    {
-      "icao": "KLAX",
-      "enabled": true,
-      "analysis_radius_nm": 150
-    }
-  ]
-}
-```
-
-### Usage
-
-**Process a single day**:
-```bash
-node scripts/daily-update.js --date 2025-01-15
-```
-
-**Backfill historical data**:
-```bash
-node scripts/backfill-historical.js --start-date 2024-01-01 --end-date 2025-01-31
-```
-
-**Reprocess an airport**:
-```bash
-node scripts/reprocess-airport.js --airport KLAX --start-date 2025-01-01
-```
-
-## 📊 Data Flow
-
-```
-GitHub (raw) → S3 (raw) → Processing → S3 (api/) → CloudFront → Frontend
-```
-
-1. **Ingestion**: Download global data from GitHub releases
-2. **Processing**: Filter to specific airports, calculate metrics
-3. **Generation**: Create pre-computed JSON statistics
-4. **Serving**: Deliver via CloudFront CDN for instant loading
-
-## 🔗 Integration
-
-### Planning App
-
-Replace mock data with real historical statistics:
-
-```javascript
-// Before: Mock data
-const mockData = generateMockData();
-
-// After: Real data
-const response = await fetch('https://cdn.ayryx.com/api/KLAX/approaches/by-month/2025-01.json');
-const realData = await response.json();
-```
-
-### Shared with atc-backend
-
-This project reuses proven aviation logic from `atc-backend`:
-- Approach path detection
-- Go-around detection
-- Geographic calculations
-
-## 💰 Estimated Costs
-
-- **S3 Storage**: ~$70/month (raw data accumulation)
-- **CloudFront**: ~$5/month (API file delivery)
-- **Processing (Lambda)**: ~$5/month (daily updates)
-- **Total**: ~$80/month
-
-## 📚 Documentation
-
-- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Complete system design (start here!)
-- **[atc-backend](../atc-backend/)** - Related project with shared aviation logic
-- **[planning-app](../planning-app/)** - Primary consumer of this data
-
-## 🛠️ Development Phases
-
-### Phase 1: Data Ingestion ⏳
-- [ ] GitHub release downloader
-- [ ] Tar extraction and decompression
-- [ ] S3 upload pipeline
-- [ ] Test with 1 week of data
-
-### Phase 2: Processing ⏳
-- [ ] Flight track builder
-- [ ] Approach analyzer (port from atc-backend)
-- [ ] Event detector (go-arounds, diversions)
-- [ ] Metrics aggregation
-
-### Phase 3: API Generation ⏳
-- [ ] JSON file generator
-- [ ] CloudFront integration
-- [ ] Caching and optimization
-
-### Phase 4: Integration ⏳
-- [ ] Update planning-app
-- [ ] Testing and validation
-- [ ] Production deployment
-
-## 🔐 Environment Variables
-
-See `.env.example` for required configuration:
-
-```bash
+```env
 AWS_REGION=us-west-2
+AWS_ACCESS_KEY_ID=your_access_key_here
+AWS_SECRET_ACCESS_KEY=your_secret_key_here
 S3_BUCKET_NAME=ayryx-adsb-history
-CLOUDFRONT_DISTRIBUTION_ID=xxx
 ```
+
+### 3. Download Recent Week of Data
+
+Download the most recent 7 days of data:
+
+```bash
+npm run download-week
+```
+
+This will:
+1. Download split tar files (`.tar.aa` + `.tar.ab`) from GitHub releases
+2. Concatenate and upload to S3 (`raw/YYYY/MM/DD/`)
+3. Extract tar files to analyze structure
+4. Clean up temporary files
+
+### 4. Custom Date Ranges
+
+Download specific dates:
+
+```bash
+# Download from Nov 2 to Nov 8, 2025
+node scripts/download-week.js --start-date 2025-11-02 --days 7
+
+# Download just 3 days
+node scripts/download-week.js --start-date 2025-11-06 --days 3
+```
+
+## 📂 Directory Structure
+
+```
+adsb-history/
+├── config/
+│   ├── airports.json          # Airports to analyze
+│   ├── aws-config.json         # S3/CloudFront configuration
+│   └── processing-config.json  # Processing parameters
+├── src/
+│   ├── ingestion/
+│   │   ├── GitHubReleaseDownloader.js
+│   │   ├── DataExtractor.js
+│   │   └── S3Uploader.js
+│   └── utils/
+│       ├── logger.js
+│       └── s3.js
+├── scripts/
+│   └── download-week.js        # Download recent week
+├── temp/                       # Temporary downloads (auto-cleaned)
+└── logs/                       # Application logs
+```
+
+## ☁️ S3 Storage Structure
+
+Data is organized in S3 as:
+
+```
+s3://ayryx-adsb-history/
+└── raw/
+    └── 2025/
+        └── 11/
+            └── 08/
+                └── v2025.11.08-planes-readsb-prod-0.tar
+```
+
+## 🔧 Available Scripts
+
+- `npm run download-week` - Download recent 7 days
+- `npm run daily-update` - (Coming soon) Daily incremental update
+- `npm run backfill` - (Coming soon) Bulk historical download
+
+## 📊 Data Source
+
+**adsb.lol globe_history_2025**: https://github.com/adsblol/globe_history_2025/releases
+
+- Daily releases with format: `v2025.11.08-planes-readsb-prod-0`
+- Split tar archives: `.tar.aa` (~2GB) + `.tar.ab` (~1GB)
+- Contains global ADS-B position reports in readsb JSON format
+
+## 🐛 Troubleshooting
+
+### AWS Credentials Not Found
+
+Make sure you've created `.env` file with valid AWS credentials:
+
+```bash
+cp .env.example .env
+# Edit .env with your credentials
+```
+
+### Out of Disk Space
+
+The download script cleans up temporary files automatically. If you run out of space:
+
+```bash
+rm -rf temp/
+```
+
+### GitHub Rate Limits
+
+If you hit GitHub API rate limits, add a GitHub token to `.env`:
+
+```env
+GITHUB_TOKEN=your_github_personal_access_token
+```
+
+## 📖 Next Steps
+
+After downloading raw data:
+
+1. **Processing**: Implement flight track building and metrics calculation
+2. **Analysis**: Extract airport-specific statistics
+3. **API Generation**: Create pre-computed JSON files for frontend
+4. **CloudFront**: Deploy CDN for fast global access
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for complete system design.
 
 ## 📝 License
 
-Same license as parent Ayryx project.
-
-Data from adsb.lol is provided under:
-- Open Database License (ODbL)
-- CC0 for contributed feeder data
-
-## 🙋 Questions?
-
-Refer to `ARCHITECTURE.md` for detailed technical information, design decisions, and implementation guidance.
-
----
-
-**For AI Assistants**: Please read `ARCHITECTURE.md` completely before implementing any features. It contains critical design decisions, data formats, and integration requirements.
-
+Data from adsb.lol is provided under Open Database License (ODbL) + CC0.

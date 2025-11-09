@@ -1,0 +1,16 @@
+{
+  "s3": {
+    "bucketName": "ayryx-adsb-history",
+    "region": "us-west-2",
+    "paths": {
+      "raw": "raw/",
+      "processed": "processed/",
+      "api": "api/"
+    }
+  },
+  "cloudfront": {
+    "distributionId": "",
+    "domain": ""
+  }
+}
+
