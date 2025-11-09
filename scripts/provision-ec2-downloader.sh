@@ -9,7 +9,7 @@ set -e
 # Configuration
 INSTANCE_TYPE="t3.medium"  # 2 vCPU, 4GB RAM - good for download/upload
 ROOT_VOLUME_SIZE=30        # GB - enough for 7 days of data
-AMI_ID="ami-0c94855ba95c574c8"  # Amazon Linux 2023 (us-west-2)
+AMI_ID=""                  # Will be auto-detected for Amazon Linux 2023
 REGION="us-west-2"
 SECURITY_GROUP_NAME="adsb-history-downloader"
 IAM_ROLE_NAME="adsb-history-downloader-role"
@@ -83,6 +83,24 @@ fi
 
 ACCOUNT_ID=$(aws sts get-caller-identity --region "$REGION" --query Account --output text)
 echo "✓ AWS Account: $ACCOUNT_ID"
+
+# Auto-detect latest Amazon Linux 2023 AMI if not specified
+if [ -z "$AMI_ID" ]; then
+  echo "Detecting latest Amazon Linux 2023 AMI for $REGION..."
+  AMI_ID=$(aws ec2 describe-images \
+    --region "$REGION" \
+    --owners amazon \
+    --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
+              "Name=state,Values=available" \
+    --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+    --output text)
+  
+  if [ -z "$AMI_ID" ] || [ "$AMI_ID" == "None" ]; then
+    echo "ERROR: Could not find Amazon Linux 2023 AMI in region $REGION"
+    exit 1
+  fi
+  echo "✓ Using AMI: $AMI_ID"
+fi
 echo ""
 
 # Step 1: Create IAM role if it doesn't exist
