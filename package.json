@@ -1,0 +1,44 @@
+{
+  "name": "ayryx-adsb-history",
+  "version": "0.1.0",
+  "description": "Historical ADS-B data collection and analysis system for Ayryx",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "daily-update": "node scripts/daily-update.js",
+    "backfill": "node scripts/backfill-historical.js",
+    "reprocess": "node scripts/reprocess-airport.js",
+    "verify": "node scripts/verify-data-integrity.js",
+    "test": "echo \"Error: no tests yet\" && exit 1"
+  },
+  "keywords": [
+    "adsb",
+    "aviation",
+    "flight-tracking",
+    "historical-data",
+    "analysis"
+  ],
+  "author": "Ayryx Team",
+  "license": "ISC",
+  "dependencies": {
+    "aws-sdk": "^2.1500.0",
+    "dotenv": "^16.3.1",
+    "tar": "^6.2.0",
+    "node-fetch": "^3.3.2",
+    "pako": "^2.1.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.54.0",
+    "prettier": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/ayryx.git",
+    "directory": "ayryx-adsb-history"
+  }
+}
+

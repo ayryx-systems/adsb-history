@@ -1,0 +1,109 @@
+{
+  "approach_detection": {
+    "entry_distances_nm": [200, 150, 100, 50, 25, 10],
+    "max_lateral_deviation_nm": 10,
+    "min_descent_rate_fpm": -100,
+    "touchdown_altitude_threshold_ft": 200,
+    "touchdown_speed_threshold_kts": 100
+  },
+  
+  "go_around_detection": {
+    "min_climb_rate_fpm": 500,
+    "proximity_threshold_nm": 3,
+    "min_altitude_agl_ft": 50,
+    "max_altitude_agl_ft": 3000,
+    "min_approach_time_seconds": 30
+  },
+  
+  "diversion_detection": {
+    "min_heading_change_deg": 45,
+    "max_distance_from_intended_nm": 50,
+    "min_alternate_distance_nm": 10
+  },
+  
+  "holding_detection": {
+    "min_radius_nm": 1,
+    "max_radius_nm": 5,
+    "min_turns": 1,
+    "altitude_tolerance_ft": 200
+  },
+  
+  "statistical_analysis": {
+    "percentiles": [10, 25, 50, 75, 90, 95],
+    "outlier_threshold_std_dev": 3,
+    "min_sample_size_for_stats": 10,
+    "weather_condition_buckets": [
+      {
+        "id": "vfr_light_winds",
+        "visibility_min_mi": 10,
+        "ceiling_min_ft": 3000,
+        "wind_max_kts": 10
+      },
+      {
+        "id": "vfr_moderate_winds",
+        "visibility_min_mi": 10,
+        "ceiling_min_ft": 3000,
+        "wind_min_kts": 10,
+        "wind_max_kts": 20
+      },
+      {
+        "id": "vfr_strong_winds",
+        "visibility_min_mi": 10,
+        "ceiling_min_ft": 3000,
+        "wind_min_kts": 20
+      },
+      {
+        "id": "mvfr_light_winds",
+        "visibility_min_mi": 3,
+        "visibility_max_mi": 10,
+        "ceiling_min_ft": 1000,
+        "ceiling_max_ft": 3000,
+        "wind_max_kts": 10
+      },
+      {
+        "id": "ifr_light_winds",
+        "visibility_min_mi": 1,
+        "visibility_max_mi": 3,
+        "ceiling_min_ft": 500,
+        "ceiling_max_ft": 1000,
+        "wind_max_kts": 10
+      },
+      {
+        "id": "ifr_moderate_winds",
+        "visibility_min_mi": 1,
+        "visibility_max_mi": 3,
+        "ceiling_min_ft": 500,
+        "ceiling_max_ft": 1000,
+        "wind_min_kts": 10,
+        "wind_max_kts": 20
+      }
+    ]
+  },
+  
+  "processing_options": {
+    "save_individual_tracks": false,
+    "compress_output_json": true,
+    "delete_temp_files": true,
+    "parallel_processing": true,
+    "max_parallel_airports": 4,
+    "log_detailed_metrics": true
+  },
+  
+  "data_quality": {
+    "min_position_reports_per_flight": 10,
+    "max_position_gap_seconds": 120,
+    "max_speed_change_kts_per_second": 50,
+    "max_altitude_change_ft_per_second": 5000
+  },
+  
+  "metadata": {
+    "version": "1.0",
+    "last_updated": "2025-11-09",
+    "notes": [
+      "All thresholds tuned based on atc-backend experience",
+      "Weather buckets align with FAA VFR/MVFR/IFR definitions",
+      "Processing options can be adjusted for performance vs detail trade-offs"
+    ]
+  }
+}
+

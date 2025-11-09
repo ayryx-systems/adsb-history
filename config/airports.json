@@ -1,0 +1,147 @@
+{
+  "airports": [
+    {
+      "icao": "KLAX",
+      "name": "Los Angeles International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 33.9416,
+        "lon": -118.4085
+      },
+      "elevation_ft": 126,
+      "analysis_radius_nm": 150,
+      "timezone": "America/Los_Angeles",
+      "runways": [
+        {
+          "name": "24R",
+          "heading": 243,
+          "threshold": {
+            "lat": 33.9416,
+            "lon": -118.4085
+          },
+          "length_ft": 8926
+        },
+        {
+          "name": "24L",
+          "heading": 243,
+          "threshold": {
+            "lat": 33.9493,
+            "lon": -118.4071
+          },
+          "length_ft": 12091
+        },
+        {
+          "name": "25R",
+          "heading": 253,
+          "threshold": {
+            "lat": 33.9364,
+            "lon": -118.4159
+          },
+          "length_ft": 12091
+        },
+        {
+          "name": "25L",
+          "heading": 253,
+          "threshold": {
+            "lat": 33.9441,
+            "lon": -118.4145
+          },
+          "length_ft": 11095
+        }
+      ]
+    },
+    {
+      "icao": "KSFO",
+      "name": "San Francisco International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 37.6213,
+        "lon": -122.3790
+      },
+      "elevation_ft": 13,
+      "analysis_radius_nm": 150,
+      "timezone": "America/Los_Angeles",
+      "runways": [
+        {
+          "name": "28R",
+          "heading": 283,
+          "threshold": {
+            "lat": 37.6213,
+            "lon": -122.3790
+          },
+          "length_ft": 11870
+        },
+        {
+          "name": "28L",
+          "heading": 283,
+          "threshold": {
+            "lat": 37.6158,
+            "lon": -122.3575
+          },
+          "length_ft": 11381
+        },
+        {
+          "name": "01R",
+          "heading": 13,
+          "threshold": {
+            "lat": 37.6067,
+            "lon": -122.3582
+          },
+          "length_ft": 7500
+        },
+        {
+          "name": "01L",
+          "heading": 13,
+          "threshold": {
+            "lat": 37.6122,
+            "lon": -122.3797
+          },
+          "length_ft": 9800
+        }
+      ]
+    },
+    {
+      "icao": "KJFK",
+      "name": "John F. Kennedy International",
+      "enabled": false,
+      "coordinates": {
+        "lat": 40.6398,
+        "lon": -73.7789
+      },
+      "elevation_ft": 13,
+      "analysis_radius_nm": 150,
+      "timezone": "America/New_York",
+      "runways": [
+        {
+          "name": "22L",
+          "heading": 223,
+          "threshold": {
+            "lat": 40.6398,
+            "lon": -73.7789
+          },
+          "length_ft": 11351
+        }
+      ],
+      "notes": "Disabled by default - enable when ready to process"
+    }
+  ],
+  
+  "global_settings": {
+    "default_analysis_radius_nm": 150,
+    "min_altitude_for_analysis_ft": 0,
+    "max_altitude_for_analysis_ft": 50000,
+    "position_report_max_age_seconds": 60
+  },
+  
+  "metadata": {
+    "last_updated": "2025-11-09",
+    "version": "1.0",
+    "notes": [
+      "Runway data sourced from FAA and aviation databases",
+      "Coordinates are for primary runway thresholds",
+      "Enable/disable airports by setting 'enabled' flag",
+      "Analysis radius determines how far from airport to include flights"
+    ]
+  }
+}
+
