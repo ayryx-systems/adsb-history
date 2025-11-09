@@ -335,10 +335,10 @@ else
 fi
 USERDATA_EOF2
 
-# Replace placeholders
-sed -i "s/AWS_REGION_PLACEHOLDER/$REGION/g" /tmp/user-data.sh
-sed -i "s/START_DATE_PLACEHOLDER/$START_DATE/g" /tmp/user-data.sh
-sed -i "s/DAYS_PLACEHOLDER/$DAYS/g" /tmp/user-data.sh
+# Replace placeholders (macOS compatible)
+sed -i '' "s/AWS_REGION_PLACEHOLDER/$REGION/g" /tmp/user-data.sh
+sed -i '' "s/START_DATE_PLACEHOLDER/$START_DATE/g" /tmp/user-data.sh
+sed -i '' "s/DAYS_PLACEHOLDER/$DAYS/g" /tmp/user-data.sh
 
 echo "✓ User data script prepared"
 echo ""
