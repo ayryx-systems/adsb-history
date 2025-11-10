@@ -188,12 +188,28 @@ class FlightAnalyzer {
       closestApproach.distance < 5
     );
 
+    // If both patterns exist, check if it's a true touch-and-go or separate flights
+    if (isArrival && isDeparture) {
+      // Calculate time between first and last nearby positions
+      const timeOnGround = lastNearby.timestamp - firstNearby.timestamp;
+      const maxTouchAndGoTime = 2 * 60; // 2 minutes in seconds
+      
+      // True touch-and-go: short time on ground (< 2 minutes)
+      // Separate flights: long time on ground (>= 2 minutes) - classify as arrival only
+      // (The departure will be captured when we process the departure portion separately)
+      if (timeOnGround < maxTouchAndGoTime) {
+        return 'touch_and_go';
+      } else {
+        // Long time on ground - treat as separate flights
+        // Prefer arrival classification since we're analyzing from the arrival perspective
+        return 'arrival';
+      }
+    }
+
     if (isArrival && !isDeparture) {
       return 'arrival';
     } else if (isDeparture && !isArrival) {
       return 'departure';
-    } else if (isArrival && isDeparture) {
-      return 'touch_and_go';
     }
 
     return 'overflight';
