@@ -43,8 +43,8 @@ logger.info('Starting download and upload', {
 });
 
 // Initialize components
-// Use /tmp for temp directory on EC2 (has more space than /opt)
-const tempDir = process.env.TEMP_DIR || '/tmp/adsb-downloads';
+// Use /opt for temp directory on EC2 (on EBS volume, not tmpfs)
+const tempDir = process.env.TEMP_DIR || '/opt/adsb-downloads';
 const downloader = new GitHubReleaseDownloader({ tempDir });
 const uploader = new S3Uploader();
 

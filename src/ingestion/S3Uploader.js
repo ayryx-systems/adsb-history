@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import S3Manager from '../utils/s3.js';
+import { S3Manager } from '../utils/s3.js';
 import logger from '../utils/logger.js';
 import pLimit from 'p-limit';
 

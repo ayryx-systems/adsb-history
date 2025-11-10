@@ -301,10 +301,14 @@ aws s3 cp s3://S3_BUCKET_PLACEHOLDER/bootstrap/adsb-history-code.tar.gz . --regi
 
 echo "Extracting code..."
 tar xzf adsb-history-code.tar.gz
-cd adsb-history
 
 echo "Installing dependencies..."
 npm install
+
+# Create temp directory for downloads (on EBS volume, not tmpfs)
+echo "Creating temp directory for downloads..."
+mkdir -p /opt/adsb-downloads
+chmod 755 /opt/adsb-downloads
 
 # Set AWS region (credentials come from IAM role)
 export AWS_REGION=AWS_REGION_PLACEHOLDER
