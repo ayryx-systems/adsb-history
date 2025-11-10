@@ -1,6 +1,8 @@
 # EC2 Processing for ADSB Historical Data
 
-Process ADSB historical data on EC2 to avoid local disk space requirements.
+Process ADSB historical data on EC2 to avoid local disk space requirements (~50GB needed).
+
+**Important:** Trace JSON files are gzipped despite having `.json` extensions. The system automatically decompresses them.
 
 ## Why EC2?
 
@@ -19,6 +21,7 @@ cd adsb-history
 ```
 
 **What it does:**
+
 1. Launches EC2 instance (t3.xlarge, 50GB, us-west-1)
 2. Downloads tar from S3 (~3 minutes)
 3. Extracts and processes traces (~10 minutes)
@@ -39,6 +42,7 @@ cd adsb-history
 ```
 
 Shows:
+
 - Instance state and uptime
 - Processing progress
 - When results are available in S3
@@ -116,6 +120,7 @@ Examples:
 ## Cost Breakdown
 
 **Per processing run:**
+
 - **EC2**: t3.xlarge @ $0.1664/hour × 0.25 hours = **$0.04**
 - **EBS**: 50GB gp3 @ $0.08/GB/month × 0.25 hours / 730 hours = **$0.001**
 - **S3 transfer**: Free (same region)
@@ -124,6 +129,7 @@ Examples:
 **Total per run: ~$0.04-0.05**
 
 **Monthly (30 airports, daily):**
+
 - 30 airports × 30 days × $0.04 = **$36/month**
 
 ## Infrastructure
@@ -131,9 +137,11 @@ Examples:
 The script automatically creates:
 
 1. **IAM Role**: `adsb-history-processor-role`
+
    - S3 read/write access to `ayryx-adsb-history` bucket
 
 2. **Security Group**: `adsb-history-processor-sg`
+
    - Egress only (no inbound access)
 
 3. **EC2 Instance**: Auto-configured
@@ -164,16 +172,19 @@ aws ec2 describe-instances \
 ### Troubleshooting
 
 **Instance doesn't terminate:**
+
 - Processing likely failed - instance stays running for debugging
 - Check logs: SSH to instance (would need key pair setup)
 - Manually terminate: `aws ec2 terminate-instances --instance-ids i-xxx --region us-west-1`
 
 **Processing takes too long (>30 minutes):**
+
 - Check if stuck in extraction or download
 - Consider larger instance type (t3.2xlarge)
 - Check S3 to see if partial results uploaded
 
 **Cost concerns:**
+
 - Instances auto-terminate to prevent runaway costs
 - Set up billing alerts in AWS Console
 - Monitor with `./scripts/monitor-ec2-processor.sh`
@@ -194,14 +205,14 @@ done
 
 ## Compare with Local Processing
 
-| Aspect | Local | EC2 |
-|--------|-------|-----|
-| Disk Space | ~50GB required | None |
-| Time | ~15 minutes | ~15 minutes |
-| Cost | Free (electricity) | ~$0.04 per run |
-| Automation | Manual | Fully automated |
-| Cleanup | Manual | Automatic |
-| Best For | One-off queries | Regular processing |
+| Aspect     | Local              | EC2                |
+| ---------- | ------------------ | ------------------ |
+| Disk Space | ~50GB required     | None               |
+| Time       | ~15 minutes        | ~15 minutes        |
+| Cost       | Free (electricity) | ~$0.04 per run     |
+| Automation | Manual             | Fully automated    |
+| Cleanup    | Manual             | Automatic          |
+| Best For   | One-off queries    | Regular processing |
 
 ## Integration with Abstraction Layer
 
@@ -226,16 +237,19 @@ Processes yesterday's data at 6 AM daily.
 ## Next Steps
 
 1. **Process a day of data**:
+
    ```bash
    ./scripts/provision-ec2-processor.sh --airport KLGA --date 2025-11-08
    ```
 
 2. **Monitor progress**:
+
    ```bash
    ./scripts/monitor-ec2-processor.sh auto
    ```
 
 3. **Query results** (after ~15 minutes):
+
    ```bash
    npm run get-arrivals -- --airport KLGA --date 2025-11-08
    ```
@@ -244,8 +258,8 @@ Processes yesterday's data at 6 AM daily.
 
 ## See Also
 
-- [PROCESSING_README.md](./PROCESSING_README.md) - Local processing guide
-- [EC2_INGESTION_README.md](./EC2_INGESTION_README.md) - EC2 data ingestion
-- [IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md) - System overview
 - [GETTING_STARTED.md](./GETTING_STARTED.md) - Quick start guide
-
+- [PROCESSING_README.md](./PROCESSING_README.md) - Local processing details
+- [EC2_INGESTION_README.md](./EC2_INGESTION_README.md) - EC2 data download
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - System design
+- [README.md](./README.md) - Main overview

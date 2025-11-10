@@ -11,6 +11,7 @@ Get a list of all aircraft that arrived at an airport (e.g., KLGA) on a specific
 ### 1. Prerequisites
 
 Already done ✅:
+
 - Node.js 18+ installed
 - AWS credentials configured
 - ~1 week of ADSB data in S3 (Nov 2-8, 2025)
@@ -46,16 +47,19 @@ a67890     08:22:45     0.8 nm, 1200 ft
 ## How It Works
 
 1. **Raw Data** (Input)
+
    - Location: `s3://ayryx-adsb-history/raw/2025/11/08/*.tar`
    - Size: ~3GB (global ADSB data)
 
 2. **Processing** (Run once)
+
    - Downloads tar from S3
    - Extracts ~500k aircraft traces
    - Classifies each flight (arrival/departure/overflight)
    - Takes ~10 minutes
 
 3. **Abstraction Layer** (Stored results)
+
    - Location: `s3://ayryx-adsb-history/processed/KLGA/2025/11/08.json`
    - Size: ~5MB (structured, airport-specific)
 
@@ -70,21 +74,24 @@ a67890     08:22:45     0.8 nm, 1200 ft
 ## Usage
 
 ### Get arrivals
+
 ```bash
 npm run get-arrivals -- --airport KLGA --date 2025-11-08
 ```
 
 ### Get full processing results
+
 ```bash
 npm run process-airport -- --airport KLGA --date 2025-11-08 --show-arrivals --show-departures
 ```
 
 ### Programmatic API
+
 ```javascript
-import DailyFlightData from './src/processing/DailyFlightData.js';
+import DailyFlightData from "./src/processing/DailyFlightData.js";
 
 const dataStore = new DailyFlightData();
-const arrivals = await dataStore.getArrivals('KLGA', '2025-11-08');
+const arrivals = await dataStore.getArrivals("KLGA", "2025-11-08");
 
 console.log(`${arrivals.length} arrivals found`);
 ```
@@ -107,6 +114,7 @@ Edit `config/airports.json`:
 ```
 
 Then process:
+
 ```bash
 npm run process-airport -- --airport KJFK --date 2025-11-08
 ```
@@ -128,45 +136,48 @@ See [IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md) for detailed archit
 
 ## Files Created
 
-| File | Purpose |
-|------|---------|
-| `src/processing/TraceReader.js` | Extract traces from S3 |
-| `src/processing/FlightClassifier.js` | Classify flights |
-| `src/processing/AirportDailyProcessor.js` | Process airport data |
-| `src/processing/DailyFlightData.js` | Abstraction layer |
-| `scripts/process-airport-day.js` | CLI tool to process |
-| `scripts/get-arrivals.js` | CLI tool to query |
+| File                                      | Purpose                |
+| ----------------------------------------- | ---------------------- |
+| `src/processing/TraceReader.js`           | Extract traces from S3 |
+| `src/processing/FlightClassifier.js`      | Classify flights       |
+| `src/processing/AirportDailyProcessor.js` | Process airport data   |
+| `src/processing/DailyFlightData.js`       | Abstraction layer      |
+| `scripts/process-airport-day.js`          | CLI tool to process    |
+| `scripts/get-arrivals.js`                 | CLI tool to query      |
 
 ## Documentation
 
-- **GETTING_STARTED.md** (this file) - Quick start
-- **IMPLEMENTATION_SUMMARY.md** - What was built and how
-- **PROCESSING_README.md** - Complete usage guide
-- **DEMO.md** - Demo and examples
-- **ARCHITECTURE.md** - System architecture
-- **EC2_INGESTION_README.md** - EC2 ingestion setup
+- **GETTING_STARTED.md** (this file) - Quick start guide
+- **[EC2_PROCESSING_README.md](./EC2_PROCESSING_README.md)** - EC2 processing (recommended)
+- **[PROCESSING_README.md](./PROCESSING_README.md)** - Local processing details
+- **[EC2_INGESTION_README.md](./EC2_INGESTION_README.md)** - Data download
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - System design
 
 ## Example Workflow
 
 1. **Download raw data** (already done):
+
 ```bash
 aws s3 ls s3://ayryx-adsb-history/raw/2025/11/
 # Shows: 7 days of data (Nov 2-8)
 ```
 
 2. **Process KLGA**:
+
 ```bash
 npm run process-airport -- --airport KLGA --date 2025-11-08
 # Takes ~10 minutes, saves to S3 + cache
 ```
 
 3. **Query arrivals** (instant):
+
 ```bash
 npm run get-arrivals -- --airport KLGA --date 2025-11-08
 # < 1 second
 ```
 
 4. **Process more dates**:
+
 ```bash
 for date in 2025-11-02 2025-11-03 2025-11-04; do
   npm run process-airport -- --airport KLGA --date $date
@@ -174,6 +185,7 @@ done
 ```
 
 5. **Build trends** (future):
+
 - Aggregate weekly/monthly statistics
 - Compare conditions (VFR vs IFR)
 - Analyze approach times
@@ -193,7 +205,8 @@ The abstraction layer is complete. Next steps:
 ## Questions?
 
 See detailed documentation:
-- [IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md) - Complete implementation details
-- [PROCESSING_README.md](./PROCESSING_README.md) - Full usage guide
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - System design
 
+- [EC2_PROCESSING_README.md](./EC2_PROCESSING_README.md) - EC2 processing guide
+- [PROCESSING_README.md](./PROCESSING_README.md) - Full processing details
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - System design
+- [README.md](./README.md) - Main overview

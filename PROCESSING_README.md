@@ -2,6 +2,8 @@
 
 This document explains how to use the abstraction layer to extract useful information from raw ADSB historical data.
 
+**Note:** For most use cases, use [EC2_PROCESSING_README.md](./EC2_PROCESSING_README.md) instead. This guide covers local processing which requires ~50GB disk space.
+
 ## Overview
 
 The system processes raw ADSB trace data **once** and stores structured flight information in an abstraction layer (S3 + local cache). This avoids reprocessing on every query.
@@ -26,8 +28,9 @@ Application Queries (fast!)
 
 ### Raw Data (Input)
 - **Location**: `s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`
-- **Format**: Readsb trace JSON (gzipped position reports)
+- **Format**: Readsb trace JSON (files are gzipped despite `.json` extension)
 - **Size**: ~3GB per day (global)
+- **Note**: System automatically decompresses with `zlib.gunzip()`
 
 ### Processed Data (Output)
 - **Location**: `s3://ayryx-adsb-history/processed/AIRPORT/YYYY/MM/DD.json`

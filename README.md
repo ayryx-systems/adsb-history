@@ -1,181 +1,146 @@
-# ADS-B Historical Data Collection
+# ADS-B Historical Data System
 
-Download, process, and analyze historical ADS-B data from [adsb.lol/globe_history_2025](https://github.com/adsblol/globe_history_2025).
+Complete system to download, process, and query historical ADS-B flight data from [adsb.lol/globe_history_2025](https://github.com/adsblol/globe_history_2025).
 
-## 📋 Prerequisites
+## What It Does
+
+Get answers like: **"Which aircraft arrived at LaGuardia on November 8, 2025?"**
+
+```bash
+npm run get-arrivals -- --airport KLGA --date 2025-11-08
+```
+
+Results are instant after initial processing (~15 min on EC2).
+
+## Quick Start
+
+See [GETTING_STARTED.md](./GETTING_STARTED.md) for complete setup guide.
+
+### 1. Download Raw Data (EC2, automated)
+
+```bash
+./scripts/provision-ec2-downloader.sh --start-date 2025-11-02 --days 7
+```
+
+Downloads ~3GB/day from GitHub → uploads to S3. Auto-terminates. Cost: < $0.10
+
+### 2. Process for an Airport (EC2, automated)
+
+```bash
+./scripts/provision-ec2-processor.sh --airport KLGA --date 2025-11-08
+```
+
+Processes raw data → classifies flights → saves to S3. Takes ~15 min. Cost: ~$0.05
+
+### 3. Query Results (local, instant)
+
+```bash
+npm run get-arrivals -- --airport KLGA --date 2025-11-08
+```
+
+Returns list of arriving aircraft with times and positions. < 1 second.
+
+## Architecture
+
+```
+Raw Data (S3)      Processing (EC2)      Abstraction Layer      Query (Local)
+  ~3GB/day    →    ~15 min once    →     ~5MB structured   →    < 1 sec
+```
+
+**Key principle:** Process raw data once, query many times from abstraction layer.
+
+## Documentation
+
+- **[GETTING_STARTED.md](./GETTING_STARTED.md)** - Setup and usage guide
+- **[EC2_PROCESSING_README.md](./EC2_PROCESSING_README.md)** - EC2 processing details
+- **[EC2_INGESTION_README.md](./EC2_INGESTION_README.md)** - EC2 data download
+- **[PROCESSING_README.md](./PROCESSING_README.md)** - Processing pipeline details
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - System design
+
+## Components
+
+### Data Ingestion
+- Downloads daily tar files from GitHub
+- Stores in S3 (`s3://bucket/raw/YYYY/MM/DD/*.tar`)
+- Automated via EC2 or local
+
+### Data Processing
+- Extracts and analyzes trace files (gzipped JSON)
+- Classifies flights: arrivals, departures, overflights, touch-and-go
+- Saves structured results to S3 (`s3://bucket/processed/AIRPORT/YYYY/MM/DD.json`)
+- Runs on EC2 (no local disk space needed)
+
+### Query Layer
+- Fast lookups from processed data (< 1 sec)
+- Local cache for instant repeated queries
+- Simple API: `getArrivals()`, `getDepartures()`, `getStatistics()`
+
+## Costs
+
+- **Raw data storage**: ~$0.70/day = ~$250/year
+- **Processed data**: ~$0.003/day/airport
+- **EC2 ingestion**: < $0.10 per day
+- **EC2 processing**: ~$0.05 per airport/day
+- **Total for 3 airports**: ~$30/year + ~$5/month processing
+
+## Data Format
+
+### Input (Raw)
+- Source: adsb.lol GitHub releases
+- Format: Tar archives of gzipped trace JSON files
+- Coverage: Global ADS-B position reports
+- Size: ~3GB/day compressed
+
+### Output (Processed)
+- Format: Structured JSON with classified flights
+- Storage: S3 + local cache
+- Size: ~5MB per airport per day
+- Schema: Arrivals, departures, statistics, metadata
+
+## Requirements
 
 - Node.js 18+
-- AWS Account with S3 access
-- ~20GB disk space for temporary downloads (per week of data)
+- AWS account (S3 access)
+- For local processing: ~50GB disk space
+- For EC2 processing: Just AWS credentials
 
-## 🚀 Quick Start
-
-### 1. Install Dependencies
+## Setup
 
 ```bash
+# Install dependencies
 cd adsb-history
 npm install
-```
 
-### 2. Configure AWS Credentials
-
-Create `.env` file from the example:
-
-```bash
+# Configure AWS
 cp .env.example .env
+# Edit .env with your AWS credentials
+
+# Download data (EC2)
+./scripts/provision-ec2-downloader.sh --date 2025-11-08
+
+# Process data (EC2)
+./scripts/provision-ec2-processor.sh --airport KLGA --date 2025-11-08
+
+# Query results (local)
+npm run get-arrivals -- --airport KLGA --date 2025-11-08
 ```
 
-Edit `.env` and add your AWS credentials:
+## Add More Airports
 
-```env
-AWS_REGION=us-west-1
-AWS_ACCESS_KEY_ID=your_access_key_here
-AWS_SECRET_ACCESS_KEY=your_secret_key_here
-S3_BUCKET_NAME=ayryx-adsb-history
+Edit `config/airports.json`:
+
+```json
+{
+  "icao": "KJFK",
+  "name": "John F. Kennedy International",
+  "enabled": true,
+  "coordinates": { "lat": 40.6398, "lon": -73.7789 },
+  "elevation_ft": 13,
+  "analysis_radius_nm": 150,
+  "timezone": "America/New_York"
+}
 ```
 
-### 3. Download Recent Week of Data
+## License
 
-**Option A: Automated EC2 (Recommended)**
-
-Launch an EC2 instance that automatically downloads and uploads to S3:
-
-```bash
-./scripts/provision-ec2-downloader.sh --start-date 2025-11-02 --days 7
-```
-
-**What it does:**
-- Launches EC2 instance in us-west-1 (same region as S3 bucket)
-- Downloads data from GitHub, uploads to S3
-- Auto-terminates when complete (~30-60 minutes)
-- Cost: < $0.10 per run
-
-See [EC2_INGESTION_README.md](./EC2_INGESTION_README.md) for troubleshooting.
-
-**Option B: Local Machine**
-
-If you have 30GB+ free disk space:
-
-```bash
-npm run download-week
-```
-
-This will:
-1. Download split tar files (`.tar.aa` + `.tar.ab`) from GitHub releases (~3GB)
-2. Concatenate into single tar file
-3. Upload to S3 at `raw/YYYY/MM/DD/` (tar only, not extracted)
-4. Extract temporarily to verify structure
-5. Clean up all temporary files
-
-**Note:** We only store the compressed tar files in S3 (~3GB per day). Extracted data (~20GB per day) is generated on-demand during processing to save storage costs.
-
-### 4. Custom Date Ranges
-
-Download specific dates:
-
-```bash
-# Using EC2 (recommended)
-./scripts/provision-ec2-downloader.sh --start-date 2025-11-02 --days 7
-
-# Using local machine (requires 30GB+ disk space)
-node scripts/download-week.js --start-date 2025-11-02 --days 7
-
-# Download just 3 days
-./scripts/provision-ec2-downloader.sh --start-date 2025-11-06 --days 3
-```
-
-## 📂 Directory Structure
-
-```
-adsb-history/
-├── config/
-│   ├── airports.json          # Airports to analyze
-│   ├── aws-config.json         # S3/CloudFront configuration
-│   └── processing-config.json  # Processing parameters
-├── src/
-│   ├── ingestion/
-│   │   ├── GitHubReleaseDownloader.js
-│   │   ├── DataExtractor.js
-│   │   └── S3Uploader.js
-│   └── utils/
-│       ├── logger.js
-│       └── s3.js
-├── scripts/
-│   └── download-week.js        # Download recent week
-├── temp/                       # Temporary downloads (auto-cleaned)
-└── logs/                       # Application logs
-```
-
-## ☁️ S3 Storage Structure
-
-Data is organized in S3 as:
-
-```
-s3://ayryx-adsb-history/
-├── raw/                          # Tar archives only (~3GB/day, ~1TB/year)
-│   └── 2025/
-│       └── 11/
-│           └── 08/
-│               └── v2025.11.08-planes-readsb-prod-0.tar
-│
-└── api/                          # Pre-computed stats (coming soon)
-    └── KLAX/
-        └── approaches/
-            └── all-time.json
-```
-
-**Tar contents** (extracted on-demand during processing):
-- `./traces/d0/`, `./traces/d1/`, ... `./traces/ff/` - Flight traces by ICAO hex
-- `./acas/` - Collision avoidance data
-
-## 🔧 Available Scripts
-
-- `npm run download-week` - Download recent 7 days
-- `npm run daily-update` - (Coming soon) Daily incremental update
-- `npm run backfill` - (Coming soon) Bulk historical download
-
-## 📊 Data Source
-
-**adsb.lol globe_history_2025**: https://github.com/adsblol/globe_history_2025/releases
-
-- Daily releases with format: `v2025.11.08-planes-readsb-prod-0`
-- Split tar archives: `.tar.aa` (~2GB) + `.tar.ab` (~1GB)
-- Contains global ADS-B position reports in readsb JSON format
-
-## 🐛 Troubleshooting
-
-### AWS Credentials Not Found
-
-Make sure you've created `.env` file with valid AWS credentials:
-
-```bash
-cp .env.example .env
-# Edit .env with your credentials
-```
-
-### Out of Disk Space
-
-The download script cleans up temporary files automatically. If you run out of space:
-
-```bash
-rm -rf temp/
-```
-
-### GitHub Rate Limits
-
-GitHub allows 60 API requests per hour for unauthenticated requests. This should be sufficient for downloading a few days of data at a time. If you need to download more frequently, space out your downloads.
-
-## 📖 Next Steps
-
-After downloading raw data:
-
-1. **Processing**: Implement flight track building and metrics calculation
-2. **Analysis**: Extract airport-specific statistics
-3. **API Generation**: Create pre-computed JSON files for frontend
-4. **CloudFront**: Deploy CDN for fast global access
-
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for complete system design.
-
-## 📝 License
-
-Data from adsb.lol is provided under Open Database License (ODbL) + CC0.
+Data from adsb.lol: Open Database License (ODbL) + CC0
