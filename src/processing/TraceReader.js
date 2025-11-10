@@ -1,8 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import zlib from 'zlib';
+import { promisify } from 'util';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import DataExtractor from '../ingestion/DataExtractor.js';
 import logger from '../utils/logger.js';
+
+const gunzip = promisify(zlib.gunzip);
 
 /**
  * Reads and parses trace files from S3 tar archives
@@ -38,7 +42,9 @@ class TraceReader {
    */
   getTarS3Key(date) {
     const [year, month, day] = date.split('-');
-    return `raw/${year}/${month}/${day}/v${date}-planes-readsb-prod-0.tar`;
+    // Note: The filename uses dots (v2025.11.08) not dashes
+    const dateWithDots = `${year}.${month}.${day}`;
+    return `raw/${year}/${month}/${day}/v${dateWithDots}-planes-readsb-prod-0.tar`;
   }
 
   /**
@@ -112,12 +118,20 @@ class TraceReader {
 
   /**
    * Read a single trace file and parse it
+   * Note: Files have .json extension but are actually gzipped
    * @param {string} tracePath - Path to trace JSON file
    * @returns {object} { icao, trace } - Parsed trace data
    */
   async readTraceFile(tracePath) {
     try {
-      const jsonString = fs.readFileSync(tracePath, 'utf-8');
+      // Read gzipped data
+      const gzippedData = fs.readFileSync(tracePath);
+      
+      // Decompress
+      const decompressed = await gunzip(gzippedData);
+      const jsonString = decompressed.toString('utf-8');
+      
+      // Parse JSON
       const data = JSON.parse(jsonString);
       
       // Extract ICAO from filename: trace_full_781ed0.json -> 781ed0
