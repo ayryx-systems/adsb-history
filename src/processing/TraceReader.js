@@ -166,7 +166,11 @@ class TraceReader {
       const filename = path.basename(tracePath);
       const icao = filename.replace('trace_full_', '').replace('.json', '');
       
-      return { icao, trace: data };
+      // Extract the trace array from the data object
+      // The file contains an object with metadata and a 'trace' property with the position array
+      const traceArray = data.trace || (Array.isArray(data) ? data : []);
+      
+      return { icao, trace: traceArray };
     } catch (error) {
       logger.error('Failed to read trace file', {
         file: path.basename(tracePath),

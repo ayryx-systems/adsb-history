@@ -66,17 +66,40 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 /**
  * Parse a position report from trace data
  */
-function parsePosition(posArray) {
+function parsePosition(posArray, baseTimestamp = null) {
   if (!posArray || posArray.length < 6) return null;
   
+  // Handle timestamp: can be relative (seconds since start of day) or absolute
+  let timestamp = posArray[0];
+  if (baseTimestamp !== null) {
+    // If base timestamp is provided, assume position timestamps are relative
+    // Add to base timestamp (start of day)
+    // Only do this if timestamp looks like a relative value (reasonable range)
+    if (timestamp >= 0 && timestamp < 86400 * 2) {
+      // Less than 2 days - likely relative
+      timestamp = baseTimestamp + timestamp;
+    }
+    // If timestamp is very large (> year 2000), assume it's already absolute
+  }
+  
+  // Handle altitude: can be "ground" string or number
+  let alt_baro = posArray[3];
+  if (alt_baro === "ground" || alt_baro === null) {
+    alt_baro = 0; // Treat ground as 0 feet
+  } else if (typeof alt_baro === 'string') {
+    // Try to parse if it's a string number
+    alt_baro = parseFloat(alt_baro);
+    if (isNaN(alt_baro)) alt_baro = null;
+  }
+  
   return {
-    timestamp: posArray[0],
+    timestamp,
     lat: posArray[1],
     lon: posArray[2],
-    alt_baro: posArray[3],
+    alt_baro,
     gs: posArray[4],
     track: posArray[5],
-    baro_rate: posArray[15],
+    baro_rate: posArray[15] || null,
   };
 }
 
@@ -96,9 +119,10 @@ class FlightClassifier {
    * Classify a flight trace for a specific airport
    * @param {object} trace - Readsb trace data (array of position reports)
    * @param {object} airport - Airport object with icao, coordinates, etc.
+   * @param {string} date - Date in YYYY-MM-DD format (optional, for timestamp calculation)
    * @returns {object|null} Classification result or null if not relevant
    */
-  classifyFlight(trace, airport) {
+  classifyFlight(trace, airport, date = null) {
     if (!trace || !Array.isArray(trace) || trace.length < this.minPositionReports) {
       return null;
     }
@@ -106,9 +130,16 @@ class FlightClassifier {
     const airportLat = airport.coordinates.lat;
     const airportLon = airport.coordinates.lon;
 
+    // Calculate base timestamp (start of day) if date is provided
+    let baseTimestamp = null;
+    if (date) {
+      const dateObj = new Date(date + 'T00:00:00Z');
+      baseTimestamp = Math.floor(dateObj.getTime() / 1000);
+    }
+
     // Parse all valid positions
     const positions = trace
-      .map(parsePosition)
+      .map(pos => parsePosition(pos, baseTimestamp))
       .filter(pos => pos && pos.lat !== null && pos.lon !== null && pos.alt_baro !== null);
 
     if (positions.length < this.minPositionReports) {

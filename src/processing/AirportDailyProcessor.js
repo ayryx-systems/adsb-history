@@ -78,7 +78,7 @@ class AirportDailyProcessor {
         }
 
         // Classify the flight
-        const classification = this.flightClassifier.classifyFlight(trace, airport);
+        const classification = this.flightClassifier.classifyFlight(trace, airport, date);
 
         if (classification) {
           results.processingInfo.tracesClassified++;
@@ -94,13 +94,23 @@ class AirportDailyProcessor {
           };
 
           // Add to appropriate category
-          const category = classification.classification;
+          // Map singular classification to plural key
+          const categoryMap = {
+            'arrival': 'arrivals',
+            'departure': 'departures',
+            'touch_and_go': 'touch_and_go',
+            'overflight': 'overflights',
+          };
+          const category = categoryMap[classification.classification] || classification.classification;
+          
           if (results.flights[category]) {
             results.flights[category].push(flightInfo);
           }
 
           results.statistics.total++;
-          results.statistics[category]++;
+          if (results.statistics[category] !== undefined) {
+            results.statistics[category]++;
+          }
         }
       }
 
