@@ -268,6 +268,63 @@ export AWS_DEFAULT_REGION=$REGION
 export S3_BUCKET_NAME=$S3_BUCKET
 export TEMP_DIR=/opt/adsb-processing
 
+# Unset any explicit credentials to ensure we use instance profile
+unset AWS_ACCESS_KEY_ID
+unset AWS_SECRET_ACCESS_KEY
+unset AWS_SESSION_TOKEN
+
+# Remove any AWS credentials file that might interfere
+rm -f ~/.aws/credentials
+rm -f ~/.aws/config
+
+# Wait for IAM credentials to be available
+echo "Waiting for IAM credentials to be available..."
+echo "Checking instance metadata for IAM role..."
+MAX_RETRIES=30
+RETRY_COUNT=0
+IAM_ROLE_ARN=""
+while [ \$RETRY_COUNT -lt \$MAX_RETRIES ]; do
+  IAM_ROLE_ARN=\$(curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/ 2>/dev/null || echo "")
+  if [ -n "\$IAM_ROLE_ARN" ]; then
+    echo "✓ IAM role found: \$IAM_ROLE_ARN"
+    # Wait a bit more for credentials to be available
+    sleep 3
+    if aws sts get-caller-identity --region $REGION > /dev/null 2>&1; then
+      echo "✓ IAM credentials available"
+      aws sts get-caller-identity --region $REGION
+      break
+    fi
+  fi
+  RETRY_COUNT=\$((RETRY_COUNT + 1))
+  if [ \$RETRY_COUNT -eq \$MAX_RETRIES ]; then
+    echo "⚠️  WARNING: IAM credentials not available after \$MAX_RETRIES attempts"
+    echo "   Instance role: \$IAM_ROLE_ARN"
+    echo "   Continuing anyway - credentials may become available during execution"
+  else
+    echo "   Waiting for IAM credentials... (attempt \$RETRY_COUNT/\$MAX_RETRIES)"
+    sleep 2
+  fi
+done
+
+# Verify S3 access
+echo ""
+echo "Verifying S3 access..."
+if aws s3 ls "s3://$S3_BUCKET/" --region $REGION > /dev/null 2>&1; then
+  echo "✓ S3 access verified via AWS CLI"
+  echo "   AWS CLI caller identity:"
+  aws sts get-caller-identity --region $REGION 2>&1 || echo "   (Could not get caller identity)"
+else
+  echo "⚠️  ERROR: Cannot access S3 bucket!"
+  echo "   Bucket: $S3_BUCKET"
+  echo "   This will cause the processing to fail."
+  echo "   Check IAM role permissions and instance profile attachment."
+fi
+echo ""
+
+# Set environment variable to tell Node.js SDK to use instance profile
+export AWS_SDK_LOAD_CONFIG=1
+export AWS_PROFILE=""
+
 # Run processing
 echo "=========================================="
 echo "Starting processing: $DATE"
