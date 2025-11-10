@@ -1,6 +1,8 @@
 # EC2 Processing for ADSB Historical Data
 
-Identify aircraft that were on the ground at an airport on a specific date.
+Launch an EC2 instance to identify aircraft that were on the ground at airports on a specific date.
+
+**What it does:** Creates ground-aircraft JSON files in S3 containing lists of ICAO codes for aircraft that were on the ground at each airport.
 
 ## Why EC2?
 
@@ -15,23 +17,30 @@ Identify aircraft that were on the ground at an airport on a specific date.
 
 ```bash
 cd adsb-history
-./scripts/provision-ec2-processor.sh --date 2025-11-08
+./scripts/create-ground-aircraft-ec2.sh --date 2025-11-08
 ```
 
 ### Process specific airports
 
 ```bash
-./scripts/provision-ec2-processor.sh --airports KLGA,KJFK,KLAX --date 2025-11-08
+./scripts/create-ground-aircraft-ec2.sh --airports KLGA,KJFK,KLAX --date 2025-11-08
 ```
 
-**What it does:**
+**What the script does:**
 
-1. Launches EC2 instance (t3.xlarge, 50GB, us-west-1)
-2. Downloads tar from S3 (~3 minutes)
-3. Extracts and processes traces (~10 minutes per airport)
-4. Identifies aircraft on ground for each airport (within 1nm, altitude < 500ft)
-5. Saves list of ICAO codes to S3 for each airport
-6. Auto-terminates when complete
+1. Packages your code and uploads to S3
+2. Launches EC2 instance (t3.xlarge, 50GB, us-west-1)
+3. Instance downloads tar from S3 (~3 minutes)
+4. Instance extracts and processes traces (~10 minutes per airport)
+5. Instance identifies aircraft on ground for each airport (within 1nm, altitude < 500ft)
+6. Instance saves ground-aircraft JSON files to S3 (one per airport)
+7. Instance auto-terminates when complete
+
+**Output:** Creates files like:
+
+- `s3://ayryx-adsb-history/ground-aircraft/KLGA/2025/11/08.json`
+- `s3://ayryx-adsb-history/ground-aircraft/KLAX/2025/11/08.json`
+- etc.
 
 **Cost:** ~$0.04-0.05 per run (processes all airports in one instance)
 
@@ -55,33 +64,47 @@ Shows:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Local Machine                                               │
-│ • Run provision script                                      │
-│ • Packages code, uploads to S3                              │
-│ • Launches EC2 instance                                     │
+│ Local Machine: Run Script                                   │
+│                                                              │
+│ ./scripts/create-ground-aircraft-ec2.sh --date 2025-11-08     │
+│                                                              │
+│ 1. Packages code (src/, scripts/, config/)                  │
+│ 2. Uploads code package to S3                               │
+│ 3. Launches EC2 instance with user-data script              │
 └────────────────┬────────────────────────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ EC2 Instance (t3.xlarge, 50GB, us-west-1)                  │
 │                                                              │
-│ 1. Download tar from S3 (~3GB)                              │
+│ On boot (user-data script):                                 │
+│ 1. Downloads code package from S3                           │
+│ 2. Installs Node.js 18                                      │
+│ 3. Runs: identify-ground-aircraft-multi.js                  │
+│                                                              │
+│ Processing (for each airport):                              │
+│ 1. Download tar from S3 (~3GB, cached after first)          │
 │ 2. Extract traces (~20GB extracted)                         │
 │ 3. Process ~68k traces                                      │
-│ 4. Identify aircraft on ground                              │
-│ 5. Save ICAO list to S3 (~50KB)                             │
-│ 6. Self-terminate                                           │
+│ 4. Identify aircraft on ground (within 1nm, <500ft)         │
+│ 5. Save ground-aircraft JSON to S3 (~5-10KB per airport)    │
 │                                                              │
-│ Duration: ~10-15 minutes                                     │
-│ Cost: ~$0.04-0.05                                            │
+│ 6. Self-terminate when all airports processed               │
+│                                                              │
+│ Duration: ~10-15 minutes per airport                        │
+│ Cost: ~$0.04-0.05 total (all airports in one instance)      │
 └────────────────┬────────────────────────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ S3: Ground Aircraft List                                    │
-│ s3://bucket/ground-aircraft/KLGA/2025/11/08.json           │
+│ S3: Ground Aircraft Files (one per airport)                 │
 │                                                              │
-│ Format:                                                      │
+│ s3://ayryx-adsb-history/ground-aircraft/                    │
+│   ├── KLGA/2025/11/08.json                                  │
+│   ├── KLAX/2025/11/08.json                                  │
+│   └── KSFO/2025/11/08.json                                  │
+│                                                              │
+│ Each file contains:                                         │
 │ {                                                           │
 │   "airport": "KLGA",                                        │
 │   "date": "2025-11-08",                                     │
@@ -94,7 +117,7 @@ Shows:
 ## Options
 
 ```bash
-./scripts/provision-ec2-processor.sh [options]
+./scripts/create-ground-aircraft-ec2.sh [options]
 
 Options:
   --airports ICAO,...   Comma-separated airports (default: all enabled)
@@ -105,13 +128,13 @@ Options:
 
 Examples:
   # Process all enabled airports
-  ./scripts/provision-ec2-processor.sh --date 2025-11-08
+  ./scripts/create-ground-aircraft-ec2.sh --date 2025-11-08
 
   # Process specific airports
-  ./scripts/provision-ec2-processor.sh --airports KLGA,KJFK,KLAX --date 2025-11-08
+  ./scripts/create-ground-aircraft-ec2.sh --airports KLGA,KJFK,KLAX --date 2025-11-08
 
   # Process single airport (backward compat)
-  ./scripts/provision-ec2-processor.sh --airport KLGA --date 2025-11-08
+  ./scripts/create-ground-aircraft-ec2.sh --airport KLGA --date 2025-11-08
 ```
 
 ## Cost Breakdown

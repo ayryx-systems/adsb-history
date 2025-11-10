@@ -1,8 +1,19 @@
 #!/bin/bash
 
-# Provision EC2 instance to process ADSB historical data for an airport
-# This processes raw tar files from S3 and generates processed results
-# Similar to EC2 ingestion but for processing instead
+# Launch EC2 instance to identify ground aircraft for airports on a specific date
+# 
+# This script:
+# 1. Packages the code and uploads to S3
+# 2. Launches an EC2 instance with the code
+# 3. The instance runs identify-ground-aircraft-multi.js which:
+#    - Downloads raw ADSB data tar from S3
+#    - Extracts and processes traces
+#    - Identifies aircraft on ground at specified airports
+#    - Saves ground-aircraft JSON files to S3 (one per airport)
+# 4. Instance auto-terminates when complete
+#
+# Output: Creates ground-aircraft files in S3:
+#   s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json
 
 set -e
 

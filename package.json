@@ -7,7 +7,7 @@
   "scripts": {
     "download-week": "node scripts/download-week.js",
     "process-airport": "node scripts/process-airport-day.js",
-    "process-ec2": "./scripts/provision-ec2-processor.sh",
+    "process-ec2": "./scripts/create-ground-aircraft-ec2.sh",
     "get-arrivals": "node scripts/get-arrivals.js",
     "backfill": "node scripts/backfill-historical.js",
     "daily-update": "node scripts/daily-update.js",

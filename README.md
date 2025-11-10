@@ -27,7 +27,7 @@ Downloads ~3GB/day from GitHub → uploads to S3. Auto-terminates. Cost: < $0.10
 ### 2. Process for an Airport (EC2, automated)
 
 ```bash
-./scripts/provision-ec2-processor.sh --airport KLGA --date 2025-11-08
+./scripts/create-ground-aircraft-ec2.sh --airport KLGA --date 2025-11-08
 ```
 
 Processes raw data → classifies flights → saves to S3. Takes ~15 min. Cost: ~$0.05
@@ -119,7 +119,7 @@ cp .env.example .env
 ./scripts/provision-ec2-downloader.sh --date 2025-11-08
 
 # Process data (EC2)
-./scripts/provision-ec2-processor.sh --airport KLGA --date 2025-11-08
+./scripts/create-ground-aircraft-ec2.sh --airport KLGA --date 2025-11-08
 
 # Query results (local)
 npm run get-arrivals -- --airport KLGA --date 2025-11-08

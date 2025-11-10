@@ -96,7 +96,7 @@ Key fields:
 ./scripts/provision-ec2-downloader.sh --date 2025-11-08
 
 # Process one airport
-./scripts/provision-ec2-processor.sh --airport KLGA --date 2025-11-08
+./scripts/create-ground-aircraft-ec2.sh --airport KLGA --date 2025-11-08
 
 # Query results
 npm run get-arrivals -- --airport KLGA --date 2025-11-08
