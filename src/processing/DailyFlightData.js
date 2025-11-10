@@ -97,7 +97,7 @@ class DailyFlightData {
         const cacheDir = path.dirname(cachePath);
         
         if (!fs.existsSync(cacheDir)) {
-          fs.mkdirSync(cacheDir, { recursive: true });
+          fs.mkdirSync(cacheDir, { recursive: true, mode: 0o755 });
         }
         
         fs.writeFileSync(cachePath, jsonData);
@@ -156,7 +156,7 @@ class DailyFlightData {
       if (this.useCache) {
         const cacheDir = path.dirname(cachePath);
         if (!fs.existsSync(cacheDir)) {
-          fs.mkdirSync(cacheDir, { recursive: true });
+          fs.mkdirSync(cacheDir, { recursive: true, mode: 0o755 });
         }
         fs.writeFileSync(cachePath, jsonData);
         logger.info('Cached data from S3', { cachePath });

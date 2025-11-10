@@ -241,6 +241,11 @@ npm install --production
 export AWS_REGION=us-west-1
 export S3_BUCKET_NAME=ayryx-adsb-history
 
+# Set temp directory to an absolute path that we know is writable
+export TEMP_DIR=/tmp/adsb-processing
+mkdir -p $TEMP_DIR
+chmod 755 $TEMP_DIR
+
 # Run processing
 echo ""
 echo "Starting processing (this will take 10-15 minutes)..."

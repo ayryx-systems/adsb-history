@@ -21,9 +21,37 @@ const gunzip = promisify(zlib.gunzip);
  */
 class TraceReader {
   constructor(config = {}) {
-    this.tempDir = config.tempDir || process.env.TEMP_DIR || './temp';
+    // Get temp directory from config, env, or default
+    let tempDir = config.tempDir || process.env.TEMP_DIR || './temp';
+    
+    // Convert relative paths to absolute
+    if (!path.isAbsolute(tempDir)) {
+      tempDir = path.resolve(process.cwd(), tempDir);
+    }
+    
+    this.tempDir = tempDir;
     this.bucketName = config.bucketName || process.env.S3_BUCKET_NAME || 'ayryx-adsb-history';
     this.region = config.region || process.env.AWS_REGION || 'us-west-1';
+    
+    // Ensure temp directory exists and is writable
+    try {
+      if (!fs.existsSync(this.tempDir)) {
+        fs.mkdirSync(this.tempDir, { recursive: true, mode: 0o755 });
+        logger.info('Created temp directory', { path: this.tempDir });
+      }
+      
+      // Test write permissions
+      const testFile = path.join(this.tempDir, '.test-write');
+      fs.writeFileSync(testFile, 'test');
+      fs.unlinkSync(testFile);
+    } catch (error) {
+      logger.error('Failed to create or verify temp directory', {
+        path: this.tempDir,
+        error: error.message,
+      });
+      throw new Error(`Cannot use temp directory ${this.tempDir}: ${error.message}`);
+    }
+    
     this.extractor = new DataExtractor({ tempDir: this.tempDir });
     
     // Initialize S3 client
@@ -57,7 +85,7 @@ class TraceReader {
     // Create directory if needed
     const dirPath = path.dirname(localTarPath);
     if (!fs.existsSync(dirPath)) {
-      fs.mkdirSync(dirPath, { recursive: true });
+      fs.mkdirSync(dirPath, { recursive: true, mode: 0o755 });
     }
 
     // Check if already downloaded

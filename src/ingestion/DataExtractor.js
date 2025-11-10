@@ -35,7 +35,7 @@ class DataExtractor {
 
     // Ensure extract directory exists
     if (!fs.existsSync(extractDir)) {
-      fs.mkdirSync(extractDir, { recursive: true });
+      fs.mkdirSync(extractDir, { recursive: true, mode: 0o755 });
     }
 
     try {
