@@ -3,6 +3,7 @@ import path from 'path';
 import zlib from 'zlib';
 import { promisify } from 'util';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { fromInstanceMetadata } from '@aws-sdk/credential-providers';
 import DataExtractor from '../ingestion/DataExtractor.js';
 import logger from '../utils/logger.js';
 
@@ -56,11 +57,21 @@ class TraceReader {
     
     // Initialize S3 client
     const clientConfig = { region: this.region };
-    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+    const hasExplicitCredentials = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY;
+    
+    if (hasExplicitCredentials) {
+      // Explicit credentials provided - use them (for local development)
       clientConfig.credentials = {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
       };
+    } else {
+      // No explicit credentials - use instance metadata provider on EC2
+      // This ensures we use the instance profile and don't pick up invalid credentials
+      clientConfig.credentials = fromInstanceMetadata({
+        maxRetries: 5,
+        timeout: 10000,
+      });
     }
     this.s3Client = new S3Client(clientConfig);
   }

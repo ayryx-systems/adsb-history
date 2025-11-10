@@ -322,8 +322,22 @@ fi
 echo ""
 
 # Set environment variable to tell Node.js SDK to use instance profile
-export AWS_SDK_LOAD_CONFIG=1
+export AWS_SDK_LOAD_CONFIG=0
 export AWS_PROFILE=""
+export AWS_SHARED_CREDENTIALS_FILE=""
+export AWS_CONFIG_FILE=""
+
+# Debug: Show what credentials/env vars are set
+echo "Environment check before running Node.js:"
+echo "  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-not set}"
+echo "  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-not set}"
+echo "  AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-not set}"
+echo "  AWS_PROFILE: ${AWS_PROFILE:-not set}"
+echo "  AWS_SHARED_CREDENTIALS_FILE: ${AWS_SHARED_CREDENTIALS_FILE:-not set}"
+echo "  AWS_CONFIG_FILE: ${AWS_CONFIG_FILE:-not set}"
+echo "  Checking for credentials files:"
+ls -la ~/.aws/ 2>/dev/null || echo "    ~/.aws/ does not exist"
+echo ""
 
 # Run processing
 echo "=========================================="

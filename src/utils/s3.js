@@ -23,6 +23,15 @@ class S3Manager {
     // If on EC2 and no explicit credentials, use instance metadata provider
     const hasExplicitCredentials = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY;
     
+    // Log environment for debugging
+    logger.info('S3Manager: Checking credentials', {
+      hasExplicitCredentials,
+      hasAccessKey: !!process.env.AWS_ACCESS_KEY_ID,
+      hasSecretKey: !!process.env.AWS_SECRET_ACCESS_KEY,
+      hasSessionToken: !!process.env.AWS_SESSION_TOKEN,
+      awsProfile: process.env.AWS_PROFILE || 'not set',
+    });
+    
     if (hasExplicitCredentials) {
       // Explicit credentials provided - use them (for local development)
       clientConfig.credentials = {
@@ -34,25 +43,20 @@ class S3Manager {
       // No explicit credentials - explicitly use instance metadata provider on EC2
       // This ensures we use the instance profile and don't pick up invalid credentials from elsewhere
       // The fromInstanceMetadata provider will automatically detect if we're on EC2
-      // If not on EC2, it will throw an error and we'll let the default chain handle it
-      try {
-        // Use instance metadata provider explicitly - this will use the instance profile on EC2
-        // It returns a promise-based credential provider that the SDK will handle
-        clientConfig.credentials = fromInstanceMetadata({
-          maxRetries: 5,
-          timeout: 10000,
-        });
-        logger.info('S3Manager: Using instance metadata credentials provider (will use instance profile on EC2)');
-      } catch (error) {
-        // If that fails (e.g., not on EC2), let the SDK use the default credential chain
-        logger.info('S3Manager: Instance metadata provider failed, using default credential chain', { error: error.message });
-      }
+      logger.info('S3Manager: No explicit credentials, using instance metadata provider');
+      // Use instance metadata provider explicitly - this will use the instance profile on EC2
+      // It returns a credential provider function that the SDK will handle
+      clientConfig.credentials = fromInstanceMetadata({
+        maxRetries: 5,
+        timeout: 10000,
+      });
+      logger.info('S3Manager: Configured instance metadata credentials provider');
     }
     
     this.client = new S3Client(clientConfig);
     
     // Log credential source for debugging
-    const credentialSource = hasExplicitCredentials ? 'explicit-credentials' : 'instance-metadata-or-default-chain';
+    const credentialSource = hasExplicitCredentials ? 'explicit-credentials' : 'instance-metadata';
     logger.info('S3Manager initialized', { 
       bucket: this.bucketName, 
       region: this.region,
