@@ -223,22 +223,29 @@ echo ""
 # Step 4: Package and upload code to S3
 echo "Step 4: Packaging code..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CODE_PACKAGE=$("$SCRIPT_DIR/package-code.sh")
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-if [ ! -f "$CODE_PACKAGE" ]; then
-  echo "ERROR: Failed to package code"
-  exit 1
-fi
+PACKAGE_DIR="/tmp/adsb-ingestion-$$"
+mkdir -p "$PACKAGE_DIR"
+
+# Copy necessary files
+cd "$PROJECT_ROOT"
+cp -r src "$PACKAGE_DIR/"
+cp -r config "$PACKAGE_DIR/"
+cp -r scripts "$PACKAGE_DIR/"
+cp package.json "$PACKAGE_DIR/"
+cp .env.example "$PACKAGE_DIR/.env" 2>/dev/null || true
+
+# Create tarball
+cd "$PACKAGE_DIR"
+tar -czf /tmp/adsb-code.tar.gz .
+cd - > /dev/null
+rm -rf "$PACKAGE_DIR"
 
 echo "Uploading code package to S3..."
 S3_CODE_KEY="bootstrap/adsb-history-code.tar.gz"
-aws s3 cp "$CODE_PACKAGE" "s3://$S3_BUCKET/$S3_CODE_KEY" --region "$REGION"
-
-# Clean up temporary package directory
-TEMP_PACKAGE_DIR="$(dirname "$(dirname "$CODE_PACKAGE")")"
-if [[ "$TEMP_PACKAGE_DIR" == *".temp-package"* ]]; then
-  rm -rf "$TEMP_PACKAGE_DIR"
-fi
+aws s3 cp /tmp/adsb-code.tar.gz "s3://$S3_BUCKET/$S3_CODE_KEY" --region "$REGION"
+rm -f /tmp/adsb-code.tar.gz
 
 echo "✓ Code uploaded to s3://$S3_BUCKET/$S3_CODE_KEY"
 echo ""
