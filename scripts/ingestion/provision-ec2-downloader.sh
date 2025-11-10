@@ -15,13 +15,20 @@ SECURITY_GROUP_NAME="adsb-history-downloader"
 IAM_ROLE_NAME="adsb-history-downloader-role"
 IAM_INSTANCE_PROFILE="adsb-history-downloader-profile"
 KEY_NAME=""  # Optional - set if you want SSH access for debugging
+AWS_PROFILE="${AWS_PROFILE:-}"  # Optional - set AWS profile to use
 
 # Parse arguments
 START_DATE=""
 DAYS=7
 
+# Check for AWS profile in environment or arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --aws-profile)
+      AWS_PROFILE="$2"
+      export AWS_PROFILE
+      shift 2
+      ;;
     --start-date)
       START_DATE="$2"
       shift 2
@@ -45,11 +52,10 @@ while [[ $# -gt 0 ]]; do
       echo "  --start-date YYYY-MM-DD   Start date for download (default: 2025-11-02)"
       echo "  --days N                  Number of days to download (default: 7)"
       echo "  --region REGION           AWS region (default: us-west-2)"
+      echo "  --aws-profile PROFILE     AWS profile to use (default: from AWS_PROFILE env or default)"
       echo "  --key-name KEY            SSH key name for debugging (optional)"
       echo "  --help                    Show this help message"
       echo ""
-      echo "Example:"
-      echo "  $0 --start-date 2025-11-02 --days 7"
       exit 0
       ;;
     *)
@@ -58,6 +64,30 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Verify AWS account
+if [ -n "$AWS_PROFILE" ]; then
+    export AWS_PROFILE
+fi
+
+CURRENT_ACCOUNT=$(aws sts get-caller-identity --query 'Account' --output text 2>/dev/null)
+if [ -z "$CURRENT_ACCOUNT" ]; then
+    echo "ERROR: Cannot determine AWS account. Check your AWS credentials."
+    exit 1
+fi
+
+echo "Using AWS account: $CURRENT_ACCOUNT"
+if [ "$CURRENT_ACCOUNT" != "632391382381" ]; then
+    echo "⚠️  WARNING: Expected account 632391382381 (Ayryx), but using $CURRENT_ACCOUNT"
+    echo "   Set AWS_PROFILE to use the correct account, or use --aws-profile option"
+    echo ""
+    read -p "Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+echo ""
 
 # Default start date if not provided
 if [ -z "$START_DATE" ]; then
@@ -74,15 +104,7 @@ echo "Date Range: $START_DATE + $DAYS days"
 echo "=========================================="
 echo ""
 
-# Check if AWS CLI is configured
-if ! aws sts get-caller-identity --region "$REGION" > /dev/null 2>&1; then
-  echo "ERROR: AWS CLI is not configured or credentials are invalid"
-  echo "Please run 'aws configure' first"
-  exit 1
-fi
-
-ACCOUNT_ID=$(aws sts get-caller-identity --region "$REGION" --query Account --output text)
-echo "✓ AWS Account: $ACCOUNT_ID"
+# Account already verified above
 
 # Auto-detect latest Amazon Linux 2023 AMI if not specified
 if [ -z "$AMI_ID" ]; then

@@ -22,14 +22,25 @@ fi
 echo "Instance: $INSTANCE_ID"
 echo ""
 
-# Get instance state
-STATE=$(aws ec2 describe-instances \
+# Get instance state and account
+INSTANCE_INFO=$(aws ec2 describe-instances \
     --instance-ids "$INSTANCE_ID" \
     --region "$REGION" \
-    --query 'Reservations[0].Instances[0].State.Name' \
+    --query 'Reservations[0].[Instances[0].State.Name,OwnerId]' \
     --output text)
 
+STATE=$(echo "$INSTANCE_INFO" | awk '{print $1}')
+ACCOUNT_ID=$(echo "$INSTANCE_INFO" | awk '{print $2}')
+CURRENT_ACCOUNT=$(aws sts get-caller-identity --query 'Account' --output text 2>/dev/null)
+
 echo "State: $STATE"
+echo "Instance Account: $ACCOUNT_ID"
+echo "Your AWS CLI Account: $CURRENT_ACCOUNT"
+if [ "$ACCOUNT_ID" != "$CURRENT_ACCOUNT" ]; then
+    echo ""
+    echo "⚠️  WARNING: Instance is in account $ACCOUNT_ID, but your AWS CLI is using $CURRENT_ACCOUNT"
+    echo "   You need to switch to account $ACCOUNT_ID in the AWS Console to see this instance"
+fi
 echo ""
 
 # Check S3 for recent uploads (this is the real progress indicator)
@@ -43,6 +54,25 @@ echo "Total files in S3:"
 aws s3 ls s3://ayryx-adsb-history/raw/ --recursive --region "$REGION" 2>/dev/null | wc -l | xargs
 
 echo ""
-echo "View in AWS Console:"
-echo "  https://console.aws.amazon.com/ec2/v2/home?region=$REGION#Instances:instanceId=$INSTANCE_ID"
+# Check if instance still exists
+if [ "$STATE" == "terminated" ] || [ "$STATE" == "stopped" ]; then
+    echo "Instance is $STATE"
+    echo ""
+    echo "To view in AWS Console (including terminated instances):"
+    echo "  1. Go to: https://console.aws.amazon.com/ec2/v2/home?region=$REGION"
+    echo "  2. Click 'Instances' in left menu"
+    echo "  3. Use search/filter to find instance ID: $INSTANCE_ID"
+    echo "  4. Or change filter to show 'Terminated' instances"
+else
+    echo "View in AWS Console:"
+    echo "  https://console.aws.amazon.com/ec2/v2/home?region=$REGION#Instances:instanceId=$INSTANCE_ID"
+    echo ""
+    echo "If instance doesn't appear:"
+    echo "  1. Go to: https://console.aws.amazon.com/ec2/v2/home?region=$REGION"
+    echo "  2. Click 'Instances' in the left menu"
+    echo "  3. In the search box, type: $INSTANCE_ID"
+    echo "  4. Or filter by 'Running instances'"
+    echo ""
+    echo "Note: The instance is in AWS account: $(aws ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query 'Reservations[0].OwnerId' --output text 2>/dev/null || echo 'unknown')"
+fi
 

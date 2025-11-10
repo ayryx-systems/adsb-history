@@ -27,9 +27,17 @@ node scripts/processing/identify-ground-aircraft-multi.js --date 2025-11-08 --al
 
 # Process specific airports
 ./scripts/processing/run-on-ec2.sh --date 2025-11-08 --airports KLGA,KSFO
+
+# Use specific AWS profile (if you have multiple AWS accounts)
+# First, check your profiles: aws configure list-profiles
+# Then use: AWS_PROFILE=your-profile-name ./scripts/processing/run-on-ec2.sh --date 2025-11-08
+# Or: ./scripts/processing/run-on-ec2.sh --date 2025-11-08 --aws-profile your-profile-name
 ```
 
+**Important**: The script will show which AWS account it's using. Make sure it matches your project account (not a different project).
+
 The script will:
+
 1. Package your code
 2. Upload to S3
 3. Launch an EC2 instance
@@ -44,9 +52,11 @@ The script will:
 ## Output
 
 Results are saved to S3:
+
 - `s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json`
 
 Each file contains:
+
 ```json
 {
   "airport": "KLGA",

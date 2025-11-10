@@ -10,6 +10,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Parse arguments
 DATE=""
 AIRPORTS_ARG="--all"
+AWS_PROFILE="${AWS_PROFILE:-}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -21,12 +22,41 @@ while [[ $# -gt 0 ]]; do
       AIRPORTS_ARG="--airports $2"
       shift 2
       ;;
+    --aws-profile)
+      AWS_PROFILE="$2"
+      export AWS_PROFILE
+      shift 2
+      ;;
     *)
       echo "Unknown option: $1"
       exit 1
       ;;
   esac
 done
+
+# Verify AWS account
+if [ -n "$AWS_PROFILE" ]; then
+    export AWS_PROFILE
+fi
+
+CURRENT_ACCOUNT=$(aws sts get-caller-identity --query 'Account' --output text 2>/dev/null)
+if [ -z "$CURRENT_ACCOUNT" ]; then
+    echo "ERROR: Cannot determine AWS account. Check your AWS credentials."
+    exit 1
+fi
+
+echo "Using AWS account: $CURRENT_ACCOUNT"
+if [ "$CURRENT_ACCOUNT" != "632391382381" ]; then
+    echo "⚠️  WARNING: Expected account 632391382381 (Ayryx), but using $CURRENT_ACCOUNT"
+    echo "   Set AWS_PROFILE to use the correct account, or use --aws-profile option"
+    echo ""
+    read -p "Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+echo ""
 
 if [ -z "$DATE" ]; then
   echo "Error: --date is required"
