@@ -7,7 +7,7 @@
 set -e
 
 # Default values
-AIRPORT="KLGA"
+AIRPORTS=""  # Empty means process all enabled airports
 DATE=$(date -u -d "yesterday" +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)
 INSTANCE_TYPE="t3.xlarge"  # 4 vCPU, 16GB RAM for faster processing
 REGION="us-west-1"
@@ -23,7 +23,11 @@ NC='\033[0m'
 while [[ $# -gt 0 ]]; do
   case $1 in
     --airport)
-      AIRPORT="$2"
+      AIRPORTS="$2"
+      shift 2
+      ;;
+    --airports)
+      AIRPORTS="$2"
       shift 2
       ;;
     --date)
@@ -38,14 +42,16 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [options]"
       echo ""
       echo "Options:"
-      echo "  --airport ICAO        Airport to process (default: KLGA)"
+      echo "  --airport ICAO        Single airport to process (deprecated, use --airports)"
+      echo "  --airports ICAO,...   Comma-separated airports (default: all enabled)"
       echo "  --date YYYY-MM-DD     Date to process (default: yesterday)"
       echo "  --instance-type TYPE  Instance type (default: t3.xlarge)"
       echo "  --help                Show this help"
       echo ""
       echo "Examples:"
-      echo "  $0 --airport KLGA --date 2025-11-08"
-      echo "  $0 --airport KLAX --date 2025-11-07"
+      echo "  $0 --date 2025-11-08                    # Process all enabled airports"
+      echo "  $0 --airports KLGA,KJFK --date 2025-11-08"
+      echo "  $0 --airport KLGA --date 2025-11-08     # Single airport (backward compat)"
       exit 0
       ;;
     *)
@@ -59,8 +65,16 @@ echo -e "${GREEN}╔════════════════════
 echo -e "${GREEN}║       ADSB Historical Data - EC2 Processor Setup          ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
+if [ -z "$AIRPORTS" ]; then
+  AIRPORTS_ARG="--all"
+  AIRPORTS_DISPLAY="all enabled airports"
+else
+  AIRPORTS_ARG="--airports $AIRPORTS"
+  AIRPORTS_DISPLAY="$AIRPORTS"
+fi
+
 echo "Configuration:"
-echo "  Airport:       $AIRPORT"
+echo "  Airports:      $AIRPORTS_DISPLAY"
 echo "  Date:          $DATE"
 echo "  Instance Type: $INSTANCE_TYPE"
 echo "  Region:        $REGION"
@@ -73,19 +87,7 @@ if ! command -v aws &> /dev/null; then
     exit 1
 fi
 
-# Check if already processed
-echo -e "${YELLOW}Checking if data already processed...${NC}"
-S3_KEY="processed/$AIRPORT/$(echo $DATE | cut -d- -f1)/$(echo $DATE | cut -d- -f2)/$(echo $DATE | cut -d- -f3).json"
-if aws s3 ls "s3://ayryx-adsb-history/$S3_KEY" &>/dev/null; then
-    echo -e "${GREEN}✓ Data already processed!${NC}"
-    echo "  Location: s3://ayryx-adsb-history/$S3_KEY"
-    echo ""
-    read -p "Reprocess anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 0
-    fi
-fi
+# Skip check for multi-airport processing (script handles it)
 
 # Get latest Amazon Linux 2023 AMI
 echo -e "${YELLOW}Finding latest Amazon Linux 2023 AMI...${NC}"
@@ -217,13 +219,14 @@ cat > $PACKAGE_DIR/run-processing.sh <<'EOFSCRIPT'
 #!/bin/bash
 set -e
 
-AIRPORT="$1"
-DATE="$2"
+DATE="$1"
+shift
+AIRPORTS_ARGS="$@"
 
 echo "=================================================="
 echo "ADSB Historical Data Processing"
-echo "Airport: $AIRPORT"
 echo "Date: $DATE"
+echo "Airports: $AIRPORTS_ARGS"
 echo "=================================================="
 echo ""
 
@@ -250,9 +253,9 @@ chmod 755 $TEMP_DIR
 echo ""
 echo "Starting processing (this will take 10-15 minutes)..."
 echo ""
-node scripts/identify-ground-aircraft.js \
-  --airport $AIRPORT \
-  --date $DATE
+node scripts/identify-ground-aircraft-multi.js \
+  --date $DATE \
+  $AIRPORTS_ARG
 
 EXIT_CODE=$?
 
@@ -263,7 +266,7 @@ if [ $EXIT_CODE -eq 0 ]; then
     echo "=================================================="
     echo ""
     echo "Data saved to:"
-    echo "  s3://ayryx-adsb-history/ground-aircraft/$AIRPORT/${DATE:0:4}/${DATE:5:2}/${DATE:8:2}.json"
+    echo "  s3://ayryx-adsb-history/ground-aircraft/*/${DATE:0:4}/${DATE:5:2}/${DATE:8:2}.json"
     echo ""
     
     # Shutdown instance
@@ -312,7 +315,7 @@ cd adsb-history
 tar -xzf ../code.tar.gz
 
 # Run processing
-bash run-processing.sh $AIRPORT $DATE
+bash run-processing.sh $DATE $AIRPORTS_ARG
 
 # If we get here, processing succeeded and instance will shutdown
 EOF
@@ -334,7 +337,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
     --security-group-ids $SG_ID \
     --user-data file:///tmp/user-data.sh \
     --block-device-mappings "[{\"DeviceName\":\"/dev/xvda\",\"Ebs\":{\"VolumeSize\":$VOLUME_SIZE,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=adsb-processor-$AIRPORT-$DATE},{Key=Purpose,Value=adsb-processing}]" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=adsb-processor-multi-$DATE},{Key=Purpose,Value=adsb-processing}]" \
     --query 'Instances[0].InstanceId' \
     --output text)
 

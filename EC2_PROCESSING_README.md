@@ -11,23 +11,29 @@ Identify aircraft that were on the ground at an airport on a specific date.
 
 ## Quick Start
 
-### Identify ground aircraft at KLGA for November 8, 2025
+### Process all enabled airports for a date
 
 ```bash
 cd adsb-history
-./scripts/provision-ec2-processor.sh --airport KLGA --date 2025-11-08
+./scripts/provision-ec2-processor.sh --date 2025-11-08
+```
+
+### Process specific airports
+
+```bash
+./scripts/provision-ec2-processor.sh --airports KLGA,KJFK,KLAX --date 2025-11-08
 ```
 
 **What it does:**
 
 1. Launches EC2 instance (t3.xlarge, 50GB, us-west-1)
 2. Downloads tar from S3 (~3 minutes)
-3. Extracts and processes traces (~10 minutes)
-4. Identifies aircraft on ground (within 1nm, altitude < 500ft)
-5. Saves list of ICAO codes to S3
+3. Extracts and processes traces (~10 minutes per airport)
+4. Identifies aircraft on ground for each airport (within 1nm, altitude < 500ft)
+5. Saves list of ICAO codes to S3 for each airport
 6. Auto-terminates when complete
 
-**Cost:** ~$0.04-0.05 per airport per day
+**Cost:** ~$0.04-0.05 per run (processes all airports in one instance)
 
 ### Monitor Progress
 
@@ -91,20 +97,21 @@ Shows:
 ./scripts/provision-ec2-processor.sh [options]
 
 Options:
-  --airport ICAO        Airport to process (default: KLGA)
+  --airports ICAO,...   Comma-separated airports (default: all enabled)
+  --airport ICAO        Single airport (backward compatibility)
   --date YYYY-MM-DD     Date to process (default: yesterday)
   --instance-type TYPE  Instance type (default: t3.xlarge)
   --help                Show help
 
 Examples:
-  # Process KLGA for November 8
+  # Process all enabled airports
+  ./scripts/provision-ec2-processor.sh --date 2025-11-08
+
+  # Process specific airports
+  ./scripts/provision-ec2-processor.sh --airports KLGA,KJFK,KLAX --date 2025-11-08
+
+  # Process single airport (backward compat)
   ./scripts/provision-ec2-processor.sh --airport KLGA --date 2025-11-08
-
-  # Process KLAX with larger instance
-  ./scripts/provision-ec2-processor.sh --airport KLAX --date 2025-11-08 --instance-type t3.2xlarge
-
-  # Process yesterday's data
-  ./scripts/provision-ec2-processor.sh --airport KJFK
 ```
 
 ## Cost Breakdown
@@ -198,10 +205,17 @@ done
 You can also process locally if you have ~50GB disk space:
 
 ```bash
+# Process all enabled airports
+node scripts/identify-ground-aircraft-multi.js --date 2025-11-08 --all
+
+# Process specific airports
+node scripts/identify-ground-aircraft-multi.js --date 2025-11-08 --airports KLGA,KJFK,KLAX
+
+# Process single airport
 node scripts/identify-ground-aircraft.js --airport KLGA --date 2025-11-08
 ```
 
-The tar file is cached locally after first download, so subsequent runs are faster.
+The tar file is cached locally after first download, so subsequent runs are faster. When processing multiple airports, the same tar file is reused for all airports.
 
 ## Output Format
 
