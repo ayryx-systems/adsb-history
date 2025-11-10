@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
-import { fromInstanceMetadata } from '@aws-sdk/credential-providers';
 import logger from '../utils/logger.js';
 
 /**
@@ -15,23 +14,20 @@ class GroundAircraftData {
     this.useCache = config.useCache !== false;
 
     // Initialize S3 client
+    // Don't set credentials - let SDK use default credential chain
+    // This will automatically use instance profile on EC2
     const clientConfig = { region: this.region };
-    const hasExplicitCredentials = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY;
     
-    if (hasExplicitCredentials) {
-      // Explicit credentials provided - use them (for local development)
+    // Only set explicit credentials if provided (for local development)
+    // Otherwise, SDK will use default chain: env vars -> credentials file -> instance metadata
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
       clientConfig.credentials = {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
       };
-    } else {
-      // No explicit credentials - use instance metadata provider on EC2
-      // This ensures we use the instance profile and don't pick up invalid credentials
-      clientConfig.credentials = fromInstanceMetadata({
-        maxRetries: 5,
-        timeout: 10000,
-      });
     }
+    // If no explicit credentials, SDK will automatically use instance profile on EC2
+    
     this.s3Client = new S3Client(clientConfig);
   }
 

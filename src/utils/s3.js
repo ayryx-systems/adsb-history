@@ -1,6 +1,5 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
-import { fromInstanceMetadata } from '@aws-sdk/credential-providers';
 import fs from 'fs';
 import path from 'path';
 import logger from './logger.js';
@@ -39,19 +38,9 @@ class S3Manager {
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
       };
       logger.info('S3Manager: Using explicit credentials from environment');
-    } else {
-      // No explicit credentials - explicitly use instance metadata provider on EC2
-      // This ensures we use the instance profile and don't pick up invalid credentials from elsewhere
-      // The fromInstanceMetadata provider will automatically detect if we're on EC2
-      logger.info('S3Manager: No explicit credentials, using instance metadata provider');
-      // Use instance metadata provider explicitly - this will use the instance profile on EC2
-      // It returns a credential provider function that the SDK will handle
-      clientConfig.credentials = fromInstanceMetadata({
-        maxRetries: 5,
-        timeout: 10000,
-      });
-      logger.info('S3Manager: Configured instance metadata credentials provider');
     }
+    // If no explicit credentials, don't set credentials - let SDK use default credential chain
+    // The default chain will automatically use instance profile on EC2
     
     this.client = new S3Client(clientConfig);
     

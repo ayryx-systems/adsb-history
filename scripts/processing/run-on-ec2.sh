@@ -306,22 +306,41 @@ while [ \$RETRY_COUNT -lt \$MAX_RETRIES ]; do
   fi
 done
 
-# Verify S3 access
+# Verify S3 access and wait for credentials to be fully available
 echo ""
 echo "Verifying S3 access..."
-if aws s3 ls "s3://$S3_BUCKET/" --region $REGION > /dev/null 2>&1; then
-  echo "✓ S3 access verified via AWS CLI"
-  echo "   AWS CLI caller identity:"
-  aws sts get-caller-identity --region $REGION 2>&1 || echo "   (Could not get caller identity)"
-else
-  echo "⚠️  ERROR: Cannot access S3 bucket!"
+CREDENTIALS_READY=false
+for i in {1..10}; do
+  if aws s3 ls "s3://$S3_BUCKET/" --region $REGION > /dev/null 2>&1; then
+    echo "✓ S3 access verified via AWS CLI (attempt $i)"
+    echo "   AWS CLI caller identity:"
+    aws sts get-caller-identity --region $REGION 2>&1 || echo "   (Could not get caller identity)"
+    CREDENTIALS_READY=true
+    break
+  else
+    echo "   Waiting for credentials... (attempt $i/10)"
+    sleep 2
+  fi
+done
+
+if [ "$CREDENTIALS_READY" != "true" ]; then
+  echo "⚠️  ERROR: Cannot access S3 bucket after 10 attempts!"
   echo "   Bucket: $S3_BUCKET"
   echo "   This will cause the processing to fail."
   echo "   Check IAM role permissions and instance profile attachment."
+  exit 1
 fi
+
+# Give credentials a moment to fully propagate
+echo "⏳ Waiting 5 seconds for credentials to fully propagate..."
+sleep 5
 echo ""
 
-# Set environment variable to tell Node.js SDK to use instance profile
+# Set environment variables to ensure Node.js SDK uses instance profile
+# Unset any explicit credentials
+unset AWS_ACCESS_KEY_ID
+unset AWS_SECRET_ACCESS_KEY
+unset AWS_SESSION_TOKEN
 export AWS_SDK_LOAD_CONFIG=0
 export AWS_PROFILE=""
 export AWS_SHARED_CREDENTIALS_FILE=""
@@ -335,6 +354,7 @@ echo "  AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-not set}"
 echo "  AWS_PROFILE: ${AWS_PROFILE:-not set}"
 echo "  AWS_SHARED_CREDENTIALS_FILE: ${AWS_SHARED_CREDENTIALS_FILE:-not set}"
 echo "  AWS_CONFIG_FILE: ${AWS_CONFIG_FILE:-not set}"
+echo "  AWS_SDK_LOAD_CONFIG: ${AWS_SDK_LOAD_CONFIG:-not set}"
 echo "  Checking for credentials files:"
 ls -la ~/.aws/ 2>/dev/null || echo "    ~/.aws/ does not exist"
 echo ""
