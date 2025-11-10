@@ -51,54 +51,62 @@ fi
 echo "Instance State: $STATE"
 echo ""
 
-if [ "$STATE" == "terminated" ] || [ "$STATE" == "stopped" ]; then
-    echo "⚠️  Instance is $STATE. Logs are no longer available."
-    exit 0
-fi
-
-# Try to get logs via Systems Manager
-echo "Attempting to retrieve logs via AWS Systems Manager..."
+# Get console output (works for running instances)
+echo "Retrieving console output..."
 echo ""
 
-# Try to get user-data log
-if aws ssm send-command \
-    --instance-ids "$INSTANCE_ID" \
+# Try console output (may take a few minutes to be available)
+CONSOLE_OUTPUT=$(aws ec2 get-console-output \
+    --instance-id "$INSTANCE_ID" \
     --region "$REGION" \
-    --document-name "AWS-RunShellScript" \
-    --parameters "commands=['cat /var/log/user-data.log']" \
-    --output text \
-    --query 'Command.CommandId' > /tmp/command-id.txt 2>/dev/null; then
-    
-    COMMAND_ID=$(cat /tmp/command-id.txt)
-    echo "Command sent. Waiting for output..."
-    sleep 3
-    
-    aws ssm get-command-invocation \
-        --command-id "$COMMAND_ID" \
-        --instance-id "$INSTANCE_ID" \
-        --region "$REGION" \
-        --query 'StandardOutputContent' \
-        --output text 2>/dev/null
-    
+    --query 'Output' \
+    --output text 2>/dev/null)
+
+if [ -n "$CONSOLE_OUTPUT" ] && [ "$CONSOLE_OUTPUT" != "None" ] && [ "$CONSOLE_OUTPUT" != "" ]; then
+    echo "=========================================="
+    echo "Console Output (last 200 lines):"
+    echo "=========================================="
     echo ""
-    echo "---"
+    echo "$CONSOLE_OUTPUT" | tail -200
     echo ""
-    echo "Error output:"
-    aws ssm get-command-invocation \
-        --command-id "$COMMAND_ID" \
-        --instance-id "$INSTANCE_ID" \
-        --region "$REGION" \
-        --query 'StandardErrorContent' \
-        --output text 2>/dev/null
+    echo "=========================================="
+    echo ""
+    echo "Note: Console output shows what's written to stdout/stderr."
+    echo "For full logs, check /var/log/user-data.log on the instance."
+    echo ""
     
-    rm -f /tmp/command-id.txt
+    if [ "$STATE" != "terminated" ] && [ "$STATE" != "stopped" ]; then
+        echo "To get real-time logs, use AWS Console (most reliable):"
+        echo "  https://console.aws.amazon.com/ec2/v2/home?region=$REGION#Instances:instanceId=$INSTANCE_ID"
+        echo "  → Actions → Monitor and troubleshoot → Get system log"
+    fi
 else
-    echo "⚠️  Could not retrieve logs via SSM"
+    echo "⚠️  Console output not available yet"
     echo ""
-    echo "To view logs manually, you can:"
-    echo "  1. SSH into the instance (if you have a key pair)"
-    echo "  2. Run: tail -f /var/log/user-data.log"
+    echo "Console output typically takes 2-5 minutes after instance launch to become available."
     echo ""
-    echo "Or check CloudWatch Logs if configured"
+    echo "════════════════════════════════════════════════════════════"
+    echo "RECOMMENDED: View logs via AWS Console (most reliable)"
+    echo "════════════════════════════════════════════════════════════"
+    echo ""
+    echo "1. Open AWS Console:"
+    echo "   https://console.aws.amazon.com/ec2/v2/home?region=$REGION#Instances:instanceId=$INSTANCE_ID"
+    echo ""
+    echo "2. Select the instance"
+    echo ""
+    echo "3. Click 'Actions' → 'Monitor and troubleshoot' → 'Get system log'"
+    echo ""
+    echo "This will show the full user-data.log output in real-time."
+    echo ""
+    echo "════════════════════════════════════════════════════════════"
+    echo "Alternative methods:"
+    echo "════════════════════════════════════════════════════════════"
+    echo ""
+    echo "Retry console output (wait 2-3 minutes after launch):"
+    echo "  $0 $INSTANCE_ID"
+    echo ""
+    echo "Or use AWS CLI to get console output:"
+    echo "  aws ec2 get-console-output --instance-id $INSTANCE_ID --region $REGION --query 'Output' --output text | tail -200"
+    echo ""
 fi
 
