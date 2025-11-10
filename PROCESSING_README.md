@@ -2,13 +2,14 @@
 
 This document explains how to use the abstraction layer to extract useful information from raw ADSB historical data.
 
-**Note:** For most use cases, use [EC2_PROCESSING_README.md](./EC2_PROCESSING_README.md) instead. This guide covers local processing which requires ~50GB disk space.
+**Note:** For EC2 processing, see the main [README.md](./README.md). This guide covers local processing which requires ~50GB disk space.
 
 ## Overview
 
 The system processes raw ADSB trace data **once** and stores structured flight information in an abstraction layer (S3 + local cache). This avoids reprocessing on every query.
 
 **Architecture:**
+
 ```
 Raw Data (S3 tars)
     ↓
@@ -27,17 +28,20 @@ Application Queries (fast!)
 ## Data Format
 
 ### Raw Data (Input)
+
 - **Location**: `s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`
 - **Format**: Readsb trace JSON (files are gzipped despite `.json` extension)
 - **Size**: ~3GB per day (global)
 - **Note**: System automatically decompresses with `zlib.gunzip()`
 
 ### Processed Data (Output)
+
 - **Location**: `s3://ayryx-adsb-history/processed/AIRPORT/YYYY/MM/DD.json`
 - **Format**: Structured JSON with classified flights
 - **Size**: ~1-10MB per airport per day
 
 Example processed data structure:
+
 ```json
 {
   "date": "2025-11-08",
@@ -107,38 +111,39 @@ npm run get-arrivals -- --airport KLGA --date 2025-11-08
 ### 3. Programmatic API
 
 ```javascript
-import DailyFlightData from './src/processing/DailyFlightData.js';
-import AirportDailyProcessor from './src/processing/AirportDailyProcessor.js';
+import DailyFlightData from "./src/processing/DailyFlightData.js";
+import AirportDailyProcessor from "./src/processing/AirportDailyProcessor.js";
 
 // Initialize abstraction layer
 const dataStore = new DailyFlightData();
 
 // Check if data already processed
-const arrivals = await dataStore.getArrivals('KLGA', '2025-11-08');
+const arrivals = await dataStore.getArrivals("KLGA", "2025-11-08");
 
 if (!arrivals) {
   // Not processed yet, process now
   const processor = new AirportDailyProcessor();
-  const results = await processor.processAirportDay('2025-11-08', airport);
-  await dataStore.save('KLGA', '2025-11-08', results);
+  const results = await processor.processAirportDay("2025-11-08", airport);
+  await dataStore.save("KLGA", "2025-11-08", results);
 }
 
 // Now query the abstraction layer (fast!)
-const arrivals = await dataStore.getArrivals('KLGA', '2025-11-08');
-const departures = await dataStore.getDepartures('KLGA', '2025-11-08');
-const stats = await dataStore.getStatistics('KLGA', '2025-11-08');
+const arrivals = await dataStore.getArrivals("KLGA", "2025-11-08");
+const departures = await dataStore.getDepartures("KLGA", "2025-11-08");
+const stats = await dataStore.getStatistics("KLGA", "2025-11-08");
 ```
 
 ## Components
 
 ### TraceReader
+
 Extracts and streams trace files from S3 tar archives.
 
 ```javascript
 const reader = new TraceReader();
 
 // Download and extract tar
-const tarPath = await reader.downloadTarFromS3('2025-11-08');
+const tarPath = await reader.downloadTarFromS3("2025-11-08");
 const extractDir = await reader.extractTar(tarPath);
 
 // Stream all traces
@@ -147,17 +152,18 @@ for await (const { icao, trace } of reader.streamAllTraces(extractDir)) {
 }
 
 // Clean up
-reader.cleanup('2025-11-08');
+reader.cleanup("2025-11-08");
 ```
 
 ### FlightClassifier
+
 Analyzes traces to determine if they're arrivals, departures, or overflights.
 
 ```javascript
 const classifier = new FlightClassifier({
-  arrivalAltitudeThreshold: 5000,  // feet
+  arrivalAltitudeThreshold: 5000, // feet
   departureAltitudeThreshold: 5000, // feet
-  airportProximityRadius: 10,       // nautical miles
+  airportProximityRadius: 10, // nautical miles
 });
 
 const classification = classifier.classifyFlight(trace, airport);
@@ -165,31 +171,33 @@ const classification = classifier.classifyFlight(trace, airport);
 ```
 
 ### AirportDailyProcessor
+
 Processes all flights for an airport on a specific day.
 
 ```javascript
 const processor = new AirportDailyProcessor();
-const results = await processor.processAirportDay('2025-11-08', airport);
+const results = await processor.processAirportDay("2025-11-08", airport);
 
 // Or get just arrivals
-const arrivals = await processor.getArrivals('2025-11-08', airport);
+const arrivals = await processor.getArrivals("2025-11-08", airport);
 ```
 
 ### DailyFlightData (Abstraction Layer)
+
 Stores and retrieves processed flight data.
 
 ```javascript
 const dataStore = new DailyFlightData();
 
 // Save processed data
-await dataStore.save('KLGA', '2025-11-08', results);
+await dataStore.save("KLGA", "2025-11-08", results);
 
 // Load processed data
-const data = await dataStore.load('KLGA', '2025-11-08');
+const data = await dataStore.load("KLGA", "2025-11-08");
 
 // Query specific data
-const arrivals = await dataStore.getArrivals('KLGA', '2025-11-08');
-const stats = await dataStore.getStatistics('KLGA', '2025-11-08');
+const arrivals = await dataStore.getArrivals("KLGA", "2025-11-08");
+const stats = await dataStore.getStatistics("KLGA", "2025-11-08");
 ```
 
 ## Configuration
@@ -218,16 +226,17 @@ Edit `config/airports.json`:
 
 ```javascript
 const classifier = new FlightClassifier({
-  arrivalAltitudeThreshold: 5000,     // Lower = more arrivals detected
-  departureAltitudeThreshold: 5000,   // Lower = more departures detected
-  airportProximityRadius: 10,         // Larger = include flights further away
-  minPositionReports: 5,              // Minimum data points to classify
+  arrivalAltitudeThreshold: 5000, // Lower = more arrivals detected
+  departureAltitudeThreshold: 5000, // Lower = more departures detected
+  airportProximityRadius: 10, // Larger = include flights further away
+  minPositionReports: 5, // Minimum data points to classify
 });
 ```
 
 ## Performance
 
 Processing a single day for one airport:
+
 - **Input**: ~3GB tar (global data)
 - **Output**: ~5MB JSON (airport-specific)
 - **Time**: ~5-15 minutes (depending on airport size and CPU)
@@ -253,18 +262,23 @@ After initial processing, queries are instant (cache/S3 lookup).
 ## Troubleshooting
 
 ### Out of Memory
+
 Large airports process many traces. Increase Node memory:
+
 ```bash
 NODE_OPTIONS="--max-old-space-size=8192" npm run process-airport -- --airport KLAX --date 2025-11-08
 ```
 
 ### Slow Processing
+
 - Ensure running on a machine with good CPU
 - Consider using EC2 for faster processing
 - Process multiple days in parallel on different machines
 
 ### Missing Data
+
 Check that raw tar exists in S3:
+
 ```bash
 aws s3 ls s3://ayryx-adsb-history/raw/2025/11/08/
 ```
@@ -272,8 +286,8 @@ aws s3 ls s3://ayryx-adsb-history/raw/2025/11/08/
 ## Next Steps
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for:
+
 - Pre-computed statistics aggregation
 - CloudFront CDN deployment
 - Integration with planning-app frontend
 - Historical analysis and trending
-

@@ -148,7 +148,7 @@ See [IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md) for detailed archit
 ## Documentation
 
 - **GETTING_STARTED.md** (this file) - Quick start guide
-- **[EC2_PROCESSING_README.md](./EC2_PROCESSING_README.md)** - EC2 processing (recommended)
+- **[README.md](./README.md)** - EC2 processing (recommended)
 - **[PROCESSING_README.md](./PROCESSING_README.md)** - Local processing details
 - **[EC2_INGESTION_README.md](./EC2_INGESTION_README.md)** - Data download
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** - System design
@@ -206,7 +206,7 @@ The abstraction layer is complete. Next steps:
 
 See detailed documentation:
 
-- [EC2_PROCESSING_README.md](./EC2_PROCESSING_README.md) - EC2 processing guide
+- [README.md](./README.md) - EC2 processing guide
 - [PROCESSING_README.md](./PROCESSING_README.md) - Full processing details
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - System design
 - [README.md](./README.md) - Main overview
