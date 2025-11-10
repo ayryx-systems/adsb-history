@@ -63,7 +63,143 @@ if [ -z "$DATE" ]; then
   exit 1
 fi
 
-echo "Packaging code..."
+# Configuration
+REGION="us-west-1"
+IAM_ROLE_NAME="adsb-history-processor-role"
+IAM_INSTANCE_PROFILE="adsb-history-processor-role"  # Same name as role
+SECURITY_GROUP_NAME="adsb-history-processor-sg"
+S3_BUCKET="ayryx-adsb-history"
+
+# Step 1: Create IAM role if it doesn't exist
+echo "Step 1: Setting up IAM role..."
+if aws iam get-role --role-name "$IAM_ROLE_NAME" --region "$REGION" > /dev/null 2>&1; then
+  echo "✓ IAM role already exists: $IAM_ROLE_NAME"
+else
+  echo "Creating IAM role: $IAM_ROLE_NAME"
+  
+  # Create trust policy
+  cat > /tmp/trust-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+  aws iam create-role \
+    --role-name "$IAM_ROLE_NAME" \
+    --assume-role-policy-document file:///tmp/trust-policy.json \
+    --region "$REGION"
+  
+  # Create and attach S3 policy
+  cat > /tmp/s3-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:ListBucket",
+        "s3:HeadObject",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${S3_BUCKET}",
+        "arn:aws:s3:::${S3_BUCKET}/*"
+      ]
+    }
+  ]
+}
+EOF
+
+  aws iam put-role-policy \
+    --role-name "$IAM_ROLE_NAME" \
+    --policy-name "S3Access" \
+    --policy-document file:///tmp/s3-policy.json \
+    --region "$REGION"
+  
+  echo "✓ IAM role created with S3 access"
+fi
+
+# Create instance profile if it doesn't exist
+if aws iam get-instance-profile --instance-profile-name "$IAM_INSTANCE_PROFILE" --region "$REGION" > /dev/null 2>&1; then
+  echo "✓ Instance profile already exists: $IAM_INSTANCE_PROFILE"
+else
+  echo "Creating instance profile: $IAM_INSTANCE_PROFILE"
+  aws iam create-instance-profile \
+    --instance-profile-name "$IAM_INSTANCE_PROFILE" \
+    --region "$REGION"
+  
+  aws iam add-role-to-instance-profile \
+    --instance-profile-name "$IAM_INSTANCE_PROFILE" \
+    --role-name "$IAM_ROLE_NAME" \
+    --region "$REGION"
+  
+  echo "✓ Instance profile created"
+  echo "⏳ Waiting 10 seconds for IAM propagation..."
+  sleep 10
+fi
+echo ""
+
+# Step 2: Create security group if it doesn't exist
+echo "Step 2: Setting up security group..."
+VPC_ID=$(aws ec2 describe-vpcs --region "$REGION" --filters "Name=isDefault,Values=true" --query "Vpcs[0].VpcId" --output text)
+
+if [ -z "$VPC_ID" ] || [ "$VPC_ID" == "None" ]; then
+  echo "ERROR: No default VPC found in region $REGION"
+  exit 1
+fi
+
+SG_ID=$(aws ec2 describe-security-groups \
+  --region "$REGION" \
+  --filters "Name=group-name,Values=$SECURITY_GROUP_NAME" "Name=vpc-id,Values=$VPC_ID" \
+  --query "SecurityGroups[0].GroupId" \
+  --output text 2>/dev/null || echo "")
+
+if [ -z "$SG_ID" ] || [ "$SG_ID" == "None" ]; then
+  echo "Creating security group: $SECURITY_GROUP_NAME"
+  SG_ID=$(aws ec2 create-security-group \
+    --group-name "$SECURITY_GROUP_NAME" \
+    --description "Security group for ADSB history processor (egress only)" \
+    --vpc-id "$VPC_ID" \
+    --region "$REGION" \
+    --query "GroupId" \
+    --output text)
+  
+  echo "✓ Security group created: $SG_ID"
+else
+  echo "✓ Security group already exists: $SG_ID"
+fi
+echo ""
+
+# Step 3: Auto-detect AMI
+echo "Step 3: Detecting AMI..."
+AMI_ID=$(aws ec2 describe-images \
+  --region "$REGION" \
+  --owners amazon \
+  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
+            "Name=state,Values=available" \
+  --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+  --output text)
+
+if [ -z "$AMI_ID" ] || [ "$AMI_ID" == "None" ]; then
+  echo "ERROR: Could not find Amazon Linux 2023 AMI in region $REGION"
+  exit 1
+fi
+echo "✓ Using AMI: $AMI_ID"
+echo ""
+
+# Step 4: Package code
+echo "Step 4: Packaging code..."
 cd "$PROJECT_ROOT"
 PACKAGE_DIR="/tmp/adsb-processor-$$"
 mkdir -p "$PACKAGE_DIR"
@@ -83,69 +219,119 @@ cd - > /dev/null
 # Upload to S3
 PACKAGE_KEY="ec2-processor/code-$(date +%s).tar.gz"
 echo "Uploading to S3..."
-aws s3 cp /tmp/adsb-code.tar.gz "s3://ayryx-adsb-history/$PACKAGE_KEY"
+aws s3 cp /tmp/adsb-code.tar.gz "s3://$S3_BUCKET/$PACKAGE_KEY" --region "$REGION"
 rm -rf "$PACKAGE_DIR" /tmp/adsb-code.tar.gz
+echo "✓ Code uploaded to s3://$S3_BUCKET/$PACKAGE_KEY"
+echo ""
 
-# Create simple user-data script
+# Step 5: Create user-data script
+echo "Step 5: Preparing user-data script..."
 cat > /tmp/user-data.sh <<EOF
 #!/bin/bash
-exec > >(tee -a /var/log/user-data.log)
+set -e
+exec > >(tee /var/log/user-data.log)
 exec 2>&1
 
-echo "Starting at \$(date)"
+echo "=========================================="
+echo "ADSB History Processing Starting"
+echo "Start time: \$(date)"
+echo "=========================================="
 
-# Install Node.js
-curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+# Install Node.js 20.x
+echo "Installing Node.js..."
+curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
 dnf install -y nodejs
 
-# Download and extract code
-cd /home/ec2-user
-aws s3 cp s3://ayryx-adsb-history/$PACKAGE_KEY code.tar.gz
-tar -xzf code.tar.gz
+# Verify installation
+node --version
+npm --version
 
-# Install dependencies
-cd adsb-history
-npm install --production
+# Download code from S3
+echo "Downloading code package from S3..."
+cd /opt
+aws s3 cp s3://$S3_BUCKET/$PACKAGE_KEY . --region $REGION
 
-# Set environment
-export AWS_REGION=us-west-1
-export S3_BUCKET_NAME=ayryx-adsb-history
-export TEMP_DIR=/tmp/adsb-processing
-mkdir -p \$TEMP_DIR
+echo "Extracting code..."
+tar xzf $(basename $PACKAGE_KEY)
+
+echo "Installing dependencies..."
+npm install
+
+# Create temp directory for processing (on EBS volume, not tmpfs)
+echo "Creating temp directory for processing..."
+mkdir -p /opt/adsb-processing
+chmod 755 /opt/adsb-processing
+
+# Set AWS region (credentials come from IAM role)
+export AWS_REGION=$REGION
+export AWS_DEFAULT_REGION=$REGION
+export S3_BUCKET_NAME=$S3_BUCKET
+export TEMP_DIR=/opt/adsb-processing
 
 # Run processing
-echo "Running: node scripts/processing/identify-ground-aircraft-multi.js --date $DATE $AIRPORTS_ARG"
-cd /home/ec2-user/adsb-history
+echo "=========================================="
+echo "Starting processing: $DATE"
+echo "=========================================="
+
 node scripts/processing/identify-ground-aircraft-multi.js --date "$DATE" $AIRPORTS_ARG
 
-# Shutdown
-echo "Completed at \$(date)"
-shutdown -h +2
+EXIT_CODE=\$?
+
+echo "=========================================="
+echo "Processing Complete"
+echo "Exit code: \$EXIT_CODE"
+echo "End time: \$(date)"
+echo "=========================================="
+
+# Self-terminate the instance
+if [ \$EXIT_CODE -eq 0 ]; then
+  echo "✓ Success! Self-terminating instance..."
+  INSTANCE_ID=\$(ec2-metadata --instance-id | cut -d " " -f 2)
+  aws ec2 terminate-instances --instance-ids "\$INSTANCE_ID" --region "\$AWS_REGION"
+else
+  echo "✗ Processing failed. Instance will remain running for debugging."
+  echo "Check logs at /var/log/user-data.log"
+fi
 EOF
 
-# Launch instance
-echo "Launching EC2 instance..."
+# Step 6: Launch instance
+echo "Step 6: Launching EC2 instance..."
 INSTANCE_ID=$(aws ec2 run-instances \
-    --region us-west-1 \
-    --image-id $(aws ec2 describe-images --region us-west-1 --owners amazon --filters "Name=name,Values=al2023-ami-*-x86_64" "Name=state,Values=available" --query 'sort_by(Images, &CreationDate)[-1].ImageId' --output text) \
+    --region "$REGION" \
+    --image-id "$AMI_ID" \
     --instance-type t3.xlarge \
-    --iam-instance-profile Name=adsb-history-processor-role \
-    --security-group-ids $(aws ec2 describe-security-groups --region us-west-1 --filters "Name=group-name,Values=adsb-history-processor-sg" --query 'SecurityGroups[0].GroupId' --output text) \
+    --iam-instance-profile "Name=$IAM_INSTANCE_PROFILE" \
+    --security-group-ids "$SG_ID" \
     --user-data file:///tmp/user-data.sh \
-    --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":50,"VolumeType":"gp3","DeleteOnTermination":true}}]' \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=adsb-processor-$DATE}]" \
+    --block-device-mappings "[{\"DeviceName\":\"/dev/xvda\",\"Ebs\":{\"VolumeSize\":50,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=adsb-processor-$DATE},{Key=Purpose,Value=data-processing},{Key=AutoTerminate,Value=true}]" \
     --query 'Instances[0].InstanceId' \
     --output text)
 
-rm -f /tmp/user-data.sh
+rm -f /tmp/user-data.sh /tmp/trust-policy.json /tmp/s3-policy.json
 
+echo "=========================================="
+echo "✓ Provisioning Complete!"
+echo "=========================================="
 echo ""
-echo "Instance launched: $INSTANCE_ID"
+echo "Instance ID: $INSTANCE_ID"
+echo "Region: $REGION"
+echo ""
+echo "The instance will:"
+echo "  1. Process date: $DATE"
+echo "  2. Upload results to S3 (s3://$S3_BUCKET/ground-aircraft/)"
+echo "  3. Self-terminate when complete"
+echo ""
+echo "Monitor progress:"
+echo "  aws ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query 'Reservations[0].Instances[0].State.Name'"
 echo ""
 echo "View logs in AWS Console:"
-echo "  https://console.aws.amazon.com/ec2/v2/home?region=us-west-1#Instances:instanceId=$INSTANCE_ID"
+echo "  https://console.aws.amazon.com/ec2/v2/home?region=$REGION#Instances:instanceId=$INSTANCE_ID"
 echo "  → Actions → Monitor and troubleshoot → Get system log"
 echo ""
 echo "Check results:"
-echo "  aws s3 ls s3://ayryx-adsb-history/ground-aircraft/ --recursive | grep $DATE"
+echo "  aws s3 ls s3://$S3_BUCKET/ground-aircraft/ --recursive | grep $DATE"
+echo ""
+echo "Estimated completion: 30-90 minutes (depends on number of airports)"
+echo "=========================================="
 
