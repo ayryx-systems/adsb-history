@@ -282,20 +282,38 @@ class TraceReader {
   }
 
   /**
-   * Clean up downloaded and extracted data for a date
+   * Clean up extracted data for a date (keeps tar file for reuse)
    */
   cleanup(date) {
     const dateTempDir = path.join(this.tempDir, date);
+    const extractDir = path.join(dateTempDir, 'extracted');
     
     try {
-      if (fs.existsSync(dateTempDir)) {
-        fs.rmSync(dateTempDir, { recursive: true, force: true });
-        logger.info('Cleaned up date temp directory', { date, path: dateTempDir });
+      // Only remove the extracted directory, keep the tar file
+      if (fs.existsSync(extractDir)) {
+        fs.rmSync(extractDir, { recursive: true, force: true });
+        logger.info('Cleaned up extracted directory', { date, path: extractDir });
+      }
+      
+      // Optionally remove the entire date directory if it's empty (tar already removed)
+      // But we keep it if tar file exists for reuse
+      const tarPath = path.join(dateTempDir, `${date}.tar`);
+      if (!fs.existsSync(tarPath) && fs.existsSync(dateTempDir)) {
+        // Only remove if tar doesn't exist and directory is empty
+        try {
+          const files = fs.readdirSync(dateTempDir);
+          if (files.length === 0) {
+            fs.rmdirSync(dateTempDir);
+            logger.info('Removed empty date directory', { date, path: dateTempDir });
+          }
+        } catch (err) {
+          // Directory not empty or other error, ignore
+        }
       }
     } catch (error) {
-      logger.error('Failed to cleanup date directory', {
+      logger.error('Failed to cleanup extracted directory', {
         date,
-        path: dateTempDir,
+        path: extractDir,
         error: error.message,
       });
     }
