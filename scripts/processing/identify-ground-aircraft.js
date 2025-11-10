@@ -15,9 +15,9 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import AirportGroundIdentifier from '../src/processing/AirportGroundIdentifier.js';
-import GroundAircraftData from '../src/processing/GroundAircraftData.js';
-import logger from '../src/utils/logger.js';
+import AirportGroundIdentifier from '../../src/processing/AirportGroundIdentifier.js';
+import GroundAircraftData from '../../src/processing/GroundAircraftData.js';
+import logger from '../../src/utils/logger.js';
 
 dotenv.config();
 
