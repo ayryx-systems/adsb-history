@@ -250,10 +250,9 @@ chmod 755 $TEMP_DIR
 echo ""
 echo "Starting processing (this will take 10-15 minutes)..."
 echo ""
-node scripts/process-airport-day.js \
+node scripts/identify-ground-aircraft.js \
   --airport $AIRPORT \
-  --date $DATE \
-  --show-arrivals
+  --date $DATE
 
 EXIT_CODE=$?
 
@@ -264,10 +263,7 @@ if [ $EXIT_CODE -eq 0 ]; then
     echo "=================================================="
     echo ""
     echo "Data saved to:"
-    echo "  s3://ayryx-adsb-history/processed/$AIRPORT/${DATE:0:4}/${DATE:5:2}/${DATE:8:2}.json"
-    echo ""
-    echo "Query arrivals locally:"
-    echo "  npm run get-arrivals -- --airport $AIRPORT --date $DATE"
+    echo "  s3://ayryx-adsb-history/ground-aircraft/$AIRPORT/${DATE:0:4}/${DATE:5:2}/${DATE:8:2}.json"
     echo ""
     
     # Shutdown instance

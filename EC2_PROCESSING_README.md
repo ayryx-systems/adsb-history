@@ -1,19 +1,17 @@
 # EC2 Processing for ADSB Historical Data
 
-Process ADSB historical data on EC2 to avoid local disk space requirements (~50GB needed).
-
-**Important:** Trace JSON files are gzipped despite having `.json` extensions. The system automatically decompresses them.
+Identify aircraft that were on the ground at an airport on a specific date.
 
 ## Why EC2?
 
 - **No local disk space needed** - Processing requires ~50GB (tar + extraction + temp files)
-- **Fast processing** - t3.xlarge (4 vCPU, 16GB RAM) processes in ~15 minutes
-- **Cost-effective** - Instance auto-terminates when done (~$0.20 per run)
+- **Fast processing** - t3.xlarge (4 vCPU, 16GB RAM) processes in ~10-15 minutes
+- **Cost-effective** - Instance auto-terminates when done (~$0.04-0.05 per run)
 - **Free S3 transfers** - EC2 to S3 in same region (us-west-1) are free
 
 ## Quick Start
 
-### Process KLGA for November 8, 2025
+### Identify ground aircraft at KLGA for November 8, 2025
 
 ```bash
 cd adsb-history
@@ -25,11 +23,11 @@ cd adsb-history
 1. Launches EC2 instance (t3.xlarge, 50GB, us-west-1)
 2. Downloads tar from S3 (~3 minutes)
 3. Extracts and processes traces (~10 minutes)
-4. Classifies flights (arrivals/departures/overflights)
-5. Saves results to S3
+4. Identifies aircraft on ground (within 1nm, altitude < 500ft)
+5. Saves list of ICAO codes to S3
 6. Auto-terminates when complete
 
-**Cost:** ~$0.20 per airport per day
+**Cost:** ~$0.04-0.05 per airport per day
 
 ### Monitor Progress
 
@@ -47,16 +45,6 @@ Shows:
 - Processing progress
 - When results are available in S3
 
-### Query Results (After Processing)
-
-Once processing completes, query instantly from local machine:
-
-```bash
-npm run get-arrivals -- --airport KLGA --date 2025-11-08
-```
-
-Results are cached locally for instant subsequent queries.
-
 ## How It Works
 
 ```
@@ -73,26 +61,28 @@ Results are cached locally for instant subsequent queries.
 │                                                              │
 │ 1. Download tar from S3 (~3GB)                              │
 │ 2. Extract traces (~20GB extracted)                         │
-│ 3. Process ~500k traces                                     │
-│ 4. Classify flights for airport                             │
-│ 5. Save results to S3 (~5MB)                                │
+│ 3. Process ~68k traces                                      │
+│ 4. Identify aircraft on ground                              │
+│ 5. Save ICAO list to S3 (~50KB)                             │
 │ 6. Self-terminate                                           │
 │                                                              │
-│ Duration: ~15 minutes                                       │
-│ Cost: ~$0.20                                                │
+│ Duration: ~10-15 minutes                                     │
+│ Cost: ~$0.04-0.05                                            │
 └────────────────┬────────────────────────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ S3: Processed Results                                       │
-│ s3://bucket/processed/KLGA/2025/11/08.json (~5MB)          │
-└────────────────┬────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Local Machine: Query Results (instant)                     │
-│ npm run get-arrivals -- --airport KLGA --date 2025-11-08   │
-└─────────────────────────────────────────────────────────────┘
+│ S3: Ground Aircraft List                                    │
+│ s3://bucket/ground-aircraft/KLGA/2025/11/08.json           │
+│                                                              │
+│ Format:                                                      │
+│ {                                                           │
+│   "airport": "KLGA",                                        │
+│   "date": "2025-11-08",                                     │
+│   "aircraftIds": ["a12345", "b67890", ...],                │
+│   "count": 323                                              │
+│ }                                                           │
+└────────────────────────────────────────────────────────────┘
 ```
 
 ## Options
@@ -124,7 +114,7 @@ Examples:
 - **EC2**: t3.xlarge @ $0.1664/hour × 0.25 hours = **$0.04**
 - **EBS**: 50GB gp3 @ $0.08/GB/month × 0.25 hours / 730 hours = **$0.001**
 - **S3 transfer**: Free (same region)
-- **S3 storage**: ~5MB @ $0.023/GB/month = **$0.0001/month**
+- **S3 storage**: ~50KB @ $0.023/GB/month = **negligible**
 
 **Total per run: ~$0.04-0.05**
 
@@ -159,7 +149,7 @@ The script automatically creates:
 ./scripts/monitor-ec2-processor.sh auto
 
 # Check S3 for results
-aws s3 ls s3://ayryx-adsb-history/processed/KLGA/2025/11/
+aws s3 ls s3://ayryx-adsb-history/ground-aircraft/KLGA/2025/11/
 
 # List all processor instances
 aws ec2 describe-instances \
@@ -203,63 +193,43 @@ done
 
 **Note:** Multiple instances can run in parallel (each processes different dates).
 
-## Compare with Local Processing
+## Local Processing
 
-| Aspect     | Local              | EC2                |
-| ---------- | ------------------ | ------------------ |
-| Disk Space | ~50GB required     | None               |
-| Time       | ~15 minutes        | ~15 minutes        |
-| Cost       | Free (electricity) | ~$0.04 per run     |
-| Automation | Manual             | Fully automated    |
-| Cleanup    | Manual             | Automatic          |
-| Best For   | One-off queries    | Regular processing |
-
-## Integration with Abstraction Layer
-
-After EC2 processing completes:
-
-1. **Results are in S3**: `s3://bucket/processed/AIRPORT/YYYY/MM/DD.json`
-2. **Query locally**: `npm run get-arrivals -- --airport KLGA --date 2025-11-08`
-3. **Results cached locally**: Future queries are instant (< 1 second)
-4. **No reprocessing needed**: Data persists in abstraction layer
-
-## Daily Automation
-
-To process data daily automatically:
+You can also process locally if you have ~50GB disk space:
 
 ```bash
-# Add to crontab
-0 6 * * * cd /path/to/adsb-history && ./scripts/provision-ec2-processor.sh --airport KLGA >> /var/log/adsb-processing.log 2>&1
+node scripts/identify-ground-aircraft.js --airport KLGA --date 2025-11-08
 ```
 
-Processes yesterday's data at 6 AM daily.
+The tar file is cached locally after first download, so subsequent runs are faster.
 
-## Next Steps
+## Output Format
 
-1. **Process a day of data**:
+Results are saved as JSON:
 
-   ```bash
-   ./scripts/provision-ec2-processor.sh --airport KLGA --date 2025-11-08
-   ```
+```json
+{
+  "airport": "KLGA",
+  "date": "2025-11-08",
+  "aircraftIds": [
+    "a12345",
+    "b67890",
+    ...
+  ],
+  "count": 323,
+  "generatedAt": "2025-11-10T12:38:48.000Z"
+}
+```
 
-2. **Monitor progress**:
+## Criteria
 
-   ```bash
-   ./scripts/monitor-ec2-processor.sh auto
-   ```
+An aircraft is identified as "on ground" if it meets **both** criteria:
 
-3. **Query results** (after ~15 minutes):
-
-   ```bash
-   npm run get-arrivals -- --airport KLGA --date 2025-11-08
-   ```
-
-4. **Process more airports/dates** as needed
+- Within **1 nautical mile** of airport coordinates
+- Altitude below **500 feet** or "ground"
 
 ## See Also
 
 - [GETTING_STARTED.md](./GETTING_STARTED.md) - Quick start guide
-- [PROCESSING_README.md](./PROCESSING_README.md) - Local processing details
 - [EC2_INGESTION_README.md](./EC2_INGESTION_README.md) - EC2 data download
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - System design
 - [README.md](./README.md) - Main overview
