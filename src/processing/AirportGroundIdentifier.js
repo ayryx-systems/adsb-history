@@ -101,6 +101,7 @@ class AirportGroundIdentifier {
    * Identify all aircraft that were on the ground at the airport on a specific date
    */
   async identifyGroundAircraft(date, airport) {
+    console.log(`[${new Date().toISOString()}] Starting identification for ${airport.icao} on ${date}`);
     logger.info('Identifying ground aircraft', { date, airport: airport.icao });
 
     const startTime = Date.now();
@@ -108,11 +109,15 @@ class AirportGroundIdentifier {
 
     try {
       // Step 1: Download and extract tar from S3
+      console.log(`[${new Date().toISOString()}] Step 1: Downloading tar from S3 for ${date}`);
       logger.info('Step 1: Downloading tar from S3', { date });
       const tarPath = await this.traceReader.downloadTarFromS3(date);
+      console.log(`[${new Date().toISOString()}] ✓ Tar downloaded: ${tarPath}`);
 
+      console.log(`[${new Date().toISOString()}] Step 2: Extracting tar`);
       logger.info('Step 2: Extracting tar', { date });
       const extractDir = await this.traceReader.extractTar(tarPath);
+      console.log(`[${new Date().toISOString()}] ✓ Tar extracted to: ${extractDir}`);
 
       // Step 3: Stream and check all traces
       logger.info('Step 3: Processing traces', { date, airport: airport.icao });
@@ -139,6 +144,11 @@ class AirportGroundIdentifier {
       }
 
       const duration = Date.now() - startTime;
+      console.log(`[${new Date().toISOString()}] Identification complete for ${airport.icao}`);
+      console.log(`  Traces processed: ${processedCount.toLocaleString()}`);
+      console.log(`  Ground aircraft found: ${aircraftIds.size}`);
+      console.log(`  Duration: ${(duration / 1000).toFixed(1)}s`);
+      
       logger.info('Identification complete', {
         date,
         airport: airport.icao,
@@ -148,11 +158,14 @@ class AirportGroundIdentifier {
       });
 
       // Clean up
+      console.log(`[${new Date().toISOString()}] Cleaning up extracted data`);
       logger.info('Cleaning up extracted data', { date });
       this.traceReader.cleanup(date);
 
       // Return as sorted array
-      return Array.from(aircraftIds).sort();
+      const result = Array.from(aircraftIds).sort();
+      console.log(`[${new Date().toISOString()}] Returning ${result.length} aircraft IDs`);
+      return result;
 
     } catch (error) {
       logger.error('Failed to identify ground aircraft', {

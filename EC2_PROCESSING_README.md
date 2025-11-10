@@ -60,6 +60,20 @@ Shows:
 - Processing progress
 - When results are available in S3
 
+### View Logs
+
+To see detailed logs from a running instance:
+
+```bash
+# View logs from specific instance
+./scripts/view-ec2-logs.sh i-1234567890abcdef
+
+# Or auto-detect latest
+./scripts/view-ec2-logs.sh auto
+```
+
+Logs are also available at `/var/log/user-data.log` on the instance if you have SSH access.
+
 ## How It Works
 
 ```

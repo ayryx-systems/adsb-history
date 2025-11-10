@@ -230,67 +230,124 @@ cat > $PACKAGE_DIR/run-processing.sh <<'EOFSCRIPT'
 #!/bin/bash
 set -e
 
+# Log function with timestamp
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
 DATE="$1"
 shift
 AIRPORTS_ARGS="$@"
 
-echo "=================================================="
-echo "ADSB Historical Data Processing"
-echo "Date: $DATE"
-echo "Airports: $AIRPORTS_ARGS"
-echo "=================================================="
-echo ""
+log "=================================================="
+log "ADSB Historical Data Processing"
+log "Date: $DATE"
+log "Airports args: $AIRPORTS_ARGS"
+log "=================================================="
+log ""
 
-# Install Node.js 18
-echo "Installing Node.js 18..."
-curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-dnf install -y nodejs
+log "Step 1: Installing Node.js 18..."
+if ! curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -; then
+    log "ERROR: Failed to setup Node.js repository"
+    exit 1
+fi
 
-# Install dependencies
-echo "Installing dependencies..."
+if ! dnf install -y nodejs; then
+    log "ERROR: Failed to install Node.js"
+    exit 1
+fi
+
+NODE_VERSION=$(node --version)
+NPM_VERSION=$(npm --version)
+log "✓ Node.js installed: $NODE_VERSION"
+log "✓ npm installed: $NPM_VERSION"
+log ""
+
+log "Step 2: Installing dependencies..."
 cd /home/ec2-user/adsb-history
-npm install --production
+if ! npm install --production 2>&1 | tee /tmp/npm-install.log; then
+    log "ERROR: Failed to install npm dependencies"
+    log "npm install output:"
+    cat /tmp/npm-install.log
+    exit 1
+fi
+log "✓ Dependencies installed"
+log ""
 
-# Set AWS region (credentials come from IAM role)
+log "Step 3: Setting up environment..."
 export AWS_REGION=us-west-1
 export S3_BUCKET_NAME=ayryx-adsb-history
-
-# Set temp directory to an absolute path that we know is writable
 export TEMP_DIR=/tmp/adsb-processing
+
+log "AWS_REGION: $AWS_REGION"
+log "S3_BUCKET_NAME: $S3_BUCKET_NAME"
+log "TEMP_DIR: $TEMP_DIR"
+
 mkdir -p $TEMP_DIR
 chmod 755 $TEMP_DIR
+log "✓ Temp directory created: $TEMP_DIR"
+log ""
 
-# Run processing
-echo ""
-echo "Starting processing (this will take 10-15 minutes)..."
-echo ""
-node scripts/identify-ground-aircraft-multi.js \
-  --date $DATE \
-  $AIRPORTS_ARG
+log "Step 4: Verifying AWS credentials..."
+if ! aws sts get-caller-identity; then
+    log "ERROR: Failed to get AWS identity - check IAM role"
+    exit 1
+fi
+log "✓ AWS credentials verified"
+log ""
 
-EXIT_CODE=$?
+log "Step 5: Running ground aircraft identification..."
+log "Command: node scripts/identify-ground-aircraft-multi.js --date $DATE $AIRPORTS_ARGS"
+log "Current directory: \$(pwd)"
+log "Node version: \$(node --version)"
+log "Files in scripts/: \$(ls -la scripts/ | head -10)"
+log ""
 
-if [ $EXIT_CODE -eq 0 ]; then
-    echo ""
-    echo "=================================================="
-    echo "✓ Processing completed successfully!"
-    echo "=================================================="
-    echo ""
-    echo "Data saved to:"
-    echo "  s3://ayryx-adsb-history/ground-aircraft/*/${DATE:0:4}/${DATE:5:2}/${DATE:8:2}.json"
-    echo ""
+# Run processing with output to both console and log file
+log "Starting Node.js script..."
+if node scripts/identify-ground-aircraft-multi.js \
+  --date "$DATE" \
+  $AIRPORTS_ARGS 2>&1 | tee /tmp/processing.log; then
     
-    # Shutdown instance
-    echo "Shutting down instance..."
-    shutdown -h now
+    EXIT_CODE=0
+    log ""
+    log "=================================================="
+    log "✓ Processing completed successfully!"
+    log "=================================================="
+    log ""
+    log "Data saved to:"
+    log "  s3://ayryx-adsb-history/ground-aircraft/*/${DATE:0:4}/${DATE:5:2}/${DATE:8:2}.json"
+    log ""
+    
+    # Verify files were created
+    log "Verifying S3 uploads..."
+    YEAR=$(echo $DATE | cut -d- -f1)
+    MONTH=$(echo $DATE | cut -d- -f2)
+    DAY=$(echo $DATE | cut -d- -f3)
+    
+    if aws s3 ls "s3://$S3_BUCKET_NAME/ground-aircraft/" --recursive | grep "$YEAR/$MONTH/$DAY.json"; then
+        log "✓ Verified: Ground aircraft files exist in S3"
+    else
+        log "WARNING: Could not verify S3 files (may still be uploading)"
+    fi
+    log ""
+    
 else
-    echo ""
-    echo "=================================================="
-    echo "✗ Processing failed with exit code $EXIT_CODE"
-    echo "=================================================="
-    echo "Instance will remain running for debugging"
+    EXIT_CODE=$?
+    log ""
+    log "=================================================="
+    log "✗ Processing failed with exit code $EXIT_CODE"
+    log "=================================================="
+    log ""
+    log "Processing output:"
+    cat /tmp/processing.log
+    log ""
+    log "Instance will remain running for debugging"
+    log "Check logs at: /var/log/user-data.log"
     exit $EXIT_CODE
 fi
+
+exit $EXIT_CODE
 EOFSCRIPT
 
 chmod +x $PACKAGE_DIR/run-processing.sh
@@ -312,23 +369,60 @@ cat > /tmp/user-data.sh <<EOF
 #!/bin/bash
 set -e
 
-# Log everything
-exec > >(tee /var/log/user-data.log)
+# Log everything to both console and file
+LOG_FILE="/var/log/user-data.log"
+exec > >(tee -a "$LOG_FILE")
 exec 2>&1
 
+echo "=========================================="
 echo "Starting ADSB processor setup..."
+echo "Timestamp: \$(date)"
+echo "=========================================="
+echo ""
 
-# Download code
+# Function to log with timestamp
+log() {
+    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$*"
+}
+
+log "Step 1: Downloading code package from S3..."
 cd /home/ec2-user
-aws s3 cp s3://ayryx-adsb-history/$PACKAGE_KEY code.tar.gz
+if ! aws s3 cp s3://ayryx-adsb-history/$PACKAGE_KEY code.tar.gz; then
+    log "ERROR: Failed to download code package from S3"
+    exit 1
+fi
+log "✓ Code package downloaded"
+
+log "Step 2: Extracting code package..."
 mkdir -p adsb-history
 cd adsb-history
-tar -xzf ../code.tar.gz
+if ! tar -xzf ../code.tar.gz; then
+    log "ERROR: Failed to extract code package"
+    exit 1
+fi
+log "✓ Code package extracted"
 
-# Run processing
-bash run-processing.sh $DATE $AIRPORTS_ARG
+log "Step 3: Running processing script..."
+log "Date: $DATE"
+log "Airports args: $AIRPORTS_ARG"
+log "Working directory: \$(pwd)"
+log "Files in directory: \$(ls -la)"
+echo ""
 
-# If we get here, processing succeeded and instance will shutdown
+# Run processing with detailed logging
+log "Executing: bash run-processing.sh $DATE $AIRPORTS_ARG"
+if bash run-processing.sh $DATE $AIRPORTS_ARG; then
+    log "✓ Processing completed successfully"
+    echo ""
+    log "Shutting down instance..."
+    shutdown -h now
+else
+    EXIT_CODE=\$?
+    log "ERROR: Processing failed with exit code \$EXIT_CODE"
+    log "Instance will remain running for debugging"
+    log "Check logs at: \$LOG_FILE"
+    exit \$EXIT_CODE
+fi
 EOF
 
 # Launch instance
@@ -359,7 +453,7 @@ echo -e "${GREEN}║                   Processing Started!                      
 echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo "Instance ID: $INSTANCE_ID"
-echo "Airport:     $AIRPORT"
+echo "Airports:    $AIRPORTS_DISPLAY"
 echo "Date:        $DATE"
 echo ""
 echo "The instance will:"

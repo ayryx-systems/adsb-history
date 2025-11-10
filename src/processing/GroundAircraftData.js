@@ -47,6 +47,10 @@ class GroundAircraftData {
     const s3Key = this.getS3Key(airport, date);
     const cachePath = this.getCachePath(airport, date);
 
+    console.log(`[${new Date().toISOString()}] Saving ground aircraft data for ${airport} on ${date}`);
+    console.log(`  S3 Key: ${s3Key}`);
+    console.log(`  Aircraft count: ${aircraftIds.length}`);
+
     const data = {
       airport,
       date,
@@ -59,6 +63,7 @@ class GroundAircraftData {
 
     try {
       // Save to S3
+      console.log(`[${new Date().toISOString()}] Uploading to S3: ${s3Key}`);
       const command = new PutObjectCommand({
         Bucket: this.bucketName,
         Key: s3Key,
@@ -67,6 +72,7 @@ class GroundAircraftData {
       });
 
       await this.s3Client.send(command);
+      console.log(`[${new Date().toISOString()}] ✓ Successfully uploaded to S3: ${s3Key}`);
       logger.info('Saved to S3', { s3Key, count: aircraftIds.length });
 
       // Save to cache

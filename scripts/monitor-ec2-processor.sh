@@ -77,27 +77,26 @@ while true; do
     echo "Launched:   $LAUNCH_TIME"
     echo ""
     
-    # Get S3 processed files count
-    if [[ $NAME =~ adsb-processor-([A-Z]+)-([0-9-]+) ]]; then
-        AIRPORT="${BASH_REMATCH[1]}"
-        DATE="${BASH_REMATCH[2]}"
-        echo "Airport:    $AIRPORT"
+    # Check for ground-aircraft files (multi-airport format)
+    if [[ $NAME =~ adsb-processor-multi-([0-9-]+) ]]; then
+        DATE="${BASH_REMATCH[1]}"
         echo "Date:       $DATE"
         echo ""
         
-        # Check if processed file exists
+        # Check for ground-aircraft files
         YEAR=$(echo $DATE | cut -d- -f1)
         MONTH=$(echo $DATE | cut -d- -f2)
         DAY=$(echo $DATE | cut -d- -f3)
-        S3_KEY="processed/$AIRPORT/$YEAR/$MONTH/$DAY.json"
         
-        if aws s3 ls "s3://ayryx-adsb-history/$S3_KEY" &>/dev/null; then
-            echo "✓ Processed data found in S3!"
-            echo "  s3://ayryx-adsb-history/$S3_KEY"
+        FILES=$(aws s3 ls "s3://ayryx-adsb-history/ground-aircraft/" --recursive 2>/dev/null | grep "$YEAR/$MONTH/$DAY.json" | wc -l)
+        
+        if [ "$FILES" -gt 0 ]; then
+            echo "✓ Found $FILES ground-aircraft file(s) in S3:"
+            aws s3 ls "s3://ayryx-adsb-history/ground-aircraft/" --recursive 2>/dev/null | grep "$YEAR/$MONTH/$DAY.json" | awk '{print "  " $4}'
             echo ""
         else
             echo "⏳ Processing in progress..."
-            echo "  Target: s3://ayryx-adsb-history/$S3_KEY"
+            echo "  Target: s3://ayryx-adsb-history/ground-aircraft/*/$YEAR/$MONTH/$DAY.json"
             echo ""
         fi
     fi
@@ -108,9 +107,12 @@ while true; do
         echo ""
         echo "✓ Instance terminated (processing complete)"
         echo ""
-        if [ ! -z "$AIRPORT" ] && [ ! -z "$DATE" ]; then
-            echo "Query arrivals:"
-            echo "  npm run get-arrivals -- --airport $AIRPORT --date $DATE"
+        if [ ! -z "$DATE" ]; then
+            echo "View logs:"
+            echo "  ./scripts/view-ec2-logs.sh $INSTANCE_ID"
+            echo ""
+            echo "Check S3 files:"
+            echo "  aws s3 ls s3://ayryx-adsb-history/ground-aircraft/ --recursive | grep $DATE"
         fi
         exit 0
     elif [ "$STATE" == "stopped" ]; then

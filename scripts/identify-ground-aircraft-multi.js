@@ -102,26 +102,42 @@ async function processAirport(airport, date, force) {
   const dataStore = new GroundAircraftData();
 
   try {
+    logger.info('Starting airport processing', { 
+      airport: airport.icao, 
+      date,
+      name: airport.name 
+    });
+    
     // Check if already processed
     if (!force) {
+      logger.info('Checking if already processed', { airport: airport.icao, date });
       const exists = await dataStore.exists(airport.icao, date);
       if (exists) {
         const aircraftIds = await dataStore.load(airport.icao, date);
-        logger.info('Already processed', {
+        logger.info('Already processed - skipping', {
           airport: airport.icao,
           date,
           count: aircraftIds.length,
         });
         return { airport: airport.icao, count: aircraftIds.length, skipped: true };
       }
+      logger.info('Not yet processed - will process', { airport: airport.icao, date });
     }
 
-    logger.info('Processing airport', { airport: airport.icao, date });
+    logger.info('Identifying ground aircraft', { airport: airport.icao, date });
     const aircraftIds = await identifier.identifyGroundAircraft(date, airport);
     
+    logger.info('Saving results to S3', { 
+      airport: airport.icao, 
+      date,
+      count: aircraftIds.length 
+    });
     await dataStore.save(airport.icao, date, aircraftIds);
     
-    logger.info('Completed', { airport: airport.icao, count: aircraftIds.length });
+    logger.info('Airport processing completed successfully', { 
+      airport: airport.icao, 
+      count: aircraftIds.length 
+    });
     return { airport: airport.icao, count: aircraftIds.length, skipped: false };
 
   } catch (error) {
@@ -129,19 +145,30 @@ async function processAirport(airport, date, force) {
       airport: airport.icao,
       date,
       error: error.message,
+      stack: error.stack,
     });
     return { airport: airport.icao, error: error.message };
   }
 }
 
 async function main() {
+  console.log('Starting identify-ground-aircraft-multi.js');
+  console.log('Arguments:', process.argv.slice(2));
+  
   const options = parseArgs();
+  console.log('Parsed options:', options);
+  
+  logger.info('Starting multi-airport processing', options);
+  
   const allAirports = loadAirportConfig();
+  console.log(`Loaded ${allAirports.length} airports from config`);
+  logger.info('Loaded airport config', { totalAirports: allAirports.length });
 
   // Determine which airports to process
   let airportsToProcess = [];
   if (options.all) {
     airportsToProcess = allAirports.filter(a => a.enabled);
+    console.log(`Processing all enabled airports: ${airportsToProcess.map(a => a.icao).join(', ')}`);
   } else if (options.airports) {
     airportsToProcess = allAirports.filter(a => 
       options.airports.includes(a.icao) && a.enabled
@@ -151,12 +178,19 @@ async function main() {
     const validIcaos = airportsToProcess.map(a => a.icao);
     const invalid = options.airports.filter(icao => !validIcaos.includes(icao));
     if (invalid.length > 0) {
+      console.warn(`WARNING: Invalid or disabled airports: ${invalid.join(', ')}`);
       logger.warn('Invalid or disabled airports', { invalid });
     }
+    console.log(`Processing specified airports: ${airportsToProcess.map(a => a.icao).join(', ')}`);
+  } else {
+    console.error('ERROR: No airports specified. Use --all or --airports');
+    logger.error('No airports specified');
+    process.exit(1);
   }
 
   if (airportsToProcess.length === 0) {
-    console.error('No airports to process');
+    console.error('ERROR: No airports to process');
+    logger.error('No airports to process');
     process.exit(1);
   }
 
@@ -164,6 +198,12 @@ async function main() {
   console.log(`Processing ${airportsToProcess.length} airport(s) for ${options.date}`);
   console.log(`Airports: ${airportsToProcess.map(a => a.icao).join(', ')}`);
   console.log('='.repeat(60) + '\n');
+  
+  logger.info('Starting processing', {
+    date: options.date,
+    airportCount: airportsToProcess.length,
+    airports: airportsToProcess.map(a => a.icao),
+  });
 
   const startTime = Date.now();
   const results = [];
