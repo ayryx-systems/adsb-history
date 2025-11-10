@@ -146,5 +146,9 @@ class S3Manager {
   }
 }
 
-export default S3Manager;
+// Export singleton instance for convenience
+const s3Manager = new S3Manager();
+
+export default s3Manager;
+export { S3Manager };
 

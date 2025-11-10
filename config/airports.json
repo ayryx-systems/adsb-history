@@ -123,6 +123,38 @@
         }
       ],
       "notes": "Disabled by default - enable when ready to process"
+    },
+    {
+      "icao": "KLGA",
+      "name": "LaGuardia Airport",
+      "enabled": true,
+      "coordinates": {
+        "lat": 40.7769,
+        "lon": -73.8740
+      },
+      "elevation_ft": 22,
+      "analysis_radius_nm": 150,
+      "timezone": "America/New_York",
+      "runways": [
+        {
+          "name": "04",
+          "heading": 40,
+          "threshold": {
+            "lat": 40.7769,
+            "lon": -73.8740
+          },
+          "length_ft": 7003
+        },
+        {
+          "name": "13",
+          "heading": 130,
+          "threshold": {
+            "lat": 40.7753,
+            "lon": -73.8694
+          },
+          "length_ft": 7001
+        }
+      ]
     }
   ],
   

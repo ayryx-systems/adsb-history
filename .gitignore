@@ -20,6 +20,7 @@ yarn-error.log*
 # Temporary files
 tmp/
 temp/
+.temp-package/
 *.tmp
 
 # Downloaded data (don't commit large files)
