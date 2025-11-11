@@ -109,10 +109,14 @@ function parsePosition(posArray, baseTimestamp = null) {
 class FlightClassifier {
   constructor(config = {}) {
     // Configuration thresholds (can be adjusted based on analysis)
-    this.arrivalAltitudeThreshold = config.arrivalAltitudeThreshold || 5000; // feet
-    this.departureAltitudeThreshold = config.departureAltitudeThreshold || 5000; // feet
+    this.arrivalAltitudeThreshold = config.arrivalAltitudeThreshold || 5000; // feet MSL
     this.airportProximityRadius = config.airportProximityRadius || 10; // nautical miles
     this.minPositionReports = config.minPositionReports || 5; // minimum positions to classify
+    
+    // Departure detection thresholds
+    this.departureCloseRadius = config.departureCloseRadius || 2.0; // nautical miles - must be within this distance
+    this.departureFarRadius = config.departureFarRadius || 5.0; // nautical miles - must be beyond this distance
+    this.departureMinAltitudeAGL = config.departureMinAltitudeAGL || 2000; // feet AGL - minimum altitude when far away
   }
 
   /**
@@ -129,6 +133,7 @@ class FlightClassifier {
 
     const airportLat = airport.coordinates.lat;
     const airportLon = airport.coordinates.lon;
+    const airportElevation = airport.elevation_ft || 0; // Airport elevation in feet AMSL
 
     // Calculate base timestamp (start of day) if date is provided
     let baseTimestamp = null;
@@ -137,9 +142,16 @@ class FlightClassifier {
       baseTimestamp = Math.floor(dateObj.getTime() / 1000);
     }
 
-    // Parse all valid positions
+    // Parse all valid positions and convert AMSL to AGL
     const positions = trace
-      .map(pos => parsePosition(pos, baseTimestamp))
+      .map(pos => {
+        const parsed = parsePosition(pos, baseTimestamp);
+        if (parsed && parsed.alt_baro !== null) {
+          // Convert AMSL to AGL by subtracting airport elevation
+          parsed.alt_agl = parsed.alt_baro - airportElevation;
+        }
+        return parsed;
+      })
       .filter(pos => pos && pos.lat !== null && pos.lon !== null && pos.alt_baro !== null);
 
     if (positions.length < this.minPositionReports) {
@@ -185,29 +197,61 @@ class FlightClassifier {
     );
 
     // Classify based on altitude profile
+    // Use AGL (Above Ground Level) for ground detection and pattern analysis
+    // Use AMSL (Above Mean Sea Level) for absolute altitude thresholds
     const avgAltitudeBefore = beforeAirport.length > 0
       ? beforeAirport.reduce((sum, pos) => sum + pos.alt_baro, 0) / beforeAirport.length
       : null;
     const avgAltitudeAfter = afterAirport.length > 0
       ? afterAirport.reduce((sum, pos) => sum + pos.alt_baro, 0) / afterAirport.length
       : null;
-    const minAltitudeNearby = Math.min(...nearbyPositions.map(pos => pos.alt_baro));
+    const minAltitudeNearbyAGL = Math.min(...nearbyPositions.map(pos => pos.alt_agl));
+    const minAltitudeNearbyMSL = Math.min(...nearbyPositions.map(pos => pos.alt_baro));
+    const firstAltitudeNearbyAGL = nearbyPositions[0].alt_agl;
+    const lastAltitudeNearbyAGL = nearbyPositions[nearbyPositions.length - 1].alt_agl;
+    const firstAltitudeNearbyMSL = nearbyPositions[0].alt_baro;
+    const lastAltitudeNearbyMSL = nearbyPositions[nearbyPositions.length - 1].alt_baro;
+
+    // Calculate altitude trend within nearby positions (climbing or descending) - use AGL
+    const altitudeTrendAGL = lastAltitudeNearbyAGL - firstAltitudeNearbyAGL;
+    
+    // Get max altitude in the entire trace (for departure detection) - use AGL
+    const maxAltitudeOverallAGL = Math.max(...positions.map(pos => pos.alt_agl));
+    
+    // Check if aircraft was on ground (very low altitude) near airport - use AGL
+    const wasOnGroundNearby = minAltitudeNearbyAGL < 500; // Within 500ft AGL of ground
 
     // Arrival detection: high altitude before, low altitude near airport
+    // Use MSL for absolute altitude thresholds
     const isArrival = (
       avgAltitudeBefore !== null &&
       avgAltitudeBefore > this.arrivalAltitudeThreshold &&
-      minAltitudeNearby < this.arrivalAltitudeThreshold &&
+      minAltitudeNearbyMSL < this.arrivalAltitudeThreshold &&
       closestApproach.distance < 5 // Very close to airport
     );
 
-    // Departure detection: low altitude near airport, high altitude after
-    const isDeparture = (
-      avgAltitudeAfter !== null &&
-      avgAltitudeAfter > this.departureAltitudeThreshold &&
-      minAltitudeNearby < this.departureAltitudeThreshold &&
-      closestApproach.distance < 5 // Very close to airport
+    // Departure detection: simple and clear logic
+    // Aircraft was within close radius of airport, then later has altitude > threshold AGL and is beyond far radius
+    // Find positions within close radius of airport
+    const positionsWithinClose = positionsWithDistance.filter(pos => pos.distance <= this.departureCloseRadius);
+    
+    // Find positions beyond far radius with altitude > threshold AGL
+    const positionsBeyondFarHigh = positionsWithDistance.filter(
+      pos => pos.distance > this.departureFarRadius && pos.alt_agl > this.departureMinAltitudeAGL
     );
+    
+    // Check if aircraft was close to airport, then later far away and high
+    const wasCloseToAirport = positionsWithinClose.length > 0;
+    const laterFarAndHigh = positionsBeyondFarHigh.length > 0;
+    
+    // If we have both, check that the "far and high" positions come after the "close" positions
+    let isDeparture = false;
+    if (wasCloseToAirport && laterFarAndHigh) {
+      const lastCloseTime = Math.max(...positionsWithinClose.map(pos => pos.timestamp));
+      const firstFarHighTime = Math.min(...positionsBeyondFarHigh.map(pos => pos.timestamp));
+      // Far and high must come after being close
+      isDeparture = firstFarHighTime > lastCloseTime && !isArrival;
+    }
 
     // Determine classification
     let classification = 'overflight';
@@ -230,7 +274,18 @@ class FlightClassifier {
         lon: closestApproach.lon,
       },
       altitudeProfile: {
-        minNearby: minAltitudeNearby,
+        minNearbyMSL: minAltitudeNearbyMSL,
+        minNearbyAGL: minAltitudeNearbyAGL,
+        maxNearbyMSL: Math.max(...nearbyPositions.map(pos => pos.alt_baro)),
+        maxNearbyAGL: Math.max(...nearbyPositions.map(pos => pos.alt_agl)),
+        firstNearbyMSL: firstAltitudeNearbyMSL,
+        firstNearbyAGL: firstAltitudeNearbyAGL,
+        lastNearbyMSL: lastAltitudeNearbyMSL,
+        lastNearbyAGL: lastAltitudeNearbyAGL,
+        altitudeTrendAGL: altitudeTrendAGL,
+        maxOverallAGL: maxAltitudeOverallAGL,
+        wasOnGroundNearby: wasOnGroundNearby,
+        airportElevation: airportElevation,
         avgBefore: avgAltitudeBefore,
         avgAfter: avgAltitudeAfter,
       },

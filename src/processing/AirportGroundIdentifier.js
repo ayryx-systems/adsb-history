@@ -6,13 +6,16 @@ import logger from '../utils/logger.js';
  * 
  * Criteria:
  * - Within 1nm of airport coordinates
- * - Altitude below 500ft or "ground"
+ * - Altitude below 500ft AGL (Above Ground Level) or "ground"
+ * 
+ * Note: ADSB provides altitudes in AMSL (Above Mean Sea Level), so we convert
+ * to AGL by subtracting the airport elevation.
  */
 class AirportGroundIdentifier {
   constructor(config = {}) {
     this.traceReader = new TraceReader(config);
     this.proximityRadius = config.proximityRadius || 1.0; // nautical miles
-    this.maxAltitude = config.maxAltitude || 500; // feet
+    this.maxAltitudeAGL = config.maxAltitudeAGL || 500; // feet AGL
   }
 
   /**
@@ -68,6 +71,7 @@ class AirportGroundIdentifier {
 
     const airportLat = airport.coordinates.lat;
     const airportLon = airport.coordinates.lon;
+    const airportElevation = airport.elevation_ft || 0; // Airport elevation in feet AMSL
 
     // Calculate base timestamp
     let baseTimestamp = null;
@@ -76,9 +80,16 @@ class AirportGroundIdentifier {
       baseTimestamp = Math.floor(dateObj.getTime() / 1000);
     }
 
-    // Parse positions
+    // Parse positions and convert AMSL to AGL
     const positions = trace
-      .map(pos => this.parsePosition(pos, baseTimestamp))
+      .map(pos => {
+        const parsed = this.parsePosition(pos, baseTimestamp);
+        if (parsed && parsed.alt_baro !== null) {
+          // Convert AMSL to AGL by subtracting airport elevation
+          parsed.alt_agl = parsed.alt_baro - airportElevation;
+        }
+        return parsed;
+      })
       .filter(pos => pos && pos.lat !== null && pos.lon !== null && pos.alt_baro !== null);
 
     if (positions.length === 0) {
@@ -86,10 +97,12 @@ class AirportGroundIdentifier {
     }
 
     // Check if any position is on ground at airport
+    // Use AGL (Above Ground Level) for ground detection
     for (const pos of positions) {
       const distance = this.calculateDistance(pos.lat, pos.lon, airportLat, airportLon);
       
-      if (distance <= this.proximityRadius && pos.alt_baro <= this.maxAltitude) {
+      // Check if within proximity and below max altitude AGL
+      if (distance <= this.proximityRadius && pos.alt_agl <= this.maxAltitudeAGL) {
         return true;
       }
     }
