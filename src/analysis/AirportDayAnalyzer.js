@@ -33,13 +33,13 @@ class AirportDayAnalyzer {
       return {
         airport,
         date,
+        airportElevation: airportConfig.elevation_ft || 0,
         flights: [],
         summary: {
           totalAircraft: 0,
           arrivals: 0,
           departures: 0,
-          touchAndGo: 0,
-          overflights: 0,
+          missedApproaches: 0,
           other: 0,
         },
       };
@@ -125,6 +125,7 @@ class AirportDayAnalyzer {
     return {
       airport,
       date,
+      airportElevation: airportConfig.elevation_ft || 0,
       flights,
       summary,
     };
@@ -132,14 +133,14 @@ class AirportDayAnalyzer {
 
   /**
    * Create summary statistics from analyzed flights
+   * Excludes overflights and touch-and-go as they are not interesting
    */
   createSummary(flights) {
     const summary = {
-      totalAircraft: flights.length,
+      totalAircraft: 0,
       arrivals: 0,
       departures: 0,
-      touchAndGo: 0,
-      overflights: 0,
+      missedApproaches: 0,
       other: 0,
     };
 
@@ -147,18 +148,23 @@ class AirportDayAnalyzer {
       switch (flight.classification) {
         case 'arrival':
           summary.arrivals++;
+          summary.totalAircraft++;
           break;
         case 'departure':
           summary.departures++;
+          summary.totalAircraft++;
+          break;
+        case 'missed_approach':
+          summary.missedApproaches++;
+          summary.totalAircraft++;
           break;
         case 'touch_and_go':
-          summary.touchAndGo++;
-          break;
         case 'overflight':
-          summary.overflights++;
+          // Exclude these from summary
           break;
         default:
           summary.other++;
+          summary.totalAircraft++;
       }
     }
 

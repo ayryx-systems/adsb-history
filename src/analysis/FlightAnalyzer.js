@@ -55,6 +55,9 @@ class FlightAnalyzer {
     this.airportProximityRadius = config.airportProximityRadius || 5; // nm
     this.groundAltitudeThreshold = config.groundAltitudeThreshold || 500; // feet
     this.touchdownProximity = config.touchdownProximity || 1; // nm
+    this.missedApproachBoundary = config.missedApproachBoundary || 2; // nm
+    this.missedApproachMaxAGL = config.missedApproachMaxAGL || 1000; // feet AGL
+    this.missedApproachMaxTime = config.missedApproachMaxTime || 2 * 60; // 2 minutes in seconds
   }
 
   /**
@@ -107,8 +110,19 @@ class FlightAnalyzer {
       return null;
     }
 
+    // Check for missed approach before classifying
+    const airportElevation = airport.elevation_ft || 0;
+    const missedApproach = this.detectMissedApproach(
+      positionsWithDistance,
+      airportElevation
+    );
+
     // Classify as arrival or departure
-    const classification = this.classifyFlight(positionsWithDistance, closestApproach);
+    const classification = this.classifyFlight(
+      positionsWithDistance,
+      closestApproach,
+      missedApproach
+    );
 
     if (!classification) {
       return null;
@@ -116,17 +130,42 @@ class FlightAnalyzer {
 
     // Analyze based on classification
     if (classification === 'arrival') {
-      return this.analyzeArrival(icao, positionsWithDistance, airport, closestApproach);
+      return this.analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation);
     } else if (classification === 'departure') {
-      return this.analyzeDeparture(icao, positionsWithDistance, airport, closestApproach);
+      return this.analyzeDeparture(icao, positionsWithDistance, airport, closestApproach, airportElevation);
+    } else if (classification === 'missed_approach') {
+      // Missed approach - return detailed info
+      return {
+        icao,
+        classification: 'missed_approach',
+        closestApproach: {
+          distance: closestApproach.distance,
+          altitude: closestApproach.alt_baro,
+          altitudeAGL: closestApproach.alt_baro - airportElevation,
+          timestamp: closestApproach.timestamp,
+          lat: closestApproach.lat,
+          lon: closestApproach.lon,
+        },
+        missedApproach: {
+          entryTime: missedApproach.entryTime,
+          exitTime: missedApproach.exitTime,
+          duration: missedApproach.exitTime - missedApproach.entryTime,
+          entryAltitudeAGL: missedApproach.entryAltitudeAGL,
+        },
+        timeRange: {
+          first: positionsWithDistance[0].timestamp,
+          last: positionsWithDistance[positionsWithDistance.length - 1].timestamp,
+        },
+      };
     } else {
-      // Overflight or other - return basic info
+      // Overflight or other - return basic info (but filter these out as not interesting)
       return {
         icao,
         classification,
         closestApproach: {
           distance: closestApproach.distance,
           altitude: closestApproach.alt_baro,
+          altitudeAGL: closestApproach.alt_baro - airportElevation,
           timestamp: closestApproach.timestamp,
           lat: closestApproach.lat,
           lon: closestApproach.lon,
@@ -140,9 +179,67 @@ class FlightAnalyzer {
   }
 
   /**
-   * Classify flight as arrival, departure, or other
+   * Detect missed approach: enters 2nm boundary below 1000ft AGL, leaves within 2 minutes
    */
-  classifyFlight(positionsWithDistance, closestApproach) {
+  detectMissedApproach(positionsWithDistance, airportElevation) {
+    const boundary = this.missedApproachBoundary;
+    
+    // Find entry and exit points for the boundary
+    let entryPos = null;
+    let entryIndex = -1;
+    
+    // Find first entry into boundary below 1000ft AGL
+    for (let i = 0; i < positionsWithDistance.length; i++) {
+      const pos = positionsWithDistance[i];
+      const agl = pos.alt_baro - airportElevation;
+      
+      // Check if entering boundary (was outside, now inside) and below max AGL
+      const wasOutside = i === 0 || positionsWithDistance[i - 1].distance > boundary;
+      if (wasOutside && pos.distance <= boundary && agl < this.missedApproachMaxAGL) {
+        entryPos = { ...pos, agl };
+        entryIndex = i;
+        break;
+      }
+    }
+    
+    if (!entryPos) {
+      return null;
+    }
+    
+    // Find first exit from boundary after entry
+    let exitPos = null;
+    for (let i = entryIndex + 1; i < positionsWithDistance.length; i++) {
+      const pos = positionsWithDistance[i];
+      
+      // Check if exiting boundary (was inside, now outside)
+      if (pos.distance > boundary) {
+        exitPos = { ...pos, agl: pos.alt_baro - airportElevation };
+        break;
+      }
+    }
+    
+    if (!exitPos) {
+      return null;
+    }
+    
+    const duration = exitPos.timestamp - entryPos.timestamp;
+    
+    // Check if left within 2 minutes
+    if (duration <= this.missedApproachMaxTime) {
+      return {
+        entryTime: entryPos.timestamp,
+        exitTime: exitPos.timestamp,
+        entryAltitudeAGL: entryPos.agl,
+      };
+    }
+    
+    return null;
+  }
+
+  /**
+   * Classify flight as arrival, departure, missed approach, or other
+   */
+  classifyFlight(positionsWithDistance, closestApproach, missedApproach = null) {
     const nearbyPositions = positionsWithDistance.filter(
       pos => pos.distance <= this.airportProximityRadius
     );
@@ -212,13 +309,18 @@ class FlightAnalyzer {
       return 'departure';
     }
 
+    // Check for missed approach before defaulting to overflight
+    if (missedApproach) {
+      return 'missed_approach';
+    }
+
     return 'overflight';
   }
 
   /**
    * Analyze an arrival flight
    */
-  analyzeArrival(icao, positionsWithDistance, airport, closestApproach) {
+  analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation = 0) {
     // Find touchdown (first position on ground near airport)
     let touchdown = null;
     for (const pos of positionsWithDistance) {
@@ -267,6 +369,7 @@ class FlightAnalyzer {
         timestamp: touchdown.timestamp,
         distance: touchdown.distance,
         altitude: touchdown.alt_baro,
+        altitudeAGL: touchdown.alt_baro - airportElevation,
         lat: touchdown.lat,
         lon: touchdown.lon,
       },
@@ -274,6 +377,7 @@ class FlightAnalyzer {
       closestApproach: {
         distance: closestApproach.distance,
         altitude: closestApproach.alt_baro,
+        altitudeAGL: closestApproach.alt_baro - airportElevation,
         timestamp: closestApproach.timestamp,
         lat: closestApproach.lat,
         lon: closestApproach.lon,
@@ -288,7 +392,7 @@ class FlightAnalyzer {
   /**
    * Analyze a departure flight
    */
-  analyzeDeparture(icao, positionsWithDistance, airport, closestApproach) {
+  analyzeDeparture(icao, positionsWithDistance, airport, closestApproach, airportElevation = 0) {
     // Find takeoff (first position on ground near airport, then first position in air)
     let takeoff = null;
     let takeoffIndex = -1;
@@ -347,6 +451,7 @@ class FlightAnalyzer {
         timestamp: takeoff.timestamp,
         distance: takeoff.distance,
         altitude: takeoff.alt_baro,
+        altitudeAGL: takeoff.alt_baro - airportElevation,
         lat: takeoff.lat,
         lon: takeoff.lon,
       },
@@ -354,6 +459,7 @@ class FlightAnalyzer {
       closestApproach: {
         distance: closestApproach.distance,
         altitude: closestApproach.alt_baro,
+        altitudeAGL: closestApproach.alt_baro - airportElevation,
         timestamp: closestApproach.timestamp,
         lat: closestApproach.lat,
         lon: closestApproach.lon,
