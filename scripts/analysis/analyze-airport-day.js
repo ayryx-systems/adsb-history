@@ -116,11 +116,11 @@ async function main() {
         const data = await dataStore.load(airport.icao, options.date);
         console.log(`\n${'='.repeat(60)}`);
         console.log(`Flight Summary for ${airport.icao} (${airport.name}) on ${options.date}`);
-        if (data.airportElevation !== undefined) {
-          console.log(`Airport Elevation: ${data.airportElevation} ft`);
+        if (data.airportElevation_ft !== undefined) {
+          console.log(`Airport Elevation: ${data.airportElevation_ft} ft`);
         }
         console.log('='.repeat(60));
-        console.log(`Total flights: ${data.summary.totalAircraft}`);
+        console.log(`Total movements: ${data.summary.totalMovements}`);
         console.log(`Arrivals: ${data.summary.arrivals}`);
         console.log(`Departures: ${data.summary.departures}`);
         console.log(`Missed Approaches: ${data.summary.missedApproaches || 0}`);
@@ -151,14 +151,14 @@ async function main() {
     await dataStore.save(airport.icao, options.date, {
       flights: results.flights,
       summary: results.summary,
-      airportElevation: results.airportElevation,
+      airportElevation_ft: results.airportElevation_ft,
     });
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`Flight Summary for ${airport.icao} (${airport.name}) on ${options.date}`);
-    console.log(`Airport Elevation: ${results.airportElevation} ft`);
+    console.log(`Airport Elevation: ${results.airportElevation_ft} ft`);
     console.log('='.repeat(60));
-    console.log(`Total flights: ${results.summary.totalAircraft}`);
+    console.log(`Total movements: ${results.summary.totalMovements}`);
     console.log(`Arrivals: ${results.summary.arrivals}`);
     console.log(`Departures: ${results.summary.departures}`);
     console.log(`Missed Approaches: ${results.summary.missedApproaches || 0}`);
