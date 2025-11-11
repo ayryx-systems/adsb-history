@@ -61,6 +61,47 @@ class L1StatsAnalyzer {
   }
 
   /**
+   * Calculate median for an array of values
+   * @param {Array<number>} values - Array of numeric values
+   * @returns {number|null} Median value or null if empty
+   */
+  calculateMedian(values) {
+    if (!values || values.length === 0) {
+      return null;
+    }
+    const sorted = [...values].sort((a, b) => a - b);
+    const count = sorted.length;
+    return count % 2 === 0
+      ? (sorted[count / 2 - 1] + sorted[count / 2]) / 2
+      : sorted[Math.floor(count / 2)];
+  }
+
+  /**
+   * Get time of day category from hour (UTC)
+   * @param {number} hour - Hour of day (0-23)
+   * @returns {string} Time of day category
+   */
+  getTimeOfDay(hour) {
+    if (hour >= 0 && hour < 6) return '00-06';
+    if (hour >= 6 && hour < 12) return '06-12';
+    if (hour >= 12 && hour < 16) return '12-16';
+    return '16-00'; // 16-24 (16-00)
+  }
+
+  /**
+   * Get 15-minute time slot key from hour and minute
+   * @param {number} hour - Hour of day (0-23)
+   * @param {number} minute - Minute of hour (0-59)
+   * @returns {string} Time slot key (e.g., "00:00", "00:15", "23:45")
+   */
+  getTimeSlot(hour, minute) {
+    const slotMinute = Math.floor(minute / 15) * 15;
+    const hourStr = hour.toString().padStart(2, '0');
+    const minStr = slotMinute.toString().padStart(2, '0');
+    return `${hourStr}:${minStr}`;
+  }
+
+  /**
    * Analyze arrival flights and generate L1 statistics
    * @param {Array} flights - Array of flight objects from summary data
    * @param {string} airport - Airport ICAO code
@@ -138,24 +179,101 @@ class L1StatsAnalyzer {
     }
 
     // Calculate overall statistics (all arrivals regardless of type)
+    // Group by time of day and 15-minute slots
     const overallMilestones = {
       timeFrom100nm: [],
       timeFrom50nm: [],
       timeFrom20nm: [],
     };
 
+    // Group by time of day (UTC)
+    const byTimeOfDay = {
+      '00-06': { timeFrom100nm: [], timeFrom50nm: [], timeFrom20nm: [] },
+      '06-12': { timeFrom100nm: [], timeFrom50nm: [], timeFrom20nm: [] },
+      '12-16': { timeFrom100nm: [], timeFrom50nm: [], timeFrom20nm: [] },
+      '16-00': { timeFrom100nm: [], timeFrom50nm: [], timeFrom20nm: [] },
+    };
+
+    // Group by 15-minute time slots
+    const byTimeSlot = {};
+
     for (const arrival of arrivals) {
+      if (!arrival.touchdown || !arrival.touchdown.timestamp) {
+        continue;
+      }
+
+      // Get time of day from touchdown timestamp
+      const touchdownDate = new Date(arrival.touchdown.timestamp * 1000);
+      const hour = touchdownDate.getUTCHours();
+      const minute = touchdownDate.getUTCMinutes();
+      const timeOfDay = this.getTimeOfDay(hour);
+      const timeSlot = this.getTimeSlot(hour, minute);
+
+      // Initialize time slot if needed
+      if (!byTimeSlot[timeSlot]) {
+        byTimeSlot[timeSlot] = {
+          timeFrom100nm: [],
+          timeFrom50nm: [],
+          timeFrom20nm: [],
+        };
+      }
+
+      // Add to overall, time-of-day, and time-slot groups
       if (arrival.milestones) {
         if (arrival.milestones.timeFrom100nm !== undefined) {
           overallMilestones.timeFrom100nm.push(arrival.milestones.timeFrom100nm);
+          byTimeOfDay[timeOfDay].timeFrom100nm.push(arrival.milestones.timeFrom100nm);
+          byTimeSlot[timeSlot].timeFrom100nm.push(arrival.milestones.timeFrom100nm);
         }
         if (arrival.milestones.timeFrom50nm !== undefined) {
           overallMilestones.timeFrom50nm.push(arrival.milestones.timeFrom50nm);
+          byTimeOfDay[timeOfDay].timeFrom50nm.push(arrival.milestones.timeFrom50nm);
+          byTimeSlot[timeSlot].timeFrom50nm.push(arrival.milestones.timeFrom50nm);
         }
         if (arrival.milestones.timeFrom20nm !== undefined) {
           overallMilestones.timeFrom20nm.push(arrival.milestones.timeFrom20nm);
+          byTimeOfDay[timeOfDay].timeFrom20nm.push(arrival.milestones.timeFrom20nm);
+          byTimeSlot[timeSlot].timeFrom20nm.push(arrival.milestones.timeFrom20nm);
         }
       }
+    }
+
+    // Calculate statistics for each time of day
+    const timeOfDayStats = {};
+    for (const [tod, milestones] of Object.entries(byTimeOfDay)) {
+      timeOfDayStats[tod] = {
+        count: Math.max(
+          milestones.timeFrom100nm.length,
+          milestones.timeFrom50nm.length,
+          milestones.timeFrom20nm.length
+        ),
+        milestones: {
+          timeFrom100nm: this.calculateStats(milestones.timeFrom100nm),
+          timeFrom50nm: this.calculateStats(milestones.timeFrom50nm),
+          timeFrom20nm: this.calculateStats(milestones.timeFrom20nm),
+        },
+      };
+    }
+
+    // Calculate median for each 15-minute time slot
+    const timeSlotMedians = {};
+    const milestoneKeys = ['timeFrom100nm', 'timeFrom50nm', 'timeFrom20nm'];
+    
+    for (const [slot, milestones] of Object.entries(byTimeSlot)) {
+      timeSlotMedians[slot] = {};
+      for (const key of milestoneKeys) {
+        const median = this.calculateMedian(milestones[key]);
+        if (median !== null) {
+          timeSlotMedians[slot][key] = Math.round(median * 100) / 100;
+        }
+      }
+    }
+
+    // Sort time slots chronologically
+    const sortedTimeSlots = Object.keys(timeSlotMedians).sort();
+    const sortedTimeSlotMedians = {};
+    for (const slot of sortedTimeSlots) {
+      sortedTimeSlotMedians[slot] = timeSlotMedians[slot];
     }
 
     const overall = {
@@ -165,6 +283,8 @@ class L1StatsAnalyzer {
         timeFrom50nm: this.calculateStats(overallMilestones.timeFrom50nm),
         timeFrom20nm: this.calculateStats(overallMilestones.timeFrom20nm),
       },
+      byTouchdownTimeOfDay: timeOfDayStats,
+      byTouchdownTimeSlot: sortedTimeSlotMedians,
     };
 
     logger.info('L1 stats analysis complete', {
