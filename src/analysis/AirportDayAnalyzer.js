@@ -88,8 +88,8 @@ class AirportDayAnalyzer {
         });
       }
 
-      // Analyze this flight
-      const analysis = this.flightAnalyzer.analyzeFlight(
+      // Analyze this flight (may return multiple events)
+      const events = this.flightAnalyzer.analyzeFlight(
         icao,
         trace,
         airportConfig,
@@ -97,8 +97,11 @@ class AirportDayAnalyzer {
         { registration, aircraftType, description }
       );
 
-      if (analysis) {
-        flights.push(analysis);
+      // Add all events to flights array
+      for (const event of events) {
+        if (event) {
+          flights.push(event);
+        }
       }
     }
 

@@ -65,17 +65,18 @@ class FlightAnalyzer {
 
   /**
    * Analyze a flight trace for a specific airport
+   * Returns multiple events if the trace contains both arrival and departure segments
    * @param {string} icao - Aircraft ICAO code
    * @param {Array} trace - Readsb trace data (array of position reports)
    * @param {object} airport - Airport object with coordinates
    * @param {string} date - Date in YYYY-MM-DD format
    * @param {object} metadata - Aircraft metadata (registration, aircraftType, description)
-   * @returns {object|null} Flight analysis result or null if not relevant
+   * @returns {Array} Array of flight events (can be multiple per aircraft)
    */
   analyzeFlight(icao, trace, airport, date, metadata = {}) {
     const { registration = null, aircraftType = null, description = null } = metadata;
     if (!trace || !Array.isArray(trace) || trace.length < 5) {
-      return null;
+      return [];
     }
 
     const airportLat = airport.coordinates.lat;
@@ -94,7 +95,7 @@ class FlightAnalyzer {
       .filter(pos => pos && pos.lat !== null && pos.lon !== null && pos.alt_baro !== null);
 
     if (positions.length < 5) {
-      return null;
+      return [];
     }
 
     // Calculate distance from airport for each position
@@ -112,85 +113,220 @@ class FlightAnalyzer {
 
     // If never got close to airport, skip
     if (closestApproach.distance > this.airportProximityRadius) {
-      return null;
+      return [];
     }
 
-    // Check for missed approach before classifying
     const airportElevation = airport.elevation_ft || 0;
-    const missedApproach = this.detectMissedApproach(
-      positionsWithDistance,
-      airportElevation
+
+    // Split trace into separate flight segments (arrival and departure)
+    const segments = this.splitIntoSegments(positionsWithDistance, airportElevation);
+    
+    const events = [];
+    
+    // Analyze each segment independently
+    for (const segment of segments) {
+      const segmentClosestApproach = segment.reduce((min, pos) => 
+        pos.distance < min.distance ? pos : min, segment[0]);
+
+      // Check for missed approach
+      const missedApproach = this.detectMissedApproach(segment, airportElevation);
+
+      // Classify this segment
+      const classification = this.classifyFlightSegment(
+        segment,
+        segmentClosestApproach,
+        missedApproach
+      );
+
+      if (!classification) {
+        continue;
+      }
+
+      // Analyze based on classification
+      if (classification === 'arrival') {
+        const arrivalEvent = this.analyzeArrival(icao, segment, airport, segmentClosestApproach, airportElevation, { registration, aircraftType, description });
+        if (arrivalEvent) events.push(arrivalEvent);
+      } else if (classification === 'departure') {
+        const departureEvent = this.analyzeDeparture(icao, segment, airport, segmentClosestApproach, airportElevation, { registration, aircraftType, description });
+        if (departureEvent) events.push(departureEvent);
+      } else if (classification === 'missed_approach') {
+        events.push({
+          icao,
+          registration,
+          type: aircraftType,
+          desc: description,
+          classification: 'missed_approach',
+          closestApproach: {
+            distance: segmentClosestApproach.distance,
+            altitude: segmentClosestApproach.alt_baro,
+            altitudeAGL: segmentClosestApproach.alt_baro - airportElevation,
+            timestamp: segmentClosestApproach.timestamp,
+            lat: segmentClosestApproach.lat,
+            lon: segmentClosestApproach.lon,
+          },
+          missedApproach: {
+            entryTime: missedApproach.entryTime,
+            exitTime: missedApproach.exitTime,
+            duration: missedApproach.exitTime - missedApproach.entryTime,
+            entryAltitudeAGL: missedApproach.entryAltitudeAGL,
+          },
+          timeRange: {
+            first: segment[0].timestamp,
+            last: segment[segment.length - 1].timestamp,
+          },
+        });
+      }
+      // Skip overflights and touch-and-go (not interesting)
+    }
+
+    return events;
+  }
+
+  /**
+   * Split trace into separate flight segments (arrival and departure)
+   * Looks for periods where aircraft is on ground near airport as split points
+   */
+  splitIntoSegments(positionsWithDistance, airportElevation) {
+    const segments = [];
+    const minSegmentLength = 5; // Minimum positions per segment
+    
+    // Find periods where aircraft is on ground near airport
+    const groundPeriods = [];
+    let inGroundPeriod = false;
+    let groundStartIndex = -1;
+    
+    for (let i = 0; i < positionsWithDistance.length; i++) {
+      const pos = positionsWithDistance[i];
+      const isNearAirport = pos.distance <= this.touchdownProximity;
+      const isOnGround = pos.alt_baro <= this.groundAltitudeThreshold;
+      
+      if (isNearAirport && isOnGround) {
+        if (!inGroundPeriod) {
+          inGroundPeriod = true;
+          groundStartIndex = i;
+        }
+      } else {
+        if (inGroundPeriod) {
+          // End of ground period
+          const groundDuration = positionsWithDistance[i - 1].timestamp - positionsWithDistance[groundStartIndex].timestamp;
+          // Only consider significant ground periods (> 5 minutes) as split points
+          if (groundDuration > 5 * 60) {
+            groundPeriods.push({ start: groundStartIndex, end: i - 1 });
+          }
+          inGroundPeriod = false;
+        }
+      }
+    }
+    
+    // If no significant ground periods, return entire trace as one segment
+    if (groundPeriods.length === 0) {
+      return [positionsWithDistance];
+    }
+    
+    // Split trace at ground periods
+    let segmentStart = 0;
+    for (const groundPeriod of groundPeriods) {
+      // Segment before ground period (arrival)
+      if (groundPeriod.start > segmentStart + minSegmentLength) {
+        segments.push(positionsWithDistance.slice(segmentStart, groundPeriod.start));
+      }
+      
+      // Segment after ground period (departure)
+      segmentStart = groundPeriod.end + 1;
+    }
+    
+    // Add final segment (if any)
+    if (segmentStart < positionsWithDistance.length - minSegmentLength) {
+      segments.push(positionsWithDistance.slice(segmentStart));
+    }
+    
+    // If we didn't create segments, return entire trace
+    if (segments.length === 0) {
+      return [positionsWithDistance];
+    }
+    
+    return segments;
+  }
+
+  /**
+   * Classify a flight segment (similar to classifyFlight but for a segment)
+   * Segments are already split, so we only need to classify as arrival or departure
+   */
+  classifyFlightSegment(positionsWithDistance, closestApproach, missedApproach = null) {
+    const nearbyPositions = positionsWithDistance.filter(
+      pos => pos.distance <= this.airportProximityRadius
     );
 
-    // Classify as arrival or departure
-    const classification = this.classifyFlight(
-      positionsWithDistance,
-      closestApproach,
-      missedApproach
-    );
-
-    if (!classification) {
+    if (nearbyPositions.length === 0) {
       return null;
     }
 
-    // Analyze based on classification
-    if (classification === 'arrival') {
-      return this.analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation, { registration, aircraftType, description });
-    } else if (classification === 'departure') {
-      return this.analyzeDeparture(icao, positionsWithDistance, airport, closestApproach, airportElevation, { registration, aircraftType, description });
-    } else if (classification === 'missed_approach') {
-      // Missed approach - return detailed info
-      return {
-        icao,
-        registration,
-        type: aircraftType,
-        desc: description,
-        classification: 'missed_approach',
-        closestApproach: {
-          distance: closestApproach.distance,
-          altitude: closestApproach.alt_baro,
-          altitudeAGL: closestApproach.alt_baro - airportElevation,
-          timestamp: closestApproach.timestamp,
-          lat: closestApproach.lat,
-          lon: closestApproach.lon,
-        },
-        missedApproach: {
-          entryTime: missedApproach.entryTime,
-          exitTime: missedApproach.exitTime,
-          duration: missedApproach.exitTime - missedApproach.entryTime,
-          entryAltitudeAGL: missedApproach.entryAltitudeAGL,
-        },
-        timeRange: {
-          first: positionsWithDistance[0].timestamp,
-          last: positionsWithDistance[positionsWithDistance.length - 1].timestamp,
-        },
-      };
-    } else {
-      // Overflight or other - return basic info (but filter these out as not interesting)
-      return {
-        icao,
-        registration,
-        type: aircraftType,
-        desc: description,
-        classification,
-        closestApproach: {
-          distance: closestApproach.distance,
-          altitude: closestApproach.alt_baro,
-          altitudeAGL: closestApproach.alt_baro - airportElevation,
-          timestamp: closestApproach.timestamp,
-          lat: closestApproach.lat,
-          lon: closestApproach.lon,
-        },
-        timeRange: {
-          first: positionsWithDistance[0].timestamp,
-          last: positionsWithDistance[positionsWithDistance.length - 1].timestamp,
-        },
-      };
+    nearbyPositions.sort((a, b) => a.timestamp - b.timestamp);
+    const firstNearby = nearbyPositions[0];
+    const lastNearby = nearbyPositions[nearbyPositions.length - 1];
+
+    // Get positions before and after airport proximity
+    const beforeAirport = positionsWithDistance.filter(
+      pos => pos.timestamp < firstNearby.timestamp
+    );
+    const afterAirport = positionsWithDistance.filter(
+      pos => pos.timestamp > lastNearby.timestamp
+    );
+
+    // Check altitude profiles
+    const avgAltitudeBefore = beforeAirport.length > 0
+      ? beforeAirport.reduce((sum, pos) => sum + pos.alt_baro, 0) / beforeAirport.length
+      : null;
+    const avgAltitudeAfter = afterAirport.length > 0
+      ? afterAirport.reduce((sum, pos) => sum + pos.alt_baro, 0) / afterAirport.length
+      : null;
+    const minAltitudeNearby = Math.min(...nearbyPositions.map(pos => pos.alt_baro));
+
+    // Check if aircraft was far enough away before/after
+    const maxDistanceBefore = beforeAirport.length > 0
+      ? Math.max(...beforeAirport.map(pos => pos.distance))
+      : 0;
+    const maxDistanceAfter = afterAirport.length > 0
+      ? Math.max(...afterAirport.map(pos => pos.distance))
+      : 0;
+
+    // Arrival: high altitude before, low altitude near airport, came from at least 2nm
+    const isArrival = (
+      avgAltitudeBefore !== null &&
+      avgAltitudeBefore > 5000 &&
+      minAltitudeNearby < 5000 &&
+      closestApproach.distance < 5 &&
+      maxDistanceBefore >= this.MIN_DISTANCE_THRESHOLD
+    );
+
+    // Departure: low altitude near airport, high altitude after, goes to at least 2nm
+    const isDeparture = (
+      avgAltitudeAfter !== null &&
+      avgAltitudeAfter > 5000 &&
+      minAltitudeNearby < 5000 &&
+      closestApproach.distance < 5 &&
+      maxDistanceAfter >= this.MIN_DISTANCE_THRESHOLD
+    );
+
+    // First check if it's a valid arrival or departure
+    if (isArrival) {
+      return 'arrival';
+    } else if (isDeparture) {
+      return 'departure';
     }
+
+    // Only check for missed approach if it's not a valid arrival or departure
+    // Missed approaches are aircraft that approach but don't complete the landing
+    if (missedApproach) {
+      return 'missed_approach';
+    }
+
+    return null; // Skip overflights and other
   }
 
   /**
    * Detect missed approach: enters 2nm boundary below 1000ft AGL, leaves within 2 minutes
+   * Must also show approach pattern (descending, coming from reasonable distance)
    */
   detectMissedApproach(positionsWithDistance, airportElevation) {
     const boundary = this.missedApproachBoundary;
@@ -217,6 +353,32 @@ class FlightAnalyzer {
       return null;
     }
     
+    // Check that aircraft was approaching from a reasonable distance (at least 5nm before entry)
+    // This ensures it's not just a short segment or pattern work
+    const positionsBeforeEntry = positionsWithDistance.slice(0, entryIndex);
+    if (positionsBeforeEntry.length === 0) {
+      return null; // No approach pattern visible
+    }
+    
+    const maxDistanceBeforeEntry = Math.max(...positionsBeforeEntry.map(pos => pos.distance));
+    if (maxDistanceBeforeEntry < 5) {
+      return null; // Didn't come from far enough away - likely pattern work or short segment
+    }
+    
+    // Check that aircraft was descending before entry (approach pattern)
+    if (positionsBeforeEntry.length >= 3) {
+      const recentBefore = positionsBeforeEntry.slice(-5); // Last 5 positions before entry
+      const altitudes = recentBefore.map(pos => pos.alt_baro).filter(alt => alt !== null);
+      if (altitudes.length >= 2) {
+        const firstAlt = altitudes[0];
+        const lastAlt = altitudes[altitudes.length - 1];
+        // Should be descending (or at least not climbing significantly)
+        if (lastAlt > firstAlt + 500) {
+          return null; // Was climbing, not approaching
+        }
+      }
+    }
+    
     // Find first exit from boundary after entry
     let exitPos = null;
     for (let i = entryIndex + 1; i < positionsWithDistance.length; i++) {
@@ -235,8 +397,9 @@ class FlightAnalyzer {
     
     const duration = exitPos.timestamp - entryPos.timestamp;
     
-    // Check if left within 2 minutes
-    if (duration <= this.missedApproachMaxTime) {
+    // Check if left within 2 minutes AND was actually approaching (not just passing through)
+    // Also require minimum duration of at least 10 seconds to avoid very brief passes
+    if (duration >= 10 && duration <= this.missedApproachMaxTime) {
       return {
         entryTime: entryPos.timestamp,
         exitTime: exitPos.timestamp,
