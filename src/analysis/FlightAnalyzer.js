@@ -52,10 +52,13 @@ function parsePosition(posArray, baseTimestamp = null) {
  */
 class FlightAnalyzer {
   constructor(config = {}) {
+    // Distance threshold for arrivals/departures (must come from/go to at least this distance)
+    this.MIN_DISTANCE_THRESHOLD = 2; // nm
+    
     this.airportProximityRadius = config.airportProximityRadius || 5; // nm
     this.groundAltitudeThreshold = config.groundAltitudeThreshold || 500; // feet
     this.touchdownProximity = config.touchdownProximity || 1; // nm
-    this.missedApproachBoundary = config.missedApproachBoundary || 2; // nm
+    this.missedApproachBoundary = config.missedApproachBoundary || this.MIN_DISTANCE_THRESHOLD; // nm
     this.missedApproachMaxAGL = config.missedApproachMaxAGL || 1000; // feet AGL
     this.missedApproachMaxTime = config.missedApproachMaxTime || 2 * 60; // 2 minutes in seconds
   }
@@ -269,20 +272,30 @@ class FlightAnalyzer {
       : null;
     const minAltitudeNearby = Math.min(...nearbyPositions.map(pos => pos.alt_baro));
 
-    // Arrival: high altitude before, low altitude near airport
+    // Check if aircraft was far enough away before/after
+    const maxDistanceBefore = beforeAirport.length > 0
+      ? Math.max(...beforeAirport.map(pos => pos.distance))
+      : 0;
+    const maxDistanceAfter = afterAirport.length > 0
+      ? Math.max(...afterAirport.map(pos => pos.distance))
+      : 0;
+
+    // Arrival: high altitude before, low altitude near airport, came from at least 2nm
     const isArrival = (
       avgAltitudeBefore !== null &&
       avgAltitudeBefore > 5000 &&
       minAltitudeNearby < 5000 &&
-      closestApproach.distance < 5
+      closestApproach.distance < 5 &&
+      maxDistanceBefore >= this.MIN_DISTANCE_THRESHOLD
     );
 
-    // Departure: low altitude near airport, high altitude after
+    // Departure: low altitude near airport, high altitude after, goes to at least 2nm
     const isDeparture = (
       avgAltitudeAfter !== null &&
       avgAltitudeAfter > 5000 &&
       minAltitudeNearby < 5000 &&
-      closestApproach.distance < 5
+      closestApproach.distance < 5 &&
+      maxDistanceAfter >= this.MIN_DISTANCE_THRESHOLD
     );
 
     // If both patterns exist, check if it's a true touch-and-go or separate flights
