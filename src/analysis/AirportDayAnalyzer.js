@@ -72,7 +72,7 @@ class AirportDayAnalyzer {
     const progressInterval = 50;
 
     // Stream only the traces we need (filtered by ICAO)
-    for await (const { icao, trace } of this.traceReader.streamFilteredTraces(
+    for await (const { icao, trace, registration, aircraftType, description } of this.traceReader.streamFilteredTraces(
       extractDir,
       aircraftIds
     )) {
@@ -93,7 +93,8 @@ class AirportDayAnalyzer {
         icao,
         trace,
         airportConfig,
-        date
+        date,
+        { registration, aircraftType, description }
       );
 
       if (analysis) {

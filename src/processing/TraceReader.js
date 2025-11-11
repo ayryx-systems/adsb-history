@@ -177,7 +177,18 @@ class TraceReader {
       // The file contains an object with metadata and a 'trace' property with the position array
       const traceArray = data.trace || (Array.isArray(data) ? data : []);
       
-      return { icao, trace: traceArray };
+      // Extract aircraft metadata (registration, type, description)
+      const registration = data.r || null;
+      const aircraftType = data.t || null;
+      const description = data.desc || null;
+      
+      return { 
+        icao, 
+        trace: traceArray,
+        registration,
+        aircraftType,
+        description,
+      };
     } catch (error) {
       logger.error('Failed to read trace file', {
         file: path.basename(tracePath),

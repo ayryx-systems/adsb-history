@@ -69,9 +69,11 @@ class FlightAnalyzer {
    * @param {Array} trace - Readsb trace data (array of position reports)
    * @param {object} airport - Airport object with coordinates
    * @param {string} date - Date in YYYY-MM-DD format
+   * @param {object} metadata - Aircraft metadata (registration, aircraftType, description)
    * @returns {object|null} Flight analysis result or null if not relevant
    */
-  analyzeFlight(icao, trace, airport, date) {
+  analyzeFlight(icao, trace, airport, date, metadata = {}) {
+    const { registration = null, aircraftType = null, description = null } = metadata;
     if (!trace || !Array.isArray(trace) || trace.length < 5) {
       return null;
     }
@@ -133,13 +135,16 @@ class FlightAnalyzer {
 
     // Analyze based on classification
     if (classification === 'arrival') {
-      return this.analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation);
+      return this.analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation, { registration, aircraftType, description });
     } else if (classification === 'departure') {
-      return this.analyzeDeparture(icao, positionsWithDistance, airport, closestApproach, airportElevation);
+      return this.analyzeDeparture(icao, positionsWithDistance, airport, closestApproach, airportElevation, { registration, aircraftType, description });
     } else if (classification === 'missed_approach') {
       // Missed approach - return detailed info
       return {
         icao,
+        registration,
+        type: aircraftType,
+        desc: description,
         classification: 'missed_approach',
         closestApproach: {
           distance: closestApproach.distance,
@@ -164,6 +169,9 @@ class FlightAnalyzer {
       // Overflight or other - return basic info (but filter these out as not interesting)
       return {
         icao,
+        registration,
+        type: aircraftType,
+        desc: description,
         classification,
         closestApproach: {
           distance: closestApproach.distance,
@@ -333,7 +341,8 @@ class FlightAnalyzer {
   /**
    * Analyze an arrival flight
    */
-  analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation = 0) {
+  analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation = 0, metadata = {}) {
+    const { registration = null, aircraftType = null, description = null } = metadata;
     // Find touchdown (first position on ground near airport)
     let touchdown = null;
     for (const pos of positionsWithDistance) {
@@ -377,6 +386,9 @@ class FlightAnalyzer {
 
     return {
       icao,
+      registration,
+      type: aircraftType,
+      desc: description,
       classification: 'arrival',
       touchdown: {
         timestamp: touchdown.timestamp,
@@ -405,7 +417,8 @@ class FlightAnalyzer {
   /**
    * Analyze a departure flight
    */
-  analyzeDeparture(icao, positionsWithDistance, airport, closestApproach, airportElevation = 0) {
+  analyzeDeparture(icao, positionsWithDistance, airport, closestApproach, airportElevation = 0, metadata = {}) {
+    const { registration = null, aircraftType = null, description = null } = metadata;
     // Find takeoff (first position on ground near airport, then first position in air)
     let takeoff = null;
     let takeoffIndex = -1;
@@ -459,6 +472,9 @@ class FlightAnalyzer {
 
     return {
       icao,
+      registration,
+      type: aircraftType,
+      desc: description,
       classification: 'departure',
       takeoff: {
         timestamp: takeoff.timestamp,
