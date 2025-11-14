@@ -18,6 +18,9 @@ Each phase depends on the previous one's output.
 
 Download raw ADSB data and store in S3.
 
+**Input**: GitHub releases from [adsblol/globe_history_2025](https://github.com/adsblol/globe_history_2025)  
+**Output**: `s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar` (~3GB per day, compressed tar archives)
+
 ### Local
 
 ```bash
@@ -40,11 +43,12 @@ node scripts/download-week.js --start-date 2025-11-08 --days 1
 ./scripts/ingestion/provision-ec2-downloader.sh --days 1
 ```
 
-**Output**: `s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`
-
 ## Phase 2: Identification
 
 Identify aircraft that were on the ground at airports.
+
+**Input**: Raw ADSB data from Phase 1 (`s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`)  
+**Output**: `s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json` (list of ICAO codes that were on ground)
 
 ### Local
 
@@ -71,14 +75,18 @@ node scripts/identification/identify-ground-aircraft-multi.js --date 2025-11-08 
 AWS_PROFILE=your-profile-name ./scripts/identification/run-on-ec2.sh --date 2025-11-08
 ```
 
-**Input**: Raw data from Phase 1  
-**Output**: `s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json`
-
 ## Phase 3: Analysis
 
 ### 3a. Flight Analysis
 
 Analyze flights to create detailed summaries with distance milestones.
+
+**Input**:
+
+- Ground aircraft list from Phase 2 (`s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json`)
+- Raw ADSB data from Phase 1 (`s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`)
+
+**Output**: `s3://ayryx-adsb-history/flight-summaries/AIRPORT/YYYY/MM/DD.json` (detailed flight data with milestones, classifications, touchdown/takeoff points)
 
 #### Local
 
@@ -95,12 +103,17 @@ node scripts/analysis/analyze-airport-day.js --airport KLGA --date 2025-11-08
 node scripts/analysis/analyze-airport-day.js --airport KLGA --date 2025-11-08
 ```
 
-**Input**: Ground aircraft list from Phase 2 + raw data from Phase 1  
-**Output**: `s3://ayryx-adsb-history/flight-summaries/AIRPORT/YYYY/MM/DD.json`
-
 ### 3b. L1 Statistics Generation
 
-Generate detailed statistics from flight summaries (arrival times, aircraft type breakdowns, milestone statistics).
+Generate aggregated statistics from flight summaries (arrival times, aircraft type breakdowns, milestone statistics).
+
+**Input**: Flight summaries from Phase 3a (`s3://ayryx-adsb-history/flight-summaries/AIRPORT/YYYY/MM/DD.json`)  
+**Output**: `s3://ayryx-adsb-history/l1-stats/AIRPORT/YYYY/MM/DD.json` (statistical aggregates: means, medians, percentiles by aircraft type)
+
+**Note**: This script **must be run after Phase 3a**. It reads the flight summaries and will error if they don't exist. The scripts are separate and do different things:
+
+- **3a** (`analyze-airport-day.js`): Analyzes raw flight traces to create detailed per-flight summaries
+- **3b** (`generate-l1-stats.js`): Aggregates those summaries into statistical reports
 
 #### Local
 
@@ -114,9 +127,6 @@ node scripts/analysis/generate-l1-stats.js --airport KLGA --date 2025-11-08
 # Same script, run on EC2 instance
 node scripts/analysis/generate-l1-stats.js --airport KLGA --date 2025-11-08
 ```
-
-**Input**: Flight summaries from Phase 3a  
-**Output**: `s3://ayryx-adsb-history/l1-stats/AIRPORT/YYYY/MM/DD.json`
 
 ## Pipeline Flow
 
