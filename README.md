@@ -8,7 +8,9 @@ Three-phase pipeline:
 
 1. **Ingestion**: Download raw ADSB data from GitHub → S3
 2. **Identification**: Identify aircraft that were on the ground at airports
-3. **Analysis**: Analyze flights to create detailed summaries with distance milestones
+3. **Analysis**:
+   - **3a. Flight Analysis**: Create detailed summaries with distance milestones
+   - **3b. L1 Statistics**: Generate statistics (arrival times, aircraft types, milestones)
 
 Each phase depends on the previous one's output.
 
@@ -74,9 +76,11 @@ AWS_PROFILE=your-profile-name ./scripts/identification/run-on-ec2.sh --date 2025
 
 ## Phase 3: Analysis
 
+### 3a. Flight Analysis
+
 Analyze flights to create detailed summaries with distance milestones.
 
-### Local
+#### Local
 
 ```bash
 node scripts/analysis/analyze-airport-day.js --airport KLGA --date 2025-11-08
@@ -84,7 +88,7 @@ node scripts/analysis/analyze-airport-day.js --airport KLGA --date 2025-11-08
 
 **Requirements**: ~50GB disk space for extraction
 
-### EC2
+#### EC2
 
 ```bash
 # Same script, run on EC2 instance with sufficient disk space
@@ -94,6 +98,26 @@ node scripts/analysis/analyze-airport-day.js --airport KLGA --date 2025-11-08
 **Input**: Ground aircraft list from Phase 2 + raw data from Phase 1  
 **Output**: `s3://ayryx-adsb-history/flight-summaries/AIRPORT/YYYY/MM/DD.json`
 
+### 3b. L1 Statistics Generation
+
+Generate detailed statistics from flight summaries (arrival times, aircraft type breakdowns, milestone statistics).
+
+#### Local
+
+```bash
+node scripts/analysis/generate-l1-stats.js --airport KLGA --date 2025-11-08
+```
+
+#### EC2
+
+```bash
+# Same script, run on EC2 instance
+node scripts/analysis/generate-l1-stats.js --airport KLGA --date 2025-11-08
+```
+
+**Input**: Flight summaries from Phase 3a  
+**Output**: `s3://ayryx-adsb-history/l1-stats/AIRPORT/YYYY/MM/DD.json`
+
 ## Pipeline Flow
 
 ```
@@ -102,8 +126,10 @@ GitHub Releases
 Raw ADSB Data (S3)
     ↓ (Phase 2: Identification)
 Ground Aircraft List (S3)
-    ↓ (Phase 3: Analysis)
+    ↓ (Phase 3a: Flight Analysis)
 Flight Summaries (S3)
+    ↓ (Phase 3b: L1 Statistics)
+L1 Statistics (S3)
 ```
 
 ## Configuration
