@@ -1,69 +1,109 @@
 # ADSB History Processing
 
-Simple pipeline to process ADSB historical data and identify aircraft that visited airports.
+Pipeline to process ADSB historical data through three phases: ingestion, identification, and analysis.
 
 ## Overview
 
-1. **Ingestion**: Download raw ADSB data and store in S3
-2. **Processing**: Identify aircraft that were on the ground at airports
+Three-phase pipeline:
 
-## Quick Start
+1. **Ingestion**: Download raw ADSB data from GitHub → S3
+2. **Identification**: Identify aircraft that were on the ground at airports
+3. **Analysis**: Analyze flights to create detailed summaries with distance milestones
 
-### Process ground aircraft locally
+Each phase depends on the previous one's output.
+
+## Phase 1: Ingestion
+
+Download raw ADSB data and store in S3.
+
+### Local
+
+```bash
+# Download 7 days of data
+node scripts/download-week.js --start-date 2025-11-02 --days 7
+
+# Download single day
+node scripts/download-week.js --start-date 2025-11-08 --days 1
+```
+
+**Requirements**: ~50GB disk space for extraction
+
+### EC2
+
+```bash
+# Download 7 days of data
+./scripts/ingestion/provision-ec2-downloader.sh --start-date 2025-11-02 --days 7
+
+# Download single day (for daily automation)
+./scripts/ingestion/provision-ec2-downloader.sh --days 1
+```
+
+**Output**: `s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`
+
+## Phase 2: Identification
+
+Identify aircraft that were on the ground at airports.
+
+### Local
 
 ```bash
 # Single airport
-node scripts/processing/identify-ground-aircraft.js --airport KLGA --date 2025-11-08
+node scripts/identification/identify-ground-aircraft.js --airport KLGA --date 2025-11-08
 
 # Multiple airports
-node scripts/processing/identify-ground-aircraft-multi.js --date 2025-11-08 --all
+node scripts/identification/identify-ground-aircraft-multi.js --date 2025-11-08 --all
 ```
 
-### Process on EC2
+**Requirements**: ~50GB disk space for extraction
+
+### EC2
 
 ```bash
 # Process all enabled airports
-./scripts/processing/run-on-ec2.sh --date 2025-11-08
+./scripts/identification/run-on-ec2.sh --date 2025-11-08
 
 # Process specific airports
-./scripts/processing/run-on-ec2.sh --date 2025-11-08 --airports KLGA,KSFO
+./scripts/identification/run-on-ec2.sh --date 2025-11-08 --airports KLGA,KSFO
 
-# Use specific AWS profile (if you have multiple AWS accounts)
-# First, check your profiles: aws configure list-profiles
-# Then use: AWS_PROFILE=your-profile-name ./scripts/processing/run-on-ec2.sh --date 2025-11-08
-# Or: ./scripts/processing/run-on-ec2.sh --date 2025-11-08 --aws-profile your-profile-name
+# Use specific AWS profile
+AWS_PROFILE=your-profile-name ./scripts/identification/run-on-ec2.sh --date 2025-11-08
 ```
 
-**Important**: The script will show which AWS account it's using. Make sure it matches your project account (not a different project).
+**Input**: Raw data from Phase 1  
+**Output**: `s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json`
 
-The script will:
+## Phase 3: Analysis
 
-1. Package your code
-2. Upload to S3
-3. Launch an EC2 instance
-4. Run the processing
-5. Save results to S3
-6. Auto-terminate
+Analyze flights to create detailed summaries with distance milestones.
 
-**View logs**: Go to AWS Console → EC2 → Select instance → Actions → Monitor and troubleshoot → Get system log
+### Local
 
-**Check results**: `aws s3 ls s3://ayryx-adsb-history/ground-aircraft/ --recursive | grep 2025-11-08`
+```bash
+node scripts/analysis/analyze-airport-day.js --airport KLGA --date 2025-11-08
+```
 
-## Output
+**Requirements**: ~50GB disk space for extraction
 
-Results are saved to S3:
+### EC2
 
-- `s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json`
+```bash
+# Same script, run on EC2 instance with sufficient disk space
+node scripts/analysis/analyze-airport-day.js --airport KLGA --date 2025-11-08
+```
 
-Each file contains:
+**Input**: Ground aircraft list from Phase 2 + raw data from Phase 1  
+**Output**: `s3://ayryx-adsb-history/flight-summaries/AIRPORT/YYYY/MM/DD.json`
 
-```json
-{
-  "airport": "KLGA",
-  "date": "2025-11-08",
-  "aircraftIds": ["abc123", "def456", ...],
-  "count": 123
-}
+## Pipeline Flow
+
+```
+GitHub Releases
+    ↓ (Phase 1: Ingestion)
+Raw ADSB Data (S3)
+    ↓ (Phase 2: Identification)
+Ground Aircraft List (S3)
+    ↓ (Phase 3: Analysis)
+Flight Summaries (S3)
 ```
 
 ## Configuration
