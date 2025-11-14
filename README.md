@@ -108,7 +108,10 @@ node scripts/analysis/analyze-airport-day.js --airport KLGA --date 2025-11-08
 Generate aggregated statistics from flight summaries (arrival times, aircraft type breakdowns, milestone statistics).
 
 **Input**: Flight summaries from Phase 3a (`s3://ayryx-adsb-history/flight-summaries/AIRPORT/YYYY/MM/DD.json`)  
-**Output**: `s3://ayryx-adsb-history/l1-stats/AIRPORT/YYYY/MM/DD.json` (statistical aggregates: means, medians, percentiles by aircraft type)
+**Output**:
+
+- **S3**: `s3://ayryx-adsb-history/l1-stats/AIRPORT/YYYY/MM/DD.json` (statistical aggregates: means, medians, percentiles by aircraft type)
+- **Local cache**: `./cache/AIRPORT/YYYY/MM/l1-stats-DD.json` (when running locally)
 
 **Note**: This script **must be run after Phase 3a**. It reads the flight summaries and will error if they don't exist. The scripts are separate and do different things:
 
