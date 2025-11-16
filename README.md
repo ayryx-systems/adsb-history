@@ -145,6 +145,38 @@ Flight Summaries (S3)
 L1 Statistics (S3)
 ```
 
+## Weather Data
+
+Download historical METAR data from Iowa State University Mesonet API and store in S3 for cross-referencing with arrival statistics.
+
+**Input**: Mesonet API (https://mesonet.agron.iastate.edu)  
+**Output**: `s3://ayryx-adsb-history/weather/metar/AIRPORT/AIRPORT_YYYY.csv` (one CSV file per airport per year)
+
+### Usage
+
+```bash
+# Download and upload METAR data for all airports for a year
+node scripts/weather/populate-aws-metar.js --year 2024
+
+# Single airport
+node scripts/weather/populate-aws-metar.js --year 2024 --airport KLGA
+
+# Multiple airports
+node scripts/weather/populate-aws-metar.js --year 2024 --airports KBOS,KLGA
+```
+
+The script downloads the full year (Jan 1 to Dec 31, or until current date if it's the current year) and overwrites any existing file for that airport and year on S3.
+
+### Supported Airports
+
+- **KBOS** - Boston Logan International
+- **KORD** - Chicago O'Hare International
+- **KEWR** - Newark Liberty International
+- **KLGA** - LaGuardia Airport
+- **KJFK** - John F. Kennedy International
+
+The script includes rate limiting (2 second delay between requests) and automatic retries to be gentle with the mesonet API.
+
 ## Configuration
 
 Airports are configured in `config/airports.json`. Set `enabled: true` to process an airport.
