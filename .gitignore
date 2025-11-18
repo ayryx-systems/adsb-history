@@ -1,5 +1,7 @@
 /cache/
 
+/notebooks/
+
 # Dependencies
 node_modules/
 package-lock.json
