@@ -155,6 +155,92 @@
           "length_ft": 7001
         }
       ]
+    },
+    {
+      "icao": "KORD",
+      "name": "Chicago O'Hare International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 41.9786,
+        "lon": -87.9048
+      },
+      "elevation_ft": 668,
+      "analysis_radius_nm": 150,
+      "timezone": "America/Chicago",
+      "runways": [
+        {
+          "name": "4L",
+          "heading": 40,
+          "threshold": {
+            "lat": 41.9786,
+            "lon": -87.9048
+          },
+          "length_ft": 7500
+        },
+        {
+          "name": "4R",
+          "heading": 40,
+          "threshold": {
+            "lat": 41.9800,
+            "lon": -87.9020
+          },
+          "length_ft": 8075
+        },
+        {
+          "name": "9L",
+          "heading": 90,
+          "threshold": {
+            "lat": 41.9850,
+            "lon": -87.9200
+          },
+          "length_ft": 7500
+        },
+        {
+          "name": "9C",
+          "heading": 90,
+          "threshold": {
+            "lat": 41.9870,
+            "lon": -87.9150
+          },
+          "length_ft": 11245
+        },
+        {
+          "name": "9R",
+          "heading": 90,
+          "threshold": {
+            "lat": 41.9890,
+            "lon": -87.9100
+          },
+          "length_ft": 11260
+        },
+        {
+          "name": "10L",
+          "heading": 100,
+          "threshold": {
+            "lat": 41.9920,
+            "lon": -87.9050
+          },
+          "length_ft": 13000
+        },
+        {
+          "name": "10C",
+          "heading": 100,
+          "threshold": {
+            "lat": 41.9940,
+            "lon": -87.9000
+          },
+          "length_ft": 10800
+        },
+        {
+          "name": "10R",
+          "heading": 100,
+          "threshold": {
+            "lat": 41.9960,
+            "lon": -87.8950
+          },
+          "length_ft": 10000
+        }
+      ]
     }
   ],
   
@@ -166,13 +252,14 @@
   },
   
   "metadata": {
-    "last_updated": "2025-11-09",
-    "version": "1.0",
+    "last_updated": "2025-01-27",
+    "version": "1.1",
     "notes": [
-      "Runway data sourced from FAA and aviation databases",
+      "Runway data sourced from FAA ADIP and aviation databases",
       "Coordinates are for primary runway thresholds",
       "Enable/disable airports by setting 'enabled' flag",
-      "Analysis radius determines how far from airport to include flights"
+      "Analysis radius determines how far from airport to include flights",
+      "Data verified against FAA ADIP: https://adip.faa.gov/agis/public/#/airportData/"
     ]
   }
 }
