@@ -3,9 +3,10 @@
 /**
  * Process January 2025 data for arrival time statistics
  * 
- * For each day in January 2025:
- * 1. Run analyze-airport-day.js to create flight summaries
- * 2. Run generate-l1-stats.js to create L1 statistics
+ * For each day in January 2025, runs the complete pipeline:
+ * 1. Phase 2: Identify ground aircraft (identify-ground-aircraft.js)
+ * 2. Phase 3a: Analyze flights (analyze-airport-day.js) - creates flight summaries
+ * 3. Phase 3b: Generate L1 statistics (generate-l1-stats.js)
  * 
  * Processes one day at a time to manage disk space (~3GB/day raw data)
  * 
@@ -118,12 +119,23 @@ function runCommand(command, args, options = {}) {
 async function processDay(airport, date, force) {
   logger.info('Processing day', { airport, date });
 
+  const identifyScript = path.join(__dirname, '..', 'identification', 'identify-ground-aircraft.js');
   const analyzeScript = path.join(__dirname, 'analyze-airport-day.js');
   const statsScript = path.join(__dirname, 'generate-l1-stats.js');
 
   try {
-    // Step 1: Analyze flights (creates flight summaries)
-    logger.info('Step 1: Analyzing flights', { airport, date });
+    // Step 1: Identify ground aircraft (Phase 2)
+    logger.info('Step 1: Identifying ground aircraft', { airport, date });
+    const identifyArgs = ['--airport', airport, '--date', date];
+    if (force) {
+      identifyArgs.push('--force');
+    }
+
+    await runCommand('node', [identifyScript, ...identifyArgs]);
+    logger.info('Ground aircraft identification complete', { airport, date });
+
+    // Step 2: Analyze flights (Phase 3a - creates flight summaries)
+    logger.info('Step 2: Analyzing flights', { airport, date });
     const analyzeArgs = ['--airport', airport, '--date', date];
     if (force) {
       analyzeArgs.push('--force');
@@ -132,8 +144,8 @@ async function processDay(airport, date, force) {
     await runCommand('node', [analyzeScript, ...analyzeArgs]);
     logger.info('Flight analysis complete', { airport, date });
 
-    // Step 2: Generate L1 statistics
-    logger.info('Step 2: Generating L1 statistics', { airport, date });
+    // Step 3: Generate L1 statistics (Phase 3b)
+    logger.info('Step 3: Generating L1 statistics', { airport, date });
     const statsArgs = ['--airport', airport, '--date', date];
     if (force) {
       statsArgs.push('--force');
@@ -236,4 +248,5 @@ main().catch((error) => {
   });
   process.exit(1);
 });
+
 

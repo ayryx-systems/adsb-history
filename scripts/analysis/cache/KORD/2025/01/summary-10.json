@@ -1,0 +1,14 @@
+{
+  "airport": "KORD",
+  "date": "2025-01-10",
+  "generatedAt": "2025-11-21T22:23:18.524Z",
+  "flights": [],
+  "summary": {
+    "totalMovements": 0,
+    "arrivals": 0,
+    "departures": 0,
+    "missedApproaches": 0,
+    "other": 0
+  },
+  "airportElevation_ft": 668
+}
