@@ -61,3 +61,11 @@ build/
 .cache/
 .parcel-cache/
 
+# Python virtual environments
+venv/
+env/
+ENV/
+.venv/
+*.pyc
+__pycache__/
+

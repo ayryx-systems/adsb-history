@@ -24,9 +24,41 @@ Python 3.9+
 
 pandas
 
-Install dependencies:
+Setup
 
-pip install pandas
+We recommend using a virtual environment to isolate dependencies.
+
+**Quick Setup (macOS/Linux):**
+
+```bash
+# Run the setup script
+./setup-venv.sh
+
+# Activate the virtual environment
+source venv/bin/activate
+```
+
+**Manual Setup:**
+
+```bash
+# Create a virtual environment
+python3 -m venv venv
+
+# Activate the virtual environment
+# On macOS/Linux:
+source venv/bin/activate
+# On Windows:
+# venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+After activation, you can run the translator. When done, deactivate with:
+
+```bash
+deactivate
+```
 
 Usage
 python3 metar_translator.py /path/to/root_folder/
