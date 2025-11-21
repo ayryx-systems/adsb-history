@@ -76,10 +76,10 @@ async function downloadMetarData(station, year, outputDir) {
     elev: 'no',
     missing: 'M',
     trace: 'T',
-    direct: 'no',
-    report_type: '3',
-    report_type: '4'
+    direct: 'no'
   });
+  params.append('report_type', '3');
+  params.append('report_type', '4');
   
   const url = `${MESONET_API_BASE}?${params.toString()}`;
   const filename = `${station.icao}_${year}.csv`;
