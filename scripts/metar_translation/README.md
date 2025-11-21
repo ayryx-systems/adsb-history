@@ -31,17 +31,25 @@ pip install pandas
 Usage
 python3 metar_translator.py /path/to/root_folder/
 
-Example:
+Examples:
+
+# Convert CSV files from temp/weather to cache/metar
+
+python3 metar_translator.py ../temp/weather/
+
+# Or convert from any directory structure
 
 python3 metar_translator.py data/2024/
 
 This will:
 
-Walk every directory under data/2024/
+Walk every directory under the specified path
 
 Find all .csv files
 
 Generate a .json file with the same name next to each CSV
+
+**Note**: For the standard workflow, CSV files are downloaded to `temp/weather/` by `populate-aws-metar.js`. After conversion, you may want to move the JSON files to `cache/metar/AIRPORT/` to match the expected directory structure for analysis scripts.
 
 Output example:
 

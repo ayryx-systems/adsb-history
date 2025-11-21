@@ -177,6 +177,41 @@ The script downloads the full year (Jan 1 to Dec 31, or until current date if it
 
 The script includes rate limiting (2 second delay between requests) and automatic retries to be gentle with the mesonet API.
 
+## Local Directory Structure
+
+The project uses two main directories for local file storage:
+
+### `./cache/` - Processed/Usable Files (Keep)
+
+This directory contains processed, usable files that should be kept:
+
+- **METAR JSON files**: `cache/metar/AIRPORT/AIRPORT_YYYY.json`
+  - Converted from CSV using `scripts/metar_translation/metar_translator.py`
+  - Used by analysis scripts (e.g., `FlightWeatherJoiner.js`)
+  - Source: CSV files from S3 or `temp/weather/`
+
+- **ADSB processed files**: `cache/AIRPORT/YYYY/MM/`
+  - Flight summaries: `DD.json`
+  - L1 statistics: `l1-stats-DD.json`
+  - Ground aircraft lists: `DD.json`
+  - Created by processing pipeline, also synced to S3
+
+### `./temp/` - Temporary Working Files (Can Delete)
+
+This directory contains temporary files used during processing:
+
+- **METAR CSV downloads**: `temp/weather/AIRPORT_YYYY.csv`
+  - Downloaded by `populate-aws-metar.js` from Mesonet API
+  - Uploaded to S3, then can be deleted
+  - Optional: Convert to JSON in `cache/metar/` using `metar_translator.py`
+
+- **ADSB raw data**: `temp/YYYY-MM-DD/`
+  - Tar files downloaded from S3: `YYYY-MM-DD.tar`
+  - Extracted traces: `extracted/traces/...`
+  - Used during processing, can be deleted after processing completes
+
+**Recommendation**: Keep `cache/` for processed files, clean up `temp/` periodically to save disk space.
+
 ## Configuration
 
 Airports are configured in `config/airports.json`. Set `enabled: true` to process an airport.

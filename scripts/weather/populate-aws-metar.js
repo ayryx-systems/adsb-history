@@ -199,7 +199,7 @@ async function main() {
     console.error('  --year YYYY                  Year to download (e.g., 2024)');
     console.error('  --airport AIRPORT            Single airport (e.g., KLGA)');
     console.error('  --airports AIRPORT1,AIRPORT2 Multiple airports (default: all)');
-    console.error('  --temp-dir <path>            Directory for downloaded files (default: ./temp/weather)');
+    console.error('  --temp-dir <path>            Directory for downloaded files (default: ./temp/weather, temporary - can be deleted after upload)');
     console.error('');
     console.error('Example:');
     console.error('  node scripts/weather/populate-aws-metar.js --year 2024');
@@ -263,7 +263,7 @@ async function main() {
     successful: successCount,
     failed: failCount,
     downloadDir,
-    note: 'Files are still in temp directory. Delete manually if desired.'
+    note: 'Files are in temp directory. They have been uploaded to S3 and can be deleted. To convert to JSON for local use, run: python3 scripts/metar_translation/metar_translator.py temp/weather/'
   });
   
   if (failCount > 0) {
