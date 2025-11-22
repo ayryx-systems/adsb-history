@@ -101,6 +101,8 @@ node scripts/download-week.js --start-date 2025-11-08 --days 1
 ./scripts/ingestion/provision-ec2-downloader.sh --days 1
 ```
 
+**SSH Access**: Use `./scripts/ingestion/ssh-to-instance.sh INSTANCE_ID` to connect. View logs with `tail -f /var/log/user-data.log`.
+
 ## Phase 2: Identification
 
 Identify aircraft that were on the ground at airports.
