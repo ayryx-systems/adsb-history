@@ -58,18 +58,20 @@ class GitHubReleaseDownloader {
     const tag = this.formatReleaseTag(date);
     const url = `https://api.github.com/repos/${this.repo}/releases/tags/${tag}`;
     
-    logger.info('Fetching release info', { tag });
+    logger.info('Fetching release info', { tag, repo: this.repo, url });
     
     try {
       const response = await axios.get(url, this.axiosConfig);
       return response.data;
     } catch (error) {
       if (error.response?.status === 404) {
-        logger.warn('Release not found', { tag });
+        logger.warn('Release not found', { tag, repo: this.repo, url });
         return null;
       }
       logger.error('Failed to fetch release', {
         tag,
+        repo: this.repo,
+        url,
         error: error.message,
       });
       throw error;
@@ -149,15 +151,18 @@ class GitHubReleaseDownloader {
     const tag = this.formatReleaseTag(date);
     const baseName = tag; // v2025.11.08-planes-readsb-prod-0
     
-    // Find the two split tar files
+    // Log available assets for debugging
+    logger.info('Release assets', { 
+      tag, 
+      assets: release.assets.map(a => a.name),
+      assetCount: release.assets.length 
+    });
+    
+    // Check for split files (2025 format) or single tar file (2024 format)
     const aaAsset = release.assets.find(a => a.name === `${baseName}.tar.aa`);
     const abAsset = release.assets.find(a => a.name === `${baseName}.tar.ab`);
-    
-    if (!aaAsset || !abAsset) {
-      throw new Error(`Missing split tar files for ${tag}. Found: ${release.assets.map(a => a.name).join(', ')}`);
-    }
+    const singleTarAsset = release.assets.find(a => a.name === `${baseName}.tar`);
 
-    // Download both parts
     const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
     const downloadDir = path.join(this.tempDir, dateStr);
     
@@ -165,28 +170,41 @@ class GitHubReleaseDownloader {
       fs.mkdirSync(downloadDir, { recursive: true });
     }
 
-    const aaPath = path.join(downloadDir, `${baseName}.tar.aa`);
-    const abPath = path.join(downloadDir, `${baseName}.tar.ab`);
     const tarPath = path.join(downloadDir, `${baseName}.tar`);
 
-    logger.info('Downloading split tar files', { date: dateStr, tag });
+    // Handle split files (2025 format)
+    if (aaAsset && abAsset) {
+      logger.info('Downloading split tar files', { date: dateStr, tag });
+      
+      const aaPath = path.join(downloadDir, `${baseName}.tar.aa`);
+      const abPath = path.join(downloadDir, `${baseName}.tar.ab`);
 
-    await this.downloadAsset(aaAsset, aaPath);
-    await this.downloadAsset(abAsset, abPath);
+      await this.downloadAsset(aaAsset, aaPath);
+      await this.downloadAsset(abAsset, abPath);
 
-    // Concatenate the files
-    logger.info('Concatenating tar files', { output: tarPath });
-    
-    const writeStream = fs.createWriteStream(tarPath);
-    await pipeline(fs.createReadStream(aaPath), writeStream, { end: false });
-    await pipeline(fs.createReadStream(abPath), writeStream);
-    
-    logger.info('Tar files concatenated successfully', { path: tarPath });
+      // Concatenate the files
+      logger.info('Concatenating tar files', { output: tarPath });
+      
+      const writeStream = fs.createWriteStream(tarPath);
+      await pipeline(fs.createReadStream(aaPath), writeStream, { end: false });
+      await pipeline(fs.createReadStream(abPath), writeStream);
 
-    // Clean up split files
-    fs.unlinkSync(aaPath);
-    fs.unlinkSync(abPath);
-    logger.debug('Cleaned up split tar files');
+      logger.info('Tar files concatenated successfully', { path: tarPath });
+
+      // Clean up split files
+      fs.unlinkSync(aaPath);
+      fs.unlinkSync(abPath);
+      logger.debug('Cleaned up split tar files');
+    }
+    // Handle single tar file (2024 format)
+    else if (singleTarAsset) {
+      logger.info('Downloading single tar file', { date: dateStr, tag });
+      await this.downloadAsset(singleTarAsset, tarPath);
+      logger.info('Tar file downloaded successfully', { path: tarPath });
+    }
+    else {
+      throw new Error(`Missing tar files for ${tag}. Found: ${release.assets.map(a => a.name).join(', ')}`);
+    }
 
     return tarPath;
   }
