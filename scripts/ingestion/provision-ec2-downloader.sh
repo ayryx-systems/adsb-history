@@ -224,16 +224,40 @@ if [ -z "$SG_ID" ] || [ "$SG_ID" == "None" ]; then
   echo "Creating security group: $SECURITY_GROUP_NAME"
   SG_ID=$(aws ec2 create-security-group \
     --group-name "$SECURITY_GROUP_NAME" \
-    --description "Security group for ADSB history downloader (egress only)" \
+    --description "Security group for ADSB history downloader" \
     --vpc-id "$VPC_ID" \
     --region "$REGION" \
     --query "GroupId" \
     --output text)
   
-  # Allow all outbound traffic (default, but making it explicit)
   echo "✓ Security group created: $SG_ID"
 else
   echo "✓ Security group already exists: $SG_ID"
+fi
+
+# Get current public IP for SSH access
+echo "Detecting your public IP address..."
+MY_IP=$(curl -s https://checkip.amazonaws.com 2>/dev/null || curl -s https://api.ipify.org 2>/dev/null || echo "")
+if [ -z "$MY_IP" ]; then
+  echo "⚠️  Could not detect your public IP. SSH access may not work."
+  echo "   You can manually add an SSH rule to the security group later."
+else
+  echo "✓ Your public IP: $MY_IP"
+  
+  # Try to add SSH rule (will fail silently if it already exists)
+  echo "Adding SSH access rule (port 22) from your IP..."
+  if aws ec2 authorize-security-group-ingress \
+    --group-id "$SG_ID" \
+    --region "$REGION" \
+    --protocol tcp \
+    --port 22 \
+    --cidr "${MY_IP}/32" \
+    > /dev/null 2>&1; then
+    echo "✓ SSH access rule added"
+  else
+    # Rule might already exist, which is fine
+    echo "✓ SSH access rule configured (may have already existed)"
+  fi
 fi
 echo ""
 
