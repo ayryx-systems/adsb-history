@@ -182,7 +182,62 @@ EOF
     --policy-document file:///tmp/s3-policy.json \
     --region "$REGION"
   
-  echo "✓ IAM role created with S3 access"
+  # Create and attach EC2 self-termination policy
+  cat > /tmp/ec2-terminate-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:TerminateInstances",
+        "ec2:DescribeInstances"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+  aws iam put-role-policy \
+    --role-name "$IAM_ROLE_NAME" \
+    --policy-name "EC2SelfTerminate" \
+    --policy-document file:///tmp/ec2-terminate-policy.json \
+    --region "$REGION"
+  
+  echo "✓ IAM role created with S3 access and EC2 self-termination"
+fi
+
+# Update existing role if it doesn't have EC2 termination permission
+if aws iam get-role --role-name "$IAM_ROLE_NAME" --region "$REGION" > /dev/null 2>&1; then
+  # Check if EC2SelfTerminate policy exists
+  if ! aws iam get-role-policy --role-name "$IAM_ROLE_NAME" --policy-name "EC2SelfTerminate" --region "$REGION" > /dev/null 2>&1; then
+    echo "Adding EC2 self-termination permission to existing role..."
+    
+    cat > /tmp/ec2-terminate-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:TerminateInstances",
+        "ec2:DescribeInstances"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+    aws iam put-role-policy \
+      --role-name "$IAM_ROLE_NAME" \
+      --policy-name "EC2SelfTerminate" \
+      --policy-document file:///tmp/ec2-terminate-policy.json \
+      --region "$REGION"
+    
+    echo "✓ EC2 self-termination permission added"
+  fi
 fi
 
 # Create instance profile if it doesn't exist
