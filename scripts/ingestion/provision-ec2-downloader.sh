@@ -14,7 +14,8 @@ REGION="us-west-1"
 SECURITY_GROUP_NAME="adsb-history-downloader"
 IAM_ROLE_NAME="adsb-history-downloader-role"
 IAM_INSTANCE_PROFILE="adsb-history-downloader-profile"
-KEY_NAME=""  # Optional - set if you want SSH access for debugging
+DEFAULT_KEY_NAME="adsb-history-downloader-key"  # Permanent key for all instances
+KEY_NAME=""  # Will default to DEFAULT_KEY_NAME if not specified
 AWS_PROFILE="${AWS_PROFILE:-}"  # Optional - set AWS profile to use
 
 # Parse arguments
@@ -51,9 +52,9 @@ while [[ $# -gt 0 ]]; do
       echo "Options:"
       echo "  --start-date YYYY-MM-DD   Start date for download (default: 2025-11-02)"
       echo "  --days N                  Number of days to download (default: 7)"
-      echo "  --region REGION           AWS region (default: us-west-2)"
+      echo "  --region REGION           AWS region (default: us-west-1)"
       echo "  --aws-profile PROFILE     AWS profile to use (default: from AWS_PROFILE env or default)"
-      echo "  --key-name KEY            SSH key name for debugging (optional)"
+      echo "  --key-name KEY            SSH key name (default: adsb-history-downloader-key, auto-created if missing)"
       echo "  --help                    Show this help message"
       echo ""
       exit 0
@@ -411,13 +412,56 @@ sed -i '' "s/DAYS_PLACEHOLDER/$DAYS/g" /tmp/user-data.sh
 echo "✓ User data script prepared"
 echo ""
 
-# Step 6: Launch EC2 instance
-echo "Step 6: Launching EC2 instance..."
-
-KEY_NAME_PARAM=""
-if [ -n "$KEY_NAME" ]; then
-  KEY_NAME_PARAM="--key-name $KEY_NAME"
+# Step 6: Set up SSH key (use default if not specified)
+if [ -z "$KEY_NAME" ]; then
+  KEY_NAME="$DEFAULT_KEY_NAME"
 fi
+
+echo "Step 6: Setting up SSH key ($KEY_NAME)..."
+
+# Check if key exists in AWS
+if aws ec2 describe-key-pairs --key-names "$KEY_NAME" --region "$REGION" > /dev/null 2>&1; then
+  echo "✓ Key pair already exists: $KEY_NAME"
+  
+  # Check if private key file exists locally
+  KEY_FILE="$HOME/.ssh/${KEY_NAME}.pem"
+  if [ ! -f "$KEY_FILE" ]; then
+    echo "⚠️  Warning: Private key file not found at $KEY_FILE"
+    echo "   The key exists in AWS, but you may not have the private key locally."
+    echo "   If you've lost the private key, you'll need to create a new key pair."
+    echo ""
+    read -p "Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      exit 1
+    fi
+  else
+    echo "✓ Private key found at: $KEY_FILE"
+  fi
+else
+  echo "Creating new key pair: $KEY_NAME"
+  
+  # Create the key pair
+  OUTPUT=$(aws ec2 create-key-pair \
+    --key-name "$KEY_NAME" \
+    --region "$REGION" \
+    --query 'KeyMaterial' \
+    --output text)
+  
+  # Save the private key
+  KEY_FILE="$HOME/.ssh/${KEY_NAME}.pem"
+  mkdir -p "$HOME/.ssh"
+  echo "$OUTPUT" > "$KEY_FILE"
+  chmod 400 "$KEY_FILE"
+  
+  echo "✓ Key pair created and saved to: $KEY_FILE"
+fi
+echo ""
+
+# Step 7: Launch EC2 instance
+echo "Step 7: Launching EC2 instance..."
+
+KEY_NAME_PARAM="--key-name $KEY_NAME"
 
 INSTANCE_ID=$(aws ec2 run-instances \
   --region "$REGION" \
@@ -456,10 +500,21 @@ echo ""
 echo "Or check instance status:"
 echo "  aws ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query 'Reservations[0].Instances[0].State.Name'"
 echo ""
-echo "View logs (if you have SSH key configured):"
-echo "  ssh ec2-user@\$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
-echo "  tail -f /var/log/user-data.log"
+
+echo "SSH Access (using key: $KEY_NAME):"
+echo "  1. Get the instance public IP:"
+echo "     INSTANCE_IP=\$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
 echo ""
+echo "  2. SSH into the instance:"
+echo "     ssh -i ~/.ssh/${KEY_NAME}.pem ec2-user@\$INSTANCE_IP"
+echo ""
+echo "  3. Or use the helper script:"
+echo "     ./scripts/ingestion/ssh-to-instance.sh $INSTANCE_ID"
+echo ""
+echo "  4. View logs:"
+echo "     tail -f /var/log/user-data.log"
+echo ""
+
 echo "Estimated completion: 30-60 minutes"
 echo "=========================================="
 
