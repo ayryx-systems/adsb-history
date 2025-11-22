@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Process January 2025 data for arrival time statistics
+ * Run complete analysis pipeline for date range
  * 
- * For each day in January 2025, runs the complete pipeline:
+ * Runs the complete analysis pipeline for each day in the specified date range:
  * 1. Phase 2: Identify ground aircraft (identify-ground-aircraft.js)
  * 2. Phase 3a: Analyze flights (analyze-airport-day.js) - creates flight summaries
  * 3. Phase 3b: Generate L1 statistics (generate-l1-stats.js)
@@ -11,9 +11,9 @@
  * Processes one day at a time to manage disk space (~3GB/day raw data)
  * 
  * Usage:
- *   node scripts/analysis/process-january-2025.js --airport KORD
- *   node scripts/analysis/process-january-2025.js --airport KORD --start-date 2025-01-15
- *   node scripts/analysis/process-january-2025.js --airport KORD --start-date 2025-01-15 --end-date 2025-01-20
+ *   node scripts/analysis/process-analysis-pipeline.js --airport KORD
+ *   node scripts/analysis/process-analysis-pipeline.js --airport KORD --start-date 2025-01-15
+ *   node scripts/analysis/process-analysis-pipeline.js --airport KORD --start-date 2025-01-15 --end-date 2025-01-20
  */
 
 import { spawn } from 'child_process';
@@ -50,10 +50,10 @@ function parseArgs() {
       options.force = true;
     } else if (arg === '--help' || arg === '-h') {
       console.log(`
-Process January 2025 data for arrival time statistics
+Run complete analysis pipeline (Phase 2, 3a, and 3b) for date range
 
 Usage:
-  node scripts/analysis/process-january-2025.js --airport ICAO [options]
+  node scripts/analysis/process-analysis-pipeline.js --airport ICAO [options]
 
 Options:
   --airport ICAO        Airport ICAO code (e.g., KORD, KLGA, KJFK)
@@ -63,11 +63,11 @@ Options:
   --help, -h            Show this help message
 
 Examples:
-  # Process all of January for KORD
-  node scripts/analysis/process-january-2025.js --airport KORD
+  # Process date range for KORD (defaults to January 2025)
+  node scripts/analysis/process-analysis-pipeline.js --airport KORD
 
   # Process specific date range
-  node scripts/analysis/process-january-2025.js --airport KORD --start-date 2025-01-15 --end-date 2025-01-20
+  node scripts/analysis/process-analysis-pipeline.js --airport KORD --start-date 2025-01-15 --end-date 2025-01-20
       `);
       process.exit(0);
     }
@@ -168,7 +168,7 @@ async function processDay(airport, date, force) {
 async function main() {
   const options = parseArgs();
 
-  logger.info('Starting January 2025 processing', {
+  logger.info('Starting analysis pipeline processing', {
     airport: options.airport,
     startDate: options.startDate,
     endDate: options.endDate,
@@ -248,5 +248,4 @@ main().catch((error) => {
   });
   process.exit(1);
 });
-
 

@@ -191,6 +191,39 @@ node scripts/analysis/generate-l1-stats.js --airport KLGA --date 2025-11-08
 node scripts/analysis/generate-l1-stats.js --airport KLGA --date 2025-11-08
 ```
 
+### Running Complete Analysis Pipeline
+
+Run all analysis phases (2, 3a, and 3b) for a date range in one command. This script processes each day sequentially, running:
+
+1. Phase 2: Identify ground aircraft
+2. Phase 3a: Analyze flights (create flight summaries)
+3. Phase 3b: Generate L1 statistics
+
+**Input**: Raw ADSB data from Phase 1 (must be ingested first)  
+**Output**: Complete analysis pipeline outputs (ground aircraft lists, flight summaries, and L1 statistics)
+
+#### Local
+
+```bash
+# Process date range (defaults to January 2025)
+node scripts/analysis/process-analysis-pipeline.js --airport KORD
+
+# Process specific date range
+node scripts/analysis/process-analysis-pipeline.js --airport KORD --start-date 2025-01-15 --end-date 2025-01-20
+
+# Force reprocess even if data exists
+node scripts/analysis/process-analysis-pipeline.js --airport KORD --start-date 2025-01-15 --end-date 2025-01-20 --force
+```
+
+**Requirements**: ~50GB disk space for extraction (processes one day at a time to manage disk usage)
+
+#### EC2
+
+```bash
+# Same script, run on EC2 instance with sufficient disk space
+node scripts/analysis/process-analysis-pipeline.js --airport KORD --start-date 2025-01-15 --end-date 2025-01-20
+```
+
 ## Pipeline Flow
 
 ```
