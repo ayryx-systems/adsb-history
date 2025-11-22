@@ -32,6 +32,10 @@ if (!startDate || !days || isNaN(days) || days < 1) {
   process.exit(1);
 }
 
+// Determine GitHub repository based on year of start date
+const startYear = new Date(startDate).getFullYear();
+const repo = `adsblol/globe_history_${startYear}`;
+
 // Generate date range
 const dates = GitHubReleaseDownloader.getDateRange(startDate, new Date(new Date(startDate).getTime() + (days - 1) * 24 * 60 * 60 * 1000));
 
@@ -40,12 +44,13 @@ logger.info('Starting download and upload', {
   days,
   dateCount: dates.length,
   dates,
+  repo,
 });
 
 // Initialize components
 // Use /opt for temp directory on EC2 (on EBS volume, not tmpfs)
 const tempDir = process.env.TEMP_DIR || '/opt/adsb-downloads';
-const downloader = new GitHubReleaseDownloader({ tempDir });
+const downloader = new GitHubReleaseDownloader({ tempDir, repo });
 const uploader = new S3Uploader();
 
 let successCount = 0;

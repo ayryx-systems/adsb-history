@@ -76,7 +76,7 @@ Going forward, all cache and temp files will be created in the project root (`./
 
 Download raw ADSB data and store in S3.
 
-**Input**: GitHub releases from [adsblol/globe_history_2025](https://github.com/adsblol/globe_history_2025)  
+**Input**: GitHub releases from [adsblol/globe_history_YYYY](https://github.com/adsblol/globe_history_2025) (repository determined by year, e.g., `globe_history_2024` for 2024 dates, `globe_history_2025` for 2025 dates)  
 **Output**: `s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar` (~3GB per day, compressed tar archives)
 
 ### Local

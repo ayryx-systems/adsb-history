@@ -5,9 +5,10 @@ import { pipeline } from 'stream/promises';
 import logger from '../utils/logger.js';
 
 /**
- * Downloads ADS-B data from adsblol/globe_history_2025 GitHub releases
+ * Downloads ADS-B data from adsblol/globe_history_YYYY GitHub releases
  * 
- * Release naming: v2025.11.08-planes-readsb-prod-0
+ * Repository is determined by year (e.g., adsblol/globe_history_2024, adsblol/globe_history_2025)
+ * Release naming: vYYYY.MM.DD-planes-readsb-prod-0
  * Assets: .tar.aa (2GB) and .tar.ab (1GB) - must be concatenated before extraction
  */
 class GitHubReleaseDownloader {

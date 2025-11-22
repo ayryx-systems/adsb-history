@@ -2,7 +2,7 @@
 
 ## 🎯 Purpose
 
-Download, process, and serve historical ADS-B data from [adsb.lol/globe_history_2025](https://github.com/adsblol/globe_history_2025) to provide statistical analysis of flight operations for the `planning-app`.
+Download, process, and serve historical ADS-B data from [adsblol/globe_history_YYYY](https://github.com/adsblol/globe_history_2025) GitHub repositories (repository determined by year, e.g., `globe_history_2024` for 2024 dates) to provide statistical analysis of flight operations for the `planning-app`.
 
 Primary metrics:
 
@@ -216,7 +216,7 @@ Downloads and stores raw ADS-B data from GitHub.
 - **Data Extractor**: Extract tar archives and decompress gzipped JSON files
 - **S3 Uploader**: Organize and upload raw data to S3
 
-**Data Source**: https://github.com/adsblol/globe_history_2025/releases
+**Data Source**: https://github.com/adsblol/globe_history_YYYY/releases (repository determined by year)
 
 ### 2. Processing Layer
 
@@ -391,7 +391,7 @@ Environment variables and config files to define:
 
 ## 📖 Data Source
 
-**adsb.lol globe_history**: https://github.com/adsblol/globe_history_2025/releases
+**adsb.lol globe_history**: https://github.com/adsblol/globe_history_YYYY/releases (repository determined by year, e.g., globe_history_2024, globe_history_2025)
 
 - License: Open Database License (ODbL) + CC0
 - Format: Daily tar archives of readsb JSON position reports
