@@ -220,10 +220,22 @@ class L1StatsAnalyzer {
       }
 
       // Track aircraft information for this time slot
-      byTimeSlot[timeSlot].aircraft.push({
+      const aircraftInfo = {
         icao: arrival.icao,
         type: arrival.type || 'UNKNOWN',
-      });
+        touchdown: {
+          distance_nm: arrival.touchdown.distance_nm,
+          altitude_ft: arrival.touchdown.altitude_ft,
+          utc: touchdownDate.toISOString(),
+        },
+      };
+
+      // Add milestones if available
+      if (arrival.milestones) {
+        aircraftInfo.milestones = { ...arrival.milestones };
+      }
+
+      byTimeSlot[timeSlot].aircraft.push(aircraftInfo);
 
       // Add to overall, time-of-day, and time-slot groups
       if (arrival.milestones) {
