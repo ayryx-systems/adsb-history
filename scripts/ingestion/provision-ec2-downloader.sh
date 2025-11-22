@@ -250,11 +250,62 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PACKAGE_DIR="/tmp/adsb-ingestion-$$"
 mkdir -p "$PACKAGE_DIR"
 
-# Copy necessary files
+# Copy necessary files, excluding cache, temp, logs, venv, and other artifacts
 cd "$PROJECT_ROOT"
-cp -r src "$PACKAGE_DIR/"
-cp -r config "$PACKAGE_DIR/"
-cp -r scripts "$PACKAGE_DIR/"
+
+# Use rsync with exclusions for cleaner copying
+rsync -av --exclude='cache/' \
+          --exclude='temp/' \
+          --exclude='tmp/' \
+          --exclude='logs/' \
+          --exclude='*.log' \
+          --exclude='venv/' \
+          --exclude='env/' \
+          --exclude='ENV/' \
+          --exclude='.venv/' \
+          --exclude='*.tar' \
+          --exclude='*.tar.gz' \
+          --exclude='node_modules/' \
+          --exclude='__pycache__/' \
+          --exclude='*.pyc' \
+          --exclude='.DS_Store' \
+          --exclude='notebooks/' \
+          src "$PACKAGE_DIR/"
+
+rsync -av --exclude='cache/' \
+          --exclude='temp/' \
+          --exclude='tmp/' \
+          --exclude='logs/' \
+          --exclude='*.log' \
+          --exclude='venv/' \
+          --exclude='env/' \
+          --exclude='ENV/' \
+          --exclude='.venv/' \
+          --exclude='*.tar' \
+          --exclude='*.tar.gz' \
+          --exclude='node_modules/' \
+          --exclude='__pycache__/' \
+          --exclude='*.pyc' \
+          --exclude='.DS_Store' \
+          config "$PACKAGE_DIR/"
+
+rsync -av --exclude='cache/' \
+          --exclude='temp/' \
+          --exclude='tmp/' \
+          --exclude='logs/' \
+          --exclude='*.log' \
+          --exclude='venv/' \
+          --exclude='env/' \
+          --exclude='ENV/' \
+          --exclude='.venv/' \
+          --exclude='*.tar' \
+          --exclude='*.tar.gz' \
+          --exclude='node_modules/' \
+          --exclude='__pycache__/' \
+          --exclude='*.pyc' \
+          --exclude='.DS_Store' \
+          scripts "$PACKAGE_DIR/"
+
 cp package.json "$PACKAGE_DIR/"
 cp .env.example "$PACKAGE_DIR/.env" 2>/dev/null || true
 
@@ -263,6 +314,17 @@ cd "$PACKAGE_DIR"
 tar -czf /tmp/adsb-code.tar.gz .
 cd - > /dev/null
 rm -rf "$PACKAGE_DIR"
+
+# Check package size
+PACKAGE_SIZE=$(du -h /tmp/adsb-code.tar.gz | awk '{print $1}')
+echo "✓ Package created: $PACKAGE_SIZE"
+
+# Warn if package is suspiciously large (>100MB)
+PACKAGE_SIZE_BYTES=$(stat -f%z /tmp/adsb-code.tar.gz 2>/dev/null || stat -c%s /tmp/adsb-code.tar.gz 2>/dev/null)
+if [ -n "$PACKAGE_SIZE_BYTES" ] && [ "$PACKAGE_SIZE_BYTES" -gt 104857600 ]; then
+  echo "⚠️  WARNING: Package size is larger than expected (>100MB)"
+  echo "   This may indicate unwanted files are being included."
+fi
 
 echo "Uploading code package to S3..."
 S3_CODE_KEY="bootstrap/adsb-history-code.tar.gz"
