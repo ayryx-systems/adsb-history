@@ -14,6 +14,64 @@ Three-phase pipeline:
 
 Each phase depends on the previous one's output.
 
+## Running Scripts
+
+**Important**: Always run scripts from the project root directory (`adsb-history/`).
+
+```bash
+cd adsb-history
+node scripts/analysis/analyze-airport-day.js --airport KLGA --date 2025-11-08
+```
+
+### Why?
+
+Cache and temp directories are created relative to your current working directory:
+
+- **Cache**: `./cache/` - Created relative to `process.cwd()` (where you run the script)
+- **Temp**: `./temp/` - Created relative to `process.cwd()` (where you run the script)
+
+If you run scripts from subdirectories, cache and temp files will be created in unexpected locations, making it hard to find and manage files.
+
+### Directory Structure
+
+When running from the project root, you'll get this structure:
+
+```
+adsb-history/
+├── cache/              # Processed files (keep)
+│   ├── KLGA/
+│   │   └── 2025/
+│   │       └── 11/
+│   └── metar/
+├── temp/               # Temporary files (can delete)
+│   ├── weather/
+│   └── 2025-11-08/
+└── scripts/            # Scripts (run from root)
+```
+
+### Environment Variables
+
+You can override the temp directory using the `TEMP_DIR` environment variable:
+
+```bash
+# Use custom temp directory
+TEMP_DIR=/path/to/temp node scripts/analysis/analyze-airport-day.js --airport KLGA --date 2025-11-08
+```
+
+**Note**: The cache directory (`./cache/`) is not configurable via environment variables. It's always created relative to your current working directory. For simplicity, always run scripts from the project root to use the default `./cache/` and `./temp/` directories.
+
+### Cleaning Up Old Cache/Temp Directories
+
+If you've previously run scripts from subdirectories, you may have cache/temp directories in places like `scripts/analysis/cache/` or `scripts/identification/temp/`. These are safe to delete:
+
+```bash
+# Remove old cache/temp from script subdirectories
+rm -rf scripts/analysis/cache scripts/analysis/temp
+rm -rf scripts/identification/cache scripts/identification/temp
+```
+
+Going forward, all cache and temp files will be created in the project root (`./cache/` and `./temp/`) when you run scripts from the root directory.
+
 ## Phase 1: Ingestion
 
 Download raw ADSB data and store in S3.
@@ -179,6 +237,8 @@ The script includes rate limiting (2 second delay between requests) and automati
 
 ## Local Directory Structure
 
+**Note**: These directories are created relative to where you run scripts. See [Running Scripts](#running-scripts) above for important guidance.
+
 The project uses two main directories for local file storage:
 
 ### `./cache/` - Processed/Usable Files (Keep)
@@ -186,6 +246,7 @@ The project uses two main directories for local file storage:
 This directory contains processed, usable files that should be kept:
 
 - **METAR JSON files**: `cache/metar/AIRPORT/AIRPORT_YYYY.json`
+
   - Converted from CSV using `scripts/metar_translation/metar_translator.py`
   - Used by analysis scripts (e.g., `FlightWeatherJoiner.js`)
   - Source: CSV files from S3 or `temp/weather/`
@@ -201,6 +262,7 @@ This directory contains processed, usable files that should be kept:
 This directory contains temporary files used during processing:
 
 - **METAR CSV downloads**: `temp/weather/AIRPORT_YYYY.csv`
+
   - Downloaded by `populate-aws-metar.js` from Mesonet API
   - Uploaded to S3, then can be deleted
   - Optional: Convert to JSON in `cache/metar/` using `metar_translator.py`
