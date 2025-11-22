@@ -276,6 +276,7 @@ class L1StatsAnalyzer {
 
     // Calculate median for each 15-minute time slot and include aircraft information
     const timeSlotData = {};
+    const timeSlotMedians = {};
     const milestoneKeys = ['timeFrom100nm', 'timeFrom50nm', 'timeFrom20nm'];
     
     for (const [slot, slotData] of Object.entries(byTimeSlot)) {
@@ -284,10 +285,14 @@ class L1StatsAnalyzer {
         aircraft: slotData.aircraft,
       };
       
+      timeSlotMedians[slot] = {};
+      
       for (const key of milestoneKeys) {
         const median = this.calculateMedian(slotData[key]);
         if (median !== null) {
-          timeSlotData[slot][key] = Math.round(median * 100) / 100;
+          const medianValue = Math.round(median * 100) / 100;
+          timeSlotData[slot][key] = medianValue;
+          timeSlotMedians[slot][key] = medianValue;
         }
       }
     }
@@ -295,8 +300,10 @@ class L1StatsAnalyzer {
     // Sort time slots chronologically
     const sortedTimeSlots = Object.keys(timeSlotData).sort();
     const sortedTimeSlotData = {};
+    const sortedTimeSlotMedians = {};
     for (const slot of sortedTimeSlots) {
       sortedTimeSlotData[slot] = timeSlotData[slot];
+      sortedTimeSlotMedians[slot] = timeSlotMedians[slot];
     }
 
     const overall = {
@@ -308,6 +315,7 @@ class L1StatsAnalyzer {
       },
       byTouchdownTimeOfDay: timeOfDayStats,
       byTouchdownTimeSlot: sortedTimeSlotData,
+      byTouchdownTimeSlotMedians: sortedTimeSlotMedians,
     };
 
     logger.info('L1 stats analysis complete', {
