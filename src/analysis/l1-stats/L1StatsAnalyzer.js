@@ -215,8 +215,15 @@ class L1StatsAnalyzer {
           timeFrom100nm: [],
           timeFrom50nm: [],
           timeFrom20nm: [],
+          aircraft: [],
         };
       }
+
+      // Track aircraft information for this time slot
+      byTimeSlot[timeSlot].aircraft.push({
+        icao: arrival.icao,
+        type: arrival.type || 'UNKNOWN',
+      });
 
       // Add to overall, time-of-day, and time-slot groups
       if (arrival.milestones) {
@@ -255,25 +262,29 @@ class L1StatsAnalyzer {
       };
     }
 
-    // Calculate median for each 15-minute time slot
-    const timeSlotMedians = {};
+    // Calculate median for each 15-minute time slot and include aircraft information
+    const timeSlotData = {};
     const milestoneKeys = ['timeFrom100nm', 'timeFrom50nm', 'timeFrom20nm'];
     
-    for (const [slot, milestones] of Object.entries(byTimeSlot)) {
-      timeSlotMedians[slot] = {};
+    for (const [slot, slotData] of Object.entries(byTimeSlot)) {
+      timeSlotData[slot] = {
+        count: slotData.aircraft.length,
+        aircraft: slotData.aircraft,
+      };
+      
       for (const key of milestoneKeys) {
-        const median = this.calculateMedian(milestones[key]);
+        const median = this.calculateMedian(slotData[key]);
         if (median !== null) {
-          timeSlotMedians[slot][key] = Math.round(median * 100) / 100;
+          timeSlotData[slot][key] = Math.round(median * 100) / 100;
         }
       }
     }
 
     // Sort time slots chronologically
-    const sortedTimeSlots = Object.keys(timeSlotMedians).sort();
-    const sortedTimeSlotMedians = {};
+    const sortedTimeSlots = Object.keys(timeSlotData).sort();
+    const sortedTimeSlotData = {};
     for (const slot of sortedTimeSlots) {
-      sortedTimeSlotMedians[slot] = timeSlotMedians[slot];
+      sortedTimeSlotData[slot] = timeSlotData[slot];
     }
 
     const overall = {
@@ -284,7 +295,7 @@ class L1StatsAnalyzer {
         timeFrom20nm: this.calculateStats(overallMilestones.timeFrom20nm),
       },
       byTouchdownTimeOfDay: timeOfDayStats,
-      byTouchdownTimeSlot: sortedTimeSlotMedians,
+      byTouchdownTimeSlot: sortedTimeSlotData,
     };
 
     logger.info('L1 stats analysis complete', {
