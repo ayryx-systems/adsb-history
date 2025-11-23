@@ -124,7 +124,8 @@ class FlightAnalyzer {
     const events = [];
     
     // Analyze each segment independently
-    for (const segment of segments) {
+    for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+      const segment = segments[segIdx];
       const segmentClosestApproach = segment.reduce((min, pos) => 
         pos.distance < min.distance ? pos : min, segment[0]);
 
@@ -142,9 +143,14 @@ class FlightAnalyzer {
         continue;
       }
 
+      // Check if there's a gap after this segment (next segment starts much later)
+      const hasGapAfter = segIdx < segments.length - 1 && 
+        segments[segIdx + 1].length > 0 &&
+        segments[segIdx + 1][0].timestamp - segment[segment.length - 1].timestamp >= 5 * 60;
+
       // Analyze based on classification
       if (classification === 'arrival') {
-        const arrivalEvent = this.analyzeArrival(icao, segment, airport, segmentClosestApproach, airportElevation, { registration, aircraftType, description });
+        const arrivalEvent = this.analyzeArrival(icao, segment, airport, segmentClosestApproach, airportElevation, { registration, aircraftType, description }, hasGapAfter);
         if (arrivalEvent) events.push(arrivalEvent);
       } else if (classification === 'departure') {
         const departureEvent = this.analyzeDeparture(icao, segment, airport, segmentClosestApproach, airportElevation, { registration, aircraftType, description });
@@ -524,7 +530,7 @@ class FlightAnalyzer {
   /**
    * Analyze an arrival flight
    */
-  analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation = 0, metadata = {}) {
+  analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation = 0, metadata = {}, hasGapAfter = false) {
     const { registration = null, aircraftType = null, description = null } = metadata;
     
     // Check for lost contact scenarios where aircraft was approaching
@@ -533,11 +539,22 @@ class FlightAnalyzer {
     const lostContactTimeout = 2 * 60; // 2 minutes in seconds
     
     // Find touchdown - prioritize last ground position in segment (handles gaps better)
+    // CRITICAL: Only use positions from this segment, never from later segments
     let touchdown = null;
     
-    // First, find all ground positions near airport
+    // Get the maximum timestamp in this segment to ensure we never use later data
+    const segmentMaxTimestamp = positionsWithDistance.length > 0 
+      ? Math.max(...positionsWithDistance.map(p => p.timestamp))
+      : 0;
+    
+    // First, find all ground positions near airport (only from this segment)
+    // Prioritize positions that are actually in this segment (before any gap)
     const groundPositions = [];
     for (const pos of positionsWithDistance) {
+      // Safety check: ensure position is actually in this segment
+      if (pos.timestamp > segmentMaxTimestamp) {
+        continue; // Skip positions from later segments
+      }
       if (pos.distance <= this.touchdownProximity && 
           pos.alt_baro <= this.groundAltitudeThreshold) {
         groundPositions.push(pos);
@@ -547,17 +564,24 @@ class FlightAnalyzer {
     // Use the last ground position (most likely to be the actual landing)
     // This is especially important when there's a gap after landing
     if (groundPositions.length > 0) {
+      // Sort by timestamp to get the last one
+      groundPositions.sort((a, b) => a.timestamp - b.timestamp);
       touchdown = groundPositions[groundPositions.length - 1];
     }
     
     // Also check if the last position in the segment is on ground near airport
     // This handles cases where we lose contact right after landing
+    // CRITICAL: This must be the actual last position in the segment (before any gap)
     if (positionsWithDistance.length > 0) {
-      const lastPos = positionsWithDistance[positionsWithDistance.length - 1];
-      if (lastPos.distance <= this.touchdownProximity && 
-          lastPos.alt_baro <= this.groundAltitudeThreshold) {
-        // Use this as touchdown (it's the most recent and likely the actual landing)
-        touchdown = lastPos;
+      // Find the actual last position in this segment (not from later segments)
+      const segmentPositions = positionsWithDistance.filter(p => p.timestamp <= segmentMaxTimestamp);
+      if (segmentPositions.length > 0) {
+        const lastPos = segmentPositions[segmentPositions.length - 1];
+        if (lastPos.distance <= this.touchdownProximity && 
+            lastPos.alt_baro <= this.groundAltitudeThreshold) {
+          // Use this as touchdown (it's the most recent and likely the actual landing)
+          touchdown = lastPos;
+        }
       }
     }
     
@@ -607,10 +631,43 @@ class FlightAnalyzer {
         }
       }
     }
+    
+    // If there's a gap after this segment and we still don't have a touchdown,
+    // use the last position in the segment if it's in approach configuration
+    // This handles cases where we lose contact during approach
+    if (!touchdown && hasGapAfter && positionsWithDistance.length > 0) {
+      const lastPos = positionsWithDistance[positionsWithDistance.length - 1];
+      const lastAGL = lastPos.alt_agl !== null ? lastPos.alt_agl : (lastPos.alt_baro !== null ? lastPos.alt_baro - airportElevation : null);
+      const wasApproaching = lastAGL !== null && 
+                             lastAGL < approachThresholdAGL && 
+                             lastPos.distance <= approachDistanceThreshold;
+      
+      if (wasApproaching) {
+        touchdown = lastPos;
+      }
+    }
 
-    // If still no touchdown, use closest approach as proxy
+    // CRITICAL: Final safety check - ensure touchdown is from this segment only
+    // Verify touchdown is actually in the positionsWithDistance array for this segment
+    if (touchdown) {
+      const touchdownInSegment = positionsWithDistance.find(p => 
+        p.timestamp === touchdown.timestamp && 
+        p.lat === touchdown.lat && 
+        p.lon === touchdown.lon
+      );
+      
+      if (!touchdownInSegment) {
+        // Touchdown is not in this segment - reset it
+        touchdown = null;
+      }
+    }
+    
+    // If still no touchdown, use closest approach from THIS segment only
     if (!touchdown) {
-      touchdown = closestApproach;
+      // Recalculate closest approach from this segment to ensure it's correct
+      const segmentClosest = positionsWithDistance.reduce((min, pos) => 
+        pos.distance < min.distance ? pos : min, positionsWithDistance[0]);
+      touchdown = segmentClosest;
     }
 
     // Find distance milestones (100nm, 50nm, 20nm) before touchdown
