@@ -309,6 +309,62 @@ This directory contains temporary files used during processing:
 
 **Recommendation**: Keep `cache/` for processed files, clean up `temp/` periodically to save disk space.
 
+## Utility Scripts
+
+### Get Aircraft Trace
+
+Retrieve raw ADSB trace data for a specific aircraft (ICAO code) on a specific day. The script automatically downloads and caches the tar file from S3, extracts it if needed, and finds the trace for the specified ICAO code.
+
+**Usage:**
+
+```bash
+# Output to stdout (JSON)
+node scripts/get-aircraft-trace.js --icao <ICAO_CODE> --date <YYYY-MM-DD>
+
+# Save to file
+node scripts/get-aircraft-trace.js --icao <ICAO_CODE> --date <YYYY-MM-DD> --output <FILE>
+```
+
+**Example:**
+
+```bash
+# Get trace for ICAO a1b2c3 on January 6, 2025
+node scripts/get-aircraft-trace.js --icao a1b2c3 --date 2025-01-06
+
+# Save to file
+node scripts/get-aircraft-trace.js --icao a1b2c3 --date 2025-01-06 --output trace.json
+```
+
+**Features:**
+
+- Automatically downloads tar file from S3 (cached in `./temp/YYYY-MM-DD/`)
+- Extracts tar file if needed (cached extraction in `./temp/YYYY-MM-DD/extracted/`)
+- Finds trace file using hex subdirectory organization
+- Outputs complete trace data including position reports, registration, aircraft type, and description
+
+**Output Format:**
+
+```json
+{
+  "icao": "a1b2c3",
+  "date": "2025-01-06",
+  "registration": "N123AB",
+  "aircraftType": "B738",
+  "description": "Boeing 737-800",
+  "trace": [
+    {
+      "timestamp": 1234567890,
+      "lat": 40.123,
+      "lon": -74.456,
+      "altitude": 35000,
+      ...
+    },
+    ...
+  ],
+  "traceCount": 1234
+}
+```
+
 ## Configuration
 
 Airports are configured in `config/airports.json`. Set `enabled: true` to process an airport.
