@@ -24,13 +24,32 @@ import path from 'path';
 const args = process.argv.slice(2);
 
 if (args.length < 1) {
-  console.error('Usage: node scripts/visualize-trace.js <trace_file> [output.html]');
+  console.error('Usage: node scripts/visualize-trace.js <trace_file> [output.html] [--thin N]');
   console.error('Example: node scripts/visualize-trace.js a8a6c0_trace.txt trace.html');
+  console.error('         node scripts/visualize-trace.js a8a6c0_trace.txt trace.html --thin 5');
+  console.error('');
+  console.error('Options:');
+  console.error('  --thin N    Only show every Nth point (e.g., --thin 5 shows every 5th point)');
   process.exit(1);
 }
 
 const traceFile = args[0];
-const outputFile = args[1] || traceFile.replace(/\.(txt|json)$/, '') + '.html';
+let outputFile = args[1] || traceFile.replace(/\.(txt|json)$/, '') + '.html';
+let thinFactor = 1;
+
+// Parse options
+for (let i = 1; i < args.length; i++) {
+  if (args[i] === '--thin' && args[i + 1]) {
+    thinFactor = parseInt(args[i + 1], 10);
+    if (isNaN(thinFactor) || thinFactor < 1) {
+      console.error('Error: --thin must be a positive integer');
+      process.exit(1);
+    }
+    i++;
+  } else if (i === 1 && !args[i].startsWith('--')) {
+    outputFile = args[i];
+  }
+}
 
 // Read and parse trace file
 let traceData;
@@ -87,6 +106,13 @@ for (const point of traceData.trace) {
 if (points.length === 0) {
   console.error('No valid points found in trace');
   process.exit(1);
+}
+
+// Thin points if requested
+let displayPoints = points;
+if (thinFactor > 1) {
+  displayPoints = points.filter((_, index) => index % thinFactor === 0);
+  console.log(`Thinning: showing ${displayPoints.length.toLocaleString()} of ${points.length.toLocaleString()} points (every ${thinFactor}th point)`);
 }
 
 // Calculate duration
@@ -227,11 +253,11 @@ const html = `<!DOCTYPE html>
             <span>${Math.round(minAlt).toLocaleString()} ft</span>
             <span>${Math.round(maxAlt).toLocaleString()} ft</span>
         </div>
-        <p style="margin-top: 0.5rem; font-size: 0.75rem; color: #666;">Hover over arrows to see altitude and track info. Arrows point in direction of travel.</p>
+        <p style="margin-top: 0.5rem; font-size: 0.75rem; color: #666;">Hover over arrows to see altitude and track info. Arrows point in direction of travel. Only visible markers are rendered for performance.</p>
     </div>
 
     <script>
-        const tracePoints = ${JSON.stringify(points)};
+        const tracePoints = ${JSON.stringify(displayPoints)};
         const minAltitude = ${minAlt};
         const maxAltitude = ${maxAlt};
         
@@ -292,36 +318,90 @@ const html = `<!DOCTYPE html>
             });
         }
         
-        // Create arrow markers for each point
-        const latlngs = tracePoints.map(p => [p.lat, p.lon]);
+        // Viewport-based rendering for performance
+        // Only render markers visible in the current viewport
+        const markerLayer = L.layerGroup();
+        map.addLayer(markerLayer);
         
-        tracePoints.forEach((point, index) => {
+        const latlngs = tracePoints.map(p => [p.lat, p.lon]);
+        let visibleMarkers = new Map();
+        
+        // Create marker data (don't create DOM elements yet)
+        const markerData = tracePoints.map((point, index) => {
             const color = getAltitudeColor(point.alt, minAltitude, maxAltitude);
             const track = point.track !== null && point.track !== undefined ? point.track : 0;
-            
-            const marker = L.marker([point.lat, point.lon], {
-                icon: createArrowIcon(color, track)
-            }).addTo(map);
-            
-            // Add hover tooltip
             const timeStr = formatTime(point.timestamp);
             const altStr = Math.round(point.alt).toLocaleString() + ' ft';
             const gsStr = point.gs ? Math.round(point.gs) + ' kts' : 'N/A';
             const trackStr = point.track ? Math.round(point.track) + '°' : 'N/A';
             
-            marker.bindPopup(\`
-                <strong>Point \${index + 1}</strong><br>
-                Time: \${timeStr}<br>
-                Altitude: \${altStr}<br>
-                Ground Speed: \${gsStr}<br>
-                Track: \${trackStr}<br>
-                Position: \${point.lat.toFixed(6)}, \${point.lon.toFixed(6)}
-            \`);
-            
-            marker.on('mouseover', function() {
-                marker.openPopup();
-            });
+            return {
+                lat: point.lat,
+                lon: point.lon,
+                color: color,
+                track: track,
+                index: index,
+                popup: \`
+                    <strong>Point \${index + 1}</strong><br>
+                    Time: \${timeStr}<br>
+                    Altitude: \${altStr}<br>
+                    Ground Speed: \${gsStr}<br>
+                    Track: \${trackStr}<br>
+                    Position: \${point.lat.toFixed(6)}, \${point.lon.toFixed(6)}
+                \`
+            };
         });
+        
+        // Function to update visible markers based on viewport
+        function updateVisibleMarkers() {
+            const bounds = map.getBounds();
+            const zoom = map.getZoom();
+            
+            // Determine which markers should be visible
+            // At lower zoom levels, show fewer markers (every Nth point)
+            const skipFactor = zoom < 10 ? 10 : zoom < 12 ? 5 : zoom < 14 ? 2 : 1;
+            
+            const newVisible = new Map();
+            
+            markerData.forEach((data, index) => {
+                // Skip based on zoom level
+                if (index % skipFactor !== 0) return;
+                
+                // Check if marker is in viewport
+                if (bounds.contains([data.lat, data.lon])) {
+                    const key = \`\${data.lat},\${data.lon},\${index}\`;
+                    newVisible.set(key, data);
+                    
+                    // Create marker if it doesn't exist
+                    if (!visibleMarkers.has(key)) {
+                        const marker = L.marker([data.lat, data.lon], {
+                            icon: createArrowIcon(data.color, data.track)
+                        });
+                        marker.bindPopup(data.popup);
+                        marker.on('mouseover', function() {
+                            marker.openPopup();
+                        });
+                        markerLayer.addLayer(marker);
+                        visibleMarkers.set(key, marker);
+                    }
+                }
+            });
+            
+            // Remove markers that are no longer visible
+            visibleMarkers.forEach((marker, key) => {
+                if (!newVisible.has(key)) {
+                    markerLayer.removeLayer(marker);
+                    visibleMarkers.delete(key);
+                }
+            });
+        }
+        
+        // Update markers on move/zoom
+        map.on('moveend', updateVisibleMarkers);
+        map.on('zoomend', updateVisibleMarkers);
+        
+        // Initial render
+        updateVisibleMarkers();
         
         // Add markers at start and end
         const startMarker = L.marker([tracePoints[0].lat, tracePoints[0].lon], {
@@ -384,8 +464,11 @@ try {
   
   fs.writeFileSync(outputPath, html);
   console.log(`✓ Generated visualization: ${outputPath}`);
-  console.log(`  Points: ${points.length.toLocaleString()}`);
+  console.log(`  Points: ${displayPoints.length.toLocaleString()}${thinFactor > 1 ? ` (thinned from ${points.length.toLocaleString()})` : ''}`);
   console.log(`  Altitude range: ${Math.round(minAlt).toLocaleString()} - ${Math.round(maxAlt).toLocaleString()} ft`);
+  if (points.length > 5000 && thinFactor === 1) {
+    console.log(`\n  Tip: Use --thin 2 or --thin 5 for better performance with large traces`);
+  }
   console.log(`\nOpen ${outputPath} in your browser to view the map.`);
 } catch (error) {
   console.error(`Error writing HTML file: ${error.message}`);

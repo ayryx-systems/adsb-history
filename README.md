@@ -319,12 +319,19 @@ Generate an interactive HTML map visualization of an ADSB trace file. The visual
 
 ```bash
 # Generate HTML file (output filename optional)
-node scripts/visualize-trace.js <trace_file> [output.html]
+node scripts/visualize-trace.js <trace_file> [output.html] [--thin N]
 
 # Examples
 node scripts/visualize-trace.js a8a6c0_trace.txt
 node scripts/visualize-trace.js a8a6c0_trace.txt trace.html
+
+# For better performance with large traces, thin the data
+node scripts/visualize-trace.js a8a6c0_trace.txt trace.html --thin 5
 ```
+
+**Options:**
+
+- `--thin N`: Only show every Nth point (e.g., `--thin 5` shows every 5th point). Useful for very large traces with thousands of points to improve performance.
 
 **Features:**
 
@@ -332,10 +339,12 @@ node scripts/visualize-trace.js a8a6c0_trace.txt trace.html
 - Directional arrows at each data point showing aircraft track (direction of travel)
 - Color-coded arrows based on altitude (blue = low altitude, red = high altitude)
 - Gaps in ADSB data are clearly visible as missing arrows
+- **Viewport-based rendering** for performance - only renders markers visible in the current viewport, automatically updates as you pan/zoom
 - Hover over arrows to see altitude, ground speed, track, and timestamp
 - Start/end markers with altitude information
 - Flight metadata display (ICAO, registration, aircraft type, date)
 - Altitude range and duration statistics
+- Optional data thinning (`--thin N`) for very large traces
 - No dependencies - uses Leaflet via CDN
 
 **Output:**
