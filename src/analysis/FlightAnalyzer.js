@@ -532,13 +532,32 @@ class FlightAnalyzer {
     const approachDistanceThreshold = 2; // nm
     const lostContactTimeout = 2 * 60; // 2 minutes in seconds
     
-    // Find touchdown (first position on ground near airport)
+    // Find touchdown - prioritize last ground position in segment (handles gaps better)
     let touchdown = null;
+    
+    // First, find all ground positions near airport
+    const groundPositions = [];
     for (const pos of positionsWithDistance) {
       if (pos.distance <= this.touchdownProximity && 
           pos.alt_baro <= this.groundAltitudeThreshold) {
-        touchdown = pos;
-        break;
+        groundPositions.push(pos);
+      }
+    }
+    
+    // Use the last ground position (most likely to be the actual landing)
+    // This is especially important when there's a gap after landing
+    if (groundPositions.length > 0) {
+      touchdown = groundPositions[groundPositions.length - 1];
+    }
+    
+    // Also check if the last position in the segment is on ground near airport
+    // This handles cases where we lose contact right after landing
+    if (positionsWithDistance.length > 0) {
+      const lastPos = positionsWithDistance[positionsWithDistance.length - 1];
+      if (lastPos.distance <= this.touchdownProximity && 
+          lastPos.alt_baro <= this.groundAltitudeThreshold) {
+        // Use this as touchdown (it's the most recent and likely the actual landing)
+        touchdown = lastPos;
       }
     }
     
@@ -582,7 +601,6 @@ class FlightAnalyzer {
                                lastPos.distance <= approachDistanceThreshold;
         
         if (wasApproaching) {
-          // Check if there are any positions after this in the original trace
           // Since we're in a segment, if this is the last position, we lost contact
           // and aircraft was approaching - consider it landed
           touchdown = lastPos;
