@@ -194,6 +194,12 @@ const html = `<!DOCTYPE html>
             color: #666;
             margin-top: 0.25rem;
         }
+        .arrow-marker {
+            cursor: pointer;
+        }
+        .arrow-marker svg {
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+        }
     </style>
 </head>
 <body>
@@ -221,7 +227,7 @@ const html = `<!DOCTYPE html>
             <span>${Math.round(minAlt).toLocaleString()} ft</span>
             <span>${Math.round(maxAlt).toLocaleString()} ft</span>
         </div>
-        <p style="margin-top: 0.5rem; font-size: 0.75rem; color: #666;">Hover over the path to see altitude at each point</p>
+        <p style="margin-top: 0.5rem; font-size: 0.75rem; color: #666;">Hover over arrows to see altitude and track info. Arrows point in direction of travel.</p>
     </div>
 
     <script>
@@ -258,47 +264,62 @@ const html = `<!DOCTYPE html>
         ctx.fillRect(0, 0, 300, 20);
         gradient.style.background = \`linear-gradient(to right, \${getAltitudeColor(minAltitude, minAltitude, maxAltitude)}, \${getAltitudeColor(maxAltitude, minAltitude, maxAltitude)})\`;
         
-        // Create polyline with color-coded segments
-        const latlngs = tracePoints.map(p => [p.lat, p.lon]);
-        
-        // Create segments for color coding
-        const segments = [];
-        for (let i = 0; i < tracePoints.length - 1; i++) {
-            const p1 = tracePoints[i];
-            const p2 = tracePoints[i + 1];
-            const color = getAltitudeColor((p1.alt + p2.alt) / 2, minAltitude, maxAltitude);
-            segments.push({
-                latlngs: [[p1.lat, p1.lon], [p2.lat, p2.lon]],
-                color: color,
-                alt: (p1.alt + p2.alt) / 2,
-                index: i
+        // Function to create arrow icon
+        function createArrowIcon(color, track) {
+            // Track is in degrees (0-360, where 0 is north, 90 is east)
+            // SVG rotation: transform="rotate(angle, centerX, centerY)"
+            // Arrow points up (north) by default, rotate around center (8, 8)
+            const rotation = track !== null && track !== undefined ? track : 0;
+            
+            // Create SVG arrow pointing up (north), rotated by track angle
+            const svg = \`
+                <svg width="16" height="16" viewBox="0 0 16 16">
+                    <g transform="rotate(\${rotation} 8 8)">
+                        <path d="M 8 2 L 12 10 L 10 10 L 10 14 L 6 14 L 6 10 L 4 10 Z" 
+                              fill="\${color}" 
+                              stroke="white" 
+                              stroke-width="1.5" 
+                              stroke-linejoin="round"/>
+                    </g>
+                </svg>
+            \`;
+            
+            return L.divIcon({
+                className: 'arrow-marker',
+                html: svg,
+                iconSize: [16, 16],
+                iconAnchor: [8, 8]
             });
         }
         
-        // Add each segment as a separate polyline
-        segments.forEach(seg => {
-            const polyline = L.polyline(seg.latlngs, {
-                color: seg.color,
-                weight: 3,
-                opacity: 0.8
+        // Create arrow markers for each point
+        const latlngs = tracePoints.map(p => [p.lat, p.lon]);
+        
+        tracePoints.forEach((point, index) => {
+            const color = getAltitudeColor(point.alt, minAltitude, maxAltitude);
+            const track = point.track !== null && point.track !== undefined ? point.track : 0;
+            
+            const marker = L.marker([point.lat, point.lon], {
+                icon: createArrowIcon(color, track)
             }).addTo(map);
             
             // Add hover tooltip
-            polyline.on('mouseover', function(e) {
-                const point = tracePoints[seg.index];
-                const timeStr = formatTime(point.timestamp);
-                const altStr = Math.round(point.alt).toLocaleString() + ' ft';
-                const gsStr = point.gs ? Math.round(point.gs) + ' kts' : 'N/A';
-                const trackStr = point.track ? Math.round(point.track) + '°' : 'N/A';
-                
-                polyline.bindPopup(\`
-                    <strong>Point \${seg.index + 1}</strong><br>
-                    Time: \${timeStr}<br>
-                    Altitude: \${altStr}<br>
-                    Ground Speed: \${gsStr}<br>
-                    Track: \${trackStr}<br>
-                    Position: \${point.lat.toFixed(6)}, \${point.lon.toFixed(6)}
-                \`).openPopup();
+            const timeStr = formatTime(point.timestamp);
+            const altStr = Math.round(point.alt).toLocaleString() + ' ft';
+            const gsStr = point.gs ? Math.round(point.gs) + ' kts' : 'N/A';
+            const trackStr = point.track ? Math.round(point.track) + '°' : 'N/A';
+            
+            marker.bindPopup(\`
+                <strong>Point \${index + 1}</strong><br>
+                Time: \${timeStr}<br>
+                Altitude: \${altStr}<br>
+                Ground Speed: \${gsStr}<br>
+                Track: \${trackStr}<br>
+                Position: \${point.lat.toFixed(6)}, \${point.lon.toFixed(6)}
+            \`);
+            
+            marker.on('mouseover', function() {
+                marker.openPopup();
             });
         });
         

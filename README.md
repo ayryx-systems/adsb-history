@@ -329,8 +329,10 @@ node scripts/visualize-trace.js a8a6c0_trace.txt trace.html
 **Features:**
 
 - Interactive Leaflet map with OpenStreetMap tiles
-- Color-coded flight path (blue = low altitude, red = high altitude)
-- Hover over path segments to see altitude, ground speed, track, and timestamp
+- Directional arrows at each data point showing aircraft track (direction of travel)
+- Color-coded arrows based on altitude (blue = low altitude, red = high altitude)
+- Gaps in ADSB data are clearly visible as missing arrows
+- Hover over arrows to see altitude, ground speed, track, and timestamp
 - Start/end markers with altitude information
 - Flight metadata display (ICAO, registration, aircraft type, date)
 - Altitude range and duration statistics
