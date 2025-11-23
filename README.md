@@ -311,6 +311,35 @@ This directory contains temporary files used during processing:
 
 ## Utility Scripts
 
+### Visualize Trace
+
+Generate an interactive HTML map visualization of an ADSB trace file. The visualization shows the flight path on an OpenStreetMap with altitude information displayed at each point.
+
+**Usage:**
+
+```bash
+# Generate HTML file (output filename optional)
+node scripts/visualize-trace.js <trace_file> [output.html]
+
+# Examples
+node scripts/visualize-trace.js a8a6c0_trace.txt
+node scripts/visualize-trace.js a8a6c0_trace.txt trace.html
+```
+
+**Features:**
+
+- Interactive Leaflet map with OpenStreetMap tiles
+- Color-coded flight path (blue = low altitude, red = high altitude)
+- Hover over path segments to see altitude, ground speed, track, and timestamp
+- Start/end markers with altitude information
+- Flight metadata display (ICAO, registration, aircraft type, date)
+- Altitude range and duration statistics
+- No dependencies - uses Leaflet via CDN
+
+**Output:**
+
+The script generates a standalone HTML file that can be opened directly in any web browser. The map automatically fits to show the entire flight path.
+
 ### Get Aircraft Trace
 
 Retrieve raw ADSB trace data for a specific aircraft (ICAO code) on a specific day. The script automatically downloads and caches the tar file from S3, extracts it if needed, and finds the trace for the specified ICAO code.
