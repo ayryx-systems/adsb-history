@@ -213,28 +213,52 @@
                 <div class="legend">
                     <div class="legend-item">
                         <div class="legend-color" style="background: rgba(75, 192, 192, 0.6);"></div>
-                        <span>Median</span>
+                        <span>Median (p50)</span>
                     </div>
                     <div class="legend-item">
-                        <div class="legend-color" style="background: rgba(255, 99, 132, 0.6);"></div>
-                        <span>Mean</span>
+                        <div class="legend-color" style="background: rgba(54, 162, 235, 0.4);"></div>
+                        <span>p75</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: rgba(255, 206, 86, 0.4);"></div>
+                        <span>p90</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: rgba(255, 99, 132, 0.4);"></div>
+                        <span>p95</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: rgba(201, 203, 207, 0.6);"></div>
+                        <span>Max</span>
                     </div>
                 </div>
             </div>
 
             <div class="chart-container">
-                <h3>Time from 20nm by Time Slot</h3>
+                <h3>Time from 100nm by Time Slot</h3>
                 <div class="chart-wrapper">
-                    <canvas id="time20nmChart"></canvas>
+                    <canvas id="time100nmChart"></canvas>
                 </div>
                 <div class="legend">
                     <div class="legend-item">
                         <div class="legend-color" style="background: rgba(153, 102, 255, 0.6);"></div>
-                        <span>Median</span>
+                        <span>Median (p50)</span>
                     </div>
                     <div class="legend-item">
-                        <div class="legend-color" style="background: rgba(255, 159, 64, 0.6);"></div>
-                        <span>Mean</span>
+                        <div class="legend-color" style="background: rgba(75, 192, 192, 0.4);"></div>
+                        <span>p75</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: rgba(255, 206, 86, 0.4);"></div>
+                        <span>p90</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: rgba(255, 99, 132, 0.4);"></div>
+                        <span>p95</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: rgba(201, 203, 207, 0.6);"></div>
+                        <span>Max</span>
                     </div>
                 </div>
             </div>
@@ -322,6 +346,35 @@
             return Array.from(select.selectedOptions).map(opt => opt.value);
         }
 
+        function calculatePercentile(sortedArray, percentile) {
+            if (sortedArray.length === 0) return null;
+            const index = Math.ceil((percentile / 100) * sortedArray.length) - 1;
+            return sortedArray[Math.max(0, Math.min(index, sortedArray.length - 1))];
+        }
+
+        function calculateStats(times) {
+            if (times.length === 0) {
+                return {
+                    median: null,
+                    p75: null,
+                    p90: null,
+                    p95: null,
+                    p99: null,
+                    max: null
+                };
+            }
+
+            const sorted = [...times].sort((a, b) => a - b);
+            return {
+                median: calculatePercentile(sorted, 50),
+                p75: calculatePercentile(sorted, 75),
+                p90: calculatePercentile(sorted, 90),
+                p95: calculatePercentile(sorted, 95),
+                p99: calculatePercentile(sorted, 99),
+                max: sorted[sorted.length - 1]
+            };
+        }
+
         function filterTimeSlotData(timeSlot, selectedTypes) {
             if (!selectedTypes || selectedTypes.length === 0) {
                 return timeSlot;
@@ -335,37 +388,33 @@
                 return null;
             }
 
+            const times100nm = filteredAircraft
+                .map(ac => ac.milestones?.timeFrom100nm)
+                .filter(t => t !== undefined);
+            
             const times50nm = filteredAircraft
                 .map(ac => ac.milestones?.timeFrom50nm)
                 .filter(t => t !== undefined);
-            
-            const times20nm = filteredAircraft
-                .map(ac => ac.milestones?.timeFrom20nm)
-                .filter(t => t !== undefined);
-
-            const median50nm = times50nm.length > 0 
-                ? times50nm.sort((a, b) => a - b)[Math.floor(times50nm.length / 2)]
-                : null;
-            
-            const mean50nm = times50nm.length > 0
-                ? times50nm.reduce((a, b) => a + b, 0) / times50nm.length
-                : null;
-
-            const median20nm = times20nm.length > 0
-                ? times20nm.sort((a, b) => a - b)[Math.floor(times20nm.length / 2)]
-                : null;
-            
-            const mean20nm = times20nm.length > 0
-                ? times20nm.reduce((a, b) => a + b, 0) / times20nm.length
-                : null;
 
             return {
                 count: filteredAircraft.length,
-                median50nm,
-                mean50nm,
-                median20nm,
-                mean20nm
+                stats100nm: calculateStats(times100nm),
+                stats50nm: calculateStats(times50nm)
             };
+        }
+
+        function getTimeSlotStats(timeSlot, milestone, selectedTypes) {
+            if (selectedTypes.length === 0) {
+                const aircraft = timeSlot.aircraft || [];
+                const times = aircraft
+                    .map(ac => ac.milestones?.[milestone])
+                    .filter(t => t !== undefined);
+                return calculateStats(times);
+            } else {
+                const filtered = filterTimeSlotData(timeSlot, selectedTypes);
+                if (!filtered) return calculateStats([]);
+                return milestone === 'timeFrom100nm' ? filtered.stats100nm : filtered.stats50nm;
+            }
         }
 
         function destroyChart(chartId) {
@@ -377,14 +426,14 @@
 
         function renderCharts(data) {
             destroyChart('arrivalCount');
+            destroyChart('time100nm');
             destroyChart('time50nm');
-            destroyChart('time20nm');
             destroyChart('aircraftTypeTime');
 
             const selectedTypes = getSelectedAircraftTypes();
             renderArrivalCountChart(data, selectedTypes);
+            renderTime100nmChart(data, selectedTypes);
             renderTime50nmChart(data, selectedTypes);
-            renderTime20nmChart(data, selectedTypes);
             renderAircraftTypeTimeChart(data, selectedTypes);
         }
 
@@ -431,28 +480,110 @@
             });
         }
 
+        function renderTime100nmChart(data, selectedTypes) {
+            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const slots = Object.keys(timeSlots).sort();
+            
+            const medians = [];
+            const p75s = [];
+            const p90s = [];
+            const p95s = [];
+            const maxs = [];
+
+            slots.forEach(slot => {
+                const stats = getTimeSlotStats(timeSlots[slot], 'timeFrom100nm', selectedTypes);
+                medians.push(stats.median ? stats.median / 60 : null);
+                p75s.push(stats.p75 ? stats.p75 / 60 : null);
+                p90s.push(stats.p90 ? stats.p90 / 60 : null);
+                p95s.push(stats.p95 ? stats.p95 / 60 : null);
+                maxs.push(stats.max ? stats.max / 60 : null);
+            });
+
+            charts['time100nm'] = new Chart(document.getElementById('time100nmChart'), {
+                type: 'line',
+                data: {
+                    labels: slots,
+                    datasets: [{
+                        label: 'Median (p50)',
+                        data: medians,
+                        borderColor: 'rgba(153, 102, 255, 1)',
+                        backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                        tension: 0.1,
+                        pointRadius: 2,
+                        borderWidth: 2
+                    }, {
+                        label: 'p75',
+                        data: p75s,
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.1,
+                        pointRadius: 1,
+                        borderWidth: 1,
+                        borderDash: [5, 5]
+                    }, {
+                        label: 'p90',
+                        data: p90s,
+                        borderColor: 'rgba(255, 206, 86, 1)',
+                        backgroundColor: 'rgba(255, 206, 86, 0.1)',
+                        tension: 0.1,
+                        pointRadius: 1,
+                        borderWidth: 1,
+                        borderDash: [5, 5]
+                    }, {
+                        label: 'p95',
+                        data: p95s,
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        tension: 0.1,
+                        pointRadius: 1,
+                        borderWidth: 1,
+                        borderDash: [5, 5]
+                    }, {
+                        label: 'Max',
+                        data: maxs,
+                        borderColor: 'rgba(201, 203, 207, 1)',
+                        backgroundColor: 'rgba(201, 203, 207, 0.1)',
+                        tension: 0.1,
+                        pointRadius: 2,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Time (minutes)' }
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         function renderTime50nmChart(data, selectedTypes) {
             const timeSlots = data.overall.byTouchdownTimeSlot;
             const slots = Object.keys(timeSlots).sort();
             
             const medians = [];
-            const means = [];
+            const p75s = [];
+            const p90s = [];
+            const p95s = [];
+            const maxs = [];
 
             slots.forEach(slot => {
-                if (selectedTypes.length === 0) {
-                    const median = timeSlots[slot].timeFrom50nm;
-                    medians.push(median ? median / 60 : null);
-                    means.push(null);
-                } else {
-                    const filtered = filterTimeSlotData(timeSlots[slot], selectedTypes);
-                    if (filtered) {
-                        medians.push(filtered.median50nm ? filtered.median50nm / 60 : null);
-                        means.push(filtered.mean50nm ? filtered.mean50nm / 60 : null);
-                    } else {
-                        medians.push(null);
-                        means.push(null);
-                    }
-                }
+                const stats = getTimeSlotStats(timeSlots[slot], 'timeFrom50nm', selectedTypes);
+                medians.push(stats.median ? stats.median / 60 : null);
+                p75s.push(stats.p75 ? stats.p75 / 60 : null);
+                p90s.push(stats.p90 ? stats.p90 / 60 : null);
+                p95s.push(stats.p95 ? stats.p95 / 60 : null);
+                maxs.push(stats.max ? stats.max / 60 : null);
             });
 
             charts['time50nm'] = new Chart(document.getElementById('time50nmChart'), {
@@ -460,82 +591,48 @@
                 data: {
                     labels: slots,
                     datasets: [{
-                        label: 'Median (minutes)',
+                        label: 'Median (p50)',
                         data: medians,
                         borderColor: 'rgba(75, 192, 192, 1)',
                         backgroundColor: 'rgba(75, 192, 192, 0.2)',
                         tension: 0.1,
-                        pointRadius: 3
+                        pointRadius: 2,
+                        borderWidth: 2
                     }, {
-                        label: 'Mean (minutes)',
-                        data: means,
+                        label: 'p75',
+                        data: p75s,
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                        tension: 0.1,
+                        pointRadius: 1,
+                        borderWidth: 1,
+                        borderDash: [5, 5]
+                    }, {
+                        label: 'p90',
+                        data: p90s,
+                        borderColor: 'rgba(255, 206, 86, 1)',
+                        backgroundColor: 'rgba(255, 206, 86, 0.1)',
+                        tension: 0.1,
+                        pointRadius: 1,
+                        borderWidth: 1,
+                        borderDash: [5, 5]
+                    }, {
+                        label: 'p95',
+                        data: p95s,
                         borderColor: 'rgba(255, 99, 132, 1)',
-                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
                         tension: 0.1,
-                        pointRadius: 3
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: { display: true, text: 'Time (minutes)' }
-                        },
-                        x: {
-                            ticks: {
-                                maxRotation: 45,
-                                minRotation: 45
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        function renderTime20nmChart(data, selectedTypes) {
-            const timeSlots = data.overall.byTouchdownTimeSlot;
-            const slots = Object.keys(timeSlots).sort();
-            
-            const medians = [];
-            const means = [];
-
-            slots.forEach(slot => {
-                if (selectedTypes.length === 0) {
-                    const median = timeSlots[slot].timeFrom20nm;
-                    medians.push(median ? median / 60 : null);
-                    means.push(null);
-                } else {
-                    const filtered = filterTimeSlotData(timeSlots[slot], selectedTypes);
-                    if (filtered) {
-                        medians.push(filtered.median20nm ? filtered.median20nm / 60 : null);
-                        means.push(filtered.mean20nm ? filtered.mean20nm / 60 : null);
-                    } else {
-                        medians.push(null);
-                        means.push(null);
-                    }
-                }
-            });
-
-            charts['time20nm'] = new Chart(document.getElementById('time20nmChart'), {
-                type: 'line',
-                data: {
-                    labels: slots,
-                    datasets: [{
-                        label: 'Median (minutes)',
-                        data: medians,
-                        borderColor: 'rgba(153, 102, 255, 1)',
-                        backgroundColor: 'rgba(153, 102, 255, 0.2)',
-                        tension: 0.1,
-                        pointRadius: 3
+                        pointRadius: 1,
+                        borderWidth: 1,
+                        borderDash: [5, 5]
                     }, {
-                        label: 'Mean (minutes)',
-                        data: means,
-                        borderColor: 'rgba(255, 159, 64, 1)',
-                        backgroundColor: 'rgba(255, 159, 64, 0.2)',
+                        label: 'Max',
+                        data: maxs,
+                        borderColor: 'rgba(201, 203, 207, 1)',
+                        backgroundColor: 'rgba(201, 203, 207, 0.1)',
                         tension: 0.1,
-                        pointRadius: 3
+                        pointRadius: 2,
+                        borderWidth: 1
                     }]
                 },
                 options: {
@@ -556,6 +653,7 @@
                 }
             });
         }
+
 
         function renderAircraftTypeTimeChart(data, selectedTypes) {
             const types = selectedTypes.length > 0 
