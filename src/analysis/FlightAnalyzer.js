@@ -81,6 +81,7 @@ class FlightAnalyzer {
 
     const airportLat = airport.coordinates.lat;
     const airportLon = airport.coordinates.lon;
+    const airportElevation = airport.elevation_ft || 0;
 
     // Calculate base timestamp
     let baseTimestamp = null;
@@ -102,6 +103,7 @@ class FlightAnalyzer {
     const positionsWithDistance = positions.map(pos => ({
       ...pos,
       distance: calculateDistance(pos.lat, pos.lon, airportLat, airportLon),
+      alt_agl: pos.alt_baro !== null ? pos.alt_baro - airportElevation : null,
     }));
 
     // Sort by timestamp
@@ -115,8 +117,6 @@ class FlightAnalyzer {
     if (closestApproach.distance > this.airportProximityRadius) {
       return [];
     }
-
-    const airportElevation = airport.elevation_ft || 0;
 
     // Split trace into separate flight segments (arrival and departure)
     const segments = this.splitIntoSegments(positionsWithDistance, airportElevation);
@@ -185,10 +185,21 @@ class FlightAnalyzer {
   /**
    * Split trace into separate flight segments (arrival and departure)
    * Looks for periods where aircraft is on ground near airport as split points
+   * Also splits on time gaps > 5 minutes (lost contact)
    */
   splitIntoSegments(positionsWithDistance, airportElevation) {
     const segments = [];
     const minSegmentLength = 5; // Minimum positions per segment
+    const maxTimeGap = 5 * 60; // 5 minutes in seconds
+    
+    // First, find time gaps >= 5 minutes (lost contact)
+    const timeGaps = [];
+    for (let i = 1; i < positionsWithDistance.length; i++) {
+      const timeDiff = positionsWithDistance[i].timestamp - positionsWithDistance[i - 1].timestamp;
+      if (timeDiff >= maxTimeGap) {
+        timeGaps.push(i);
+      }
+    }
     
     // Find periods where aircraft is on ground near airport
     const groundPeriods = [];
@@ -210,7 +221,7 @@ class FlightAnalyzer {
           // End of ground period
           const groundDuration = positionsWithDistance[i - 1].timestamp - positionsWithDistance[groundStartIndex].timestamp;
           // Only consider significant ground periods (> 5 minutes) as split points
-          if (groundDuration > 5 * 60) {
+          if (groundDuration > maxTimeGap) {
             groundPeriods.push({ start: groundStartIndex, end: i - 1 });
           }
           inGroundPeriod = false;
@@ -218,21 +229,30 @@ class FlightAnalyzer {
       }
     }
     
-    // If no significant ground periods, return entire trace as one segment
-    if (groundPeriods.length === 0) {
+    // Combine time gaps and ground periods into split points
+    const splitPoints = new Set();
+    for (const gap of timeGaps) {
+      splitPoints.add(gap);
+    }
+    for (const groundPeriod of groundPeriods) {
+      splitPoints.add(groundPeriod.start);
+    }
+    
+    const sortedSplitPoints = Array.from(splitPoints).sort((a, b) => a - b);
+    
+    // If no split points, return entire trace as one segment
+    if (sortedSplitPoints.length === 0) {
       return [positionsWithDistance];
     }
     
-    // Split trace at ground periods
+    // Split trace at split points
     let segmentStart = 0;
-    for (const groundPeriod of groundPeriods) {
-      // Segment before ground period (arrival)
-      if (groundPeriod.start > segmentStart + minSegmentLength) {
-        segments.push(positionsWithDistance.slice(segmentStart, groundPeriod.start));
+    for (const splitPoint of sortedSplitPoints) {
+      // Segment before split point
+      if (splitPoint > segmentStart + minSegmentLength) {
+        segments.push(positionsWithDistance.slice(segmentStart, splitPoint));
       }
-      
-      // Segment after ground period (departure)
-      segmentStart = groundPeriod.end + 1;
+      segmentStart = splitPoint;
     }
     
     // Add final segment (if any)
@@ -506,6 +526,12 @@ class FlightAnalyzer {
    */
   analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation = 0, metadata = {}) {
     const { registration = null, aircraftType = null, description = null } = metadata;
+    
+    // Check for lost contact scenarios where aircraft was approaching
+    const approachThresholdAGL = 1000; // feet AGL
+    const approachDistanceThreshold = 2; // nm
+    const lostContactTimeout = 2 * 60; // 2 minutes in seconds
+    
     // Find touchdown (first position on ground near airport)
     let touchdown = null;
     for (const pos of positionsWithDistance) {
@@ -515,8 +541,56 @@ class FlightAnalyzer {
         break;
       }
     }
+    
+    // If no clear touchdown, check for lost contact scenarios
+    if (!touchdown) {
+      // Check for gaps in the data where aircraft was approaching
+      for (let i = 1; i < positionsWithDistance.length; i++) {
+        const prevPos = positionsWithDistance[i - 1];
+        const currPos = positionsWithDistance[i];
+        const timeGap = currPos.timestamp - prevPos.timestamp;
+        
+        // If gap is between 2 minutes and 5 minutes (lost contact but not segment split)
+        // Note: gaps >= 5 minutes would have already split the segment
+        if (timeGap >= lostContactTimeout && timeGap < 5 * 60) {
+          // Check if previous position was in approach configuration
+          const prevAGL = prevPos.alt_agl !== null ? prevPos.alt_agl : (prevPos.alt_baro !== null ? prevPos.alt_baro - airportElevation : null);
+          const wasApproaching = prevAGL !== null && 
+                                 prevAGL < approachThresholdAGL && 
+                                 prevPos.distance <= approachDistanceThreshold;
+          
+          if (wasApproaching) {
+            // Check if aircraft reappeared far from airport (left the area)
+            const reappearedFar = currPos.distance > approachDistanceThreshold;
+            
+            // If aircraft didn't leave the area, consider it landed
+            if (!reappearedFar) {
+              touchdown = prevPos;
+              break;
+            }
+          }
+        }
+      }
+      
+      // Also check if segment ends with aircraft in approach configuration
+      // (no more data after this segment, so we lost contact)
+      if (!touchdown && positionsWithDistance.length > 0) {
+        const lastPos = positionsWithDistance[positionsWithDistance.length - 1];
+        const lastAGL = lastPos.alt_agl !== null ? lastPos.alt_agl : (lastPos.alt_baro !== null ? lastPos.alt_baro - airportElevation : null);
+        const wasApproaching = lastAGL !== null && 
+                               lastAGL < approachThresholdAGL && 
+                               lastPos.distance <= approachDistanceThreshold;
+        
+        if (wasApproaching) {
+          // Check if there are any positions after this in the original trace
+          // Since we're in a segment, if this is the last position, we lost contact
+          // and aircraft was approaching - consider it landed
+          touchdown = lastPos;
+        }
+      }
+    }
 
-    // If no clear touchdown, use closest approach as proxy
+    // If still no touchdown, use closest approach as proxy
     if (!touchdown) {
       touchdown = closestApproach;
     }
