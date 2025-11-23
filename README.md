@@ -311,34 +311,53 @@ This directory contains temporary files used during processing:
 
 ## Utility Scripts
 
-### Visualize Trace
+### Get and Visualize Aircraft Trace
 
-Generate an interactive HTML map visualization of an ADSB trace file. The visualization shows the flight path on an OpenStreetMap with altitude information displayed at each point.
+Retrieve raw ADSB trace data for a specific aircraft and generate an interactive HTML visualization. The script automatically downloads and caches the tar file from S3, extracts it if needed, finds the trace for the specified ICAO code, saves it to a standard filename, and generates an HTML visualization.
 
 **Usage:**
 
 ```bash
-# Generate HTML file (output filename optional)
-node scripts/visualize-trace.js <trace_file> [output.html] [--thin N]
+node scripts/trace_utils/get-and-visualize-trace.js --icao <ICAO_CODE> --date <YYYY-MM-DD> [--thin N]
+```
 
-# Examples
-node scripts/visualize-trace.js a8a6c0_trace.txt
-node scripts/visualize-trace.js a8a6c0_trace.txt trace.html
+**Example:**
+
+```bash
+# Get trace and generate visualization for ICAO a1b2c3 on January 6, 2025
+node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06
 
 # For better performance with large traces, thin the data
-node scripts/visualize-trace.js a8a6c0_trace.txt trace.html --thin 5
+node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06 --thin 5
 ```
 
 **Options:**
 
-- `--thin N`: Only show every Nth point (e.g., `--thin 5` shows every 5th point). Useful for very large traces with thousands of points to improve performance.
+- `--icao <ICAO_CODE>`: 6-character hexadecimal ICAO code (required)
+- `--date <YYYY-MM-DD>`: Date in YYYY-MM-DD format (required)
+- `--thin N`: Only show every Nth point in the visualization (e.g., `--thin 5` shows every 5th point). Useful for very large traces with thousands of points to improve performance.
+
+**Output Files:**
+
+The script automatically creates two files with standard names:
+
+- **Trace file**: `trace_<icao>_<date>.txt` - JSON file containing the raw trace data
+- **HTML visualization**: `trace_<icao>_<date>.html` - Interactive map visualization
+
+Example: For ICAO `a1b2c3` on date `2025-01-06`, the script creates:
+- `trace_a1b2c3_2025-01-06.txt`
+- `trace_a1b2c3_2025-01-06.html`
 
 **Features:**
 
+- Automatically downloads tar file from S3 (cached in `./temp/YYYY-MM-DD/`)
+- Extracts tar file if needed (cached extraction in `./temp/YYYY-MM-DD/extracted/`)
+- Finds trace file using hex subdirectory organization
+- Saves trace data to standardized filename (no need to specify output file)
+- Generates interactive HTML visualization with standardized filename
 - Interactive Leaflet map with OpenStreetMap tiles
 - Directional arrows at each data point showing aircraft track (direction of travel)
 - Color-coded arrows based on altitude (blue = low altitude, red = high altitude)
-- Gaps in ADSB data are clearly visible as missing arrows
 - **Viewport-based rendering** for performance - only renders markers visible in the current viewport, automatically updates as you pan/zoom
 - Hover over arrows to see altitude, ground speed, track, and timestamp
 - Start/end markers with altitude information
@@ -347,42 +366,9 @@ node scripts/visualize-trace.js a8a6c0_trace.txt trace.html --thin 5
 - Optional data thinning (`--thin N`) for very large traces
 - No dependencies - uses Leaflet via CDN
 
-**Output:**
+**Trace File Format:**
 
-The script generates a standalone HTML file that can be opened directly in any web browser. The map automatically fits to show the entire flight path.
-
-### Get Aircraft Trace
-
-Retrieve raw ADSB trace data for a specific aircraft (ICAO code) on a specific day. The script automatically downloads and caches the tar file from S3, extracts it if needed, and finds the trace for the specified ICAO code.
-
-**Usage:**
-
-```bash
-# Output to stdout (JSON)
-node scripts/get-aircraft-trace.js --icao <ICAO_CODE> --date <YYYY-MM-DD>
-
-# Save to file
-node scripts/get-aircraft-trace.js --icao <ICAO_CODE> --date <YYYY-MM-DD> --output <FILE>
-```
-
-**Example:**
-
-```bash
-# Get trace for ICAO a1b2c3 on January 6, 2025
-node scripts/get-aircraft-trace.js --icao a1b2c3 --date 2025-01-06
-
-# Save to file
-node scripts/get-aircraft-trace.js --icao a1b2c3 --date 2025-01-06 --output trace.json
-```
-
-**Features:**
-
-- Automatically downloads tar file from S3 (cached in `./temp/YYYY-MM-DD/`)
-- Extracts tar file if needed (cached extraction in `./temp/YYYY-MM-DD/extracted/`)
-- Finds trace file using hex subdirectory organization
-- Outputs complete trace data including position reports, registration, aircraft type, and description
-
-**Output Format:**
+The trace file contains complete trace data in JSON format:
 
 ```json
 {
@@ -392,18 +378,16 @@ node scripts/get-aircraft-trace.js --icao a1b2c3 --date 2025-01-06 --output trac
   "aircraftType": "B738",
   "description": "Boeing 737-800",
   "trace": [
-    {
-      "timestamp": 1234567890,
-      "lat": 40.123,
-      "lon": -74.456,
-      "altitude": 35000,
-      ...
-    },
+    [timestamp, lat, lon, alt, gs, track],
     ...
   ],
   "traceCount": 1234
 }
 ```
+
+**HTML Visualization:**
+
+The HTML file is a standalone file that can be opened directly in any web browser. The map automatically fits to show the entire flight path.
 
 ## Configuration
 

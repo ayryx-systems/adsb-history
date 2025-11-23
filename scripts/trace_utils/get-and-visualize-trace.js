@@ -1,121 +1,71 @@
 #!/usr/bin/env node
 
 /**
- * Generate an HTML file with an interactive map visualization of an ADSB trace
+ * Get raw ADSB trace data for a specific aircraft and generate an HTML visualization
  * 
  * Usage:
- *   node scripts/visualize-trace.js <trace_file> [output.html]
+ *   node scripts/trace_utils/get-and-visualize-trace.js --icao <ICAO_CODE> --date <YYYY-MM-DD> [--thin N]
  * 
  * Example:
- *   node scripts/visualize-trace.js a8a6c0_trace.txt trace.html
- *   node scripts/visualize-trace.js a8a6c0_trace.txt
+ *   node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06
+ *   node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06 --thin 5
  * 
- * The script reads a trace JSON file and generates an HTML file with:
- * - Interactive Leaflet map showing the flight path
- * - Altitude information displayed at each point on hover/click
- * - Color-coded path based on altitude
- * - Flight metadata (ICAO, registration, aircraft type, date)
+ * The script will:
+ * 1. Download the tar file from S3 (if not already in temp/)
+ * 2. Extract the tar file (if not already extracted)
+ * 3. Find and read the trace file for the specified ICAO code
+ * 4. Save the trace data to trace_<icao>_<date>.txt
+ * 5. Generate an HTML visualization to trace_<icao>_<date>.html
+ * 
+ * Files are cached in ./temp/YYYY-MM-DD/ to avoid re-downloading.
  */
 
-import fs from 'fs';
+import TraceReader from '../../src/processing/TraceReader.js';
+import logger from '../../src/utils/logger.js';
 import path from 'path';
+import fs from 'fs';
 
-// Parse command line arguments
 const args = process.argv.slice(2);
-
-if (args.length < 1) {
-  console.error('Usage: node scripts/visualize-trace.js <trace_file> [output.html] [--thin N]');
-  console.error('Example: node scripts/visualize-trace.js a8a6c0_trace.txt trace.html');
-  console.error('         node scripts/visualize-trace.js a8a6c0_trace.txt trace.html --thin 5');
-  console.error('');
-  console.error('Options:');
-  console.error('  --thin N    Only show every Nth point (e.g., --thin 5 shows every 5th point)');
-  process.exit(1);
-}
-
-const traceFile = args[0];
-let outputFile = args[1] || traceFile.replace(/\.(txt|json)$/, '') + '.html';
+let icao = null;
+let date = null;
 let thinFactor = 1;
 
-// Parse options
-for (let i = 1; i < args.length; i++) {
-  if (args[i] === '--thin' && args[i + 1]) {
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--icao' && args[i + 1]) {
+    icao = args[i + 1].toLowerCase();
+    i++;
+  } else if (args[i] === '--date' && args[i + 1]) {
+    date = args[i + 1];
+    i++;
+  } else if (args[i] === '--thin' && args[i + 1]) {
     thinFactor = parseInt(args[i + 1], 10);
     if (isNaN(thinFactor) || thinFactor < 1) {
       console.error('Error: --thin must be a positive integer');
       process.exit(1);
     }
     i++;
-  } else if (i === 1 && !args[i].startsWith('--')) {
-    outputFile = args[i];
   }
 }
 
-// Read and parse trace file
-let traceData;
-try {
-  const fileContent = fs.readFileSync(traceFile, 'utf-8');
-  // Handle case where log output might be appended to JSON
-  const jsonMatch = fileContent.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error('No valid JSON found in trace file');
-  }
-  traceData = JSON.parse(jsonMatch[0]);
-} catch (error) {
-  console.error(`Error reading trace file: ${error.message}`);
+if (!icao || !date) {
+  console.error('Usage: node scripts/trace_utils/get-and-visualize-trace.js --icao <ICAO_CODE> --date <YYYY-MM-DD> [--thin N]');
+  console.error('Example: node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06');
+  console.error('         node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06 --thin 5');
   process.exit(1);
 }
 
-if (!traceData.trace || !Array.isArray(traceData.trace)) {
-  console.error('Invalid trace file: missing trace array');
+const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+if (!dateRegex.test(date)) {
+  console.error('Error: Date must be in YYYY-MM-DD format');
   process.exit(1);
 }
 
-// Parse trace points
-const points = [];
-let minAlt = Infinity;
-let maxAlt = -Infinity;
-
-for (const point of traceData.trace) {
-  if (!Array.isArray(point) || point.length < 4) continue;
-  
-  const timestamp = point[0];
-  const lat = point[1];
-  const lon = point[2];
-  const alt = point[3];
-  const gs = point[4] || null;
-  const track = point[5] || null;
-  
-  if (lat === null || lon === null || alt === null) continue;
-  
-  if (typeof alt === 'number') {
-    minAlt = Math.min(minAlt, alt);
-    maxAlt = Math.max(maxAlt, alt);
-  }
-  
-  points.push({
-    lat,
-    lon,
-    alt: typeof alt === 'number' ? alt : 0,
-    timestamp,
-    gs,
-    track,
-  });
-}
-
-if (points.length === 0) {
-  console.error('No valid points found in trace');
+const icaoRegex = /^[0-9a-f]{6}$/i;
+if (!icaoRegex.test(icao)) {
+  console.error('Error: ICAO code must be 6 hexadecimal characters');
   process.exit(1);
 }
 
-// Thin points if requested
-let displayPoints = points;
-if (thinFactor > 1) {
-  displayPoints = points.filter((_, index) => index % thinFactor === 0);
-  console.log(`Thinning: showing ${displayPoints.length.toLocaleString()} of ${points.length.toLocaleString()} points (every ${thinFactor}th point)`);
-}
-
-// Calculate duration
 function formatDuration(seconds) {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
@@ -129,16 +79,121 @@ function formatDuration(seconds) {
   }
 }
 
-const durationSeconds = points[points.length - 1].timestamp - points[0].timestamp;
-const durationFormatted = formatDuration(durationSeconds);
+async function getAndVisualizeTrace() {
+  try {
+    logger.info('Getting and visualizing aircraft trace', { icao, date });
 
-// Generate HTML
-const html = `<!DOCTYPE html>
+    const traceReader = new TraceReader();
+
+    logger.info('Step 1: Downloading/checking tar file', { date });
+    const tarPath = await traceReader.downloadTarFromS3(date);
+
+    logger.info('Step 2: Extracting/checking extracted tar', { date });
+    const extractDir = await traceReader.extractTar(tarPath);
+
+    const hexSubdir = icao.slice(-2);
+    const tracesDir = path.join(extractDir, 'traces');
+    const subdirPath = path.join(tracesDir, hexSubdir);
+    const traceFilePath = path.join(subdirPath, `trace_full_${icao}.json`);
+
+    if (!fs.existsSync(traceFilePath)) {
+      logger.error('Trace file not found', {
+        icao,
+        date,
+        expectedPath: traceFilePath,
+      });
+      console.error(`Error: No trace data found for ICAO ${icao} on ${date}`);
+      console.error(`Expected file: ${traceFilePath}`);
+      process.exit(1);
+    }
+
+    logger.info('Step 3: Reading trace file', { icao, date, traceFilePath });
+    const traceData = await traceReader.readTraceFile(traceFilePath);
+
+    if (!traceData) {
+      logger.error('Failed to read trace file', { icao, date, traceFilePath });
+      console.error(`Error: Failed to read trace file for ICAO ${icao}`);
+      process.exit(1);
+    }
+
+    const output = {
+      icao: traceData.icao,
+      date,
+      registration: traceData.registration,
+      aircraftType: traceData.aircraftType,
+      description: traceData.description,
+      trace: traceData.trace,
+      traceCount: traceData.trace ? traceData.trace.length : 0,
+    };
+
+    const traceFileName = `trace_${icao}_${date}.txt`;
+    const traceFilePath_output = path.resolve(process.cwd(), traceFileName);
+    fs.writeFileSync(traceFilePath_output, JSON.stringify(output, null, 2));
+    logger.info('Trace data written to file', { 
+      icao, 
+      date, 
+      outputPath: traceFilePath_output,
+      traceCount: output.traceCount,
+    });
+    console.log(`✓ Trace data written to: ${traceFilePath_output}`);
+    console.log(`  Found ${output.traceCount} position reports for ICAO ${icao} on ${date}`);
+
+    if (!output.trace || !Array.isArray(output.trace)) {
+      console.error('Invalid trace data: missing trace array');
+      process.exit(1);
+    }
+
+    const points = [];
+    let minAlt = Infinity;
+    let maxAlt = -Infinity;
+
+    for (const point of output.trace) {
+      if (!Array.isArray(point) || point.length < 4) continue;
+      
+      const timestamp = point[0];
+      const lat = point[1];
+      const lon = point[2];
+      const alt = point[3];
+      const gs = point[4] || null;
+      const track = point[5] || null;
+      
+      if (lat === null || lon === null || alt === null) continue;
+      
+      if (typeof alt === 'number') {
+        minAlt = Math.min(minAlt, alt);
+        maxAlt = Math.max(maxAlt, alt);
+      }
+      
+      points.push({
+        lat,
+        lon,
+        alt: typeof alt === 'number' ? alt : 0,
+        timestamp,
+        gs,
+        track,
+      });
+    }
+
+    if (points.length === 0) {
+      console.error('No valid points found in trace');
+      process.exit(1);
+    }
+
+    let displayPoints = points;
+    if (thinFactor > 1) {
+      displayPoints = points.filter((_, index) => index % thinFactor === 0);
+      console.log(`  Thinning: showing ${displayPoints.length.toLocaleString()} of ${points.length.toLocaleString()} points (every ${thinFactor}th point)`);
+    }
+
+    const durationSeconds = points[points.length - 1].timestamp - points[0].timestamp;
+    const durationFormatted = formatDuration(durationSeconds);
+
+    const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ADSB Trace: ${traceData.icao || 'Unknown'}</title>
+    <title>ADSB Trace: ${output.icao || 'Unknown'}</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -232,10 +287,10 @@ const html = `<!DOCTYPE html>
     <div class="header">
         <h1>ADSB Trace Visualization</h1>
         <div class="header-info">
-            <span><strong>ICAO:</strong> ${traceData.icao || 'N/A'}</span>
-            <span><strong>Registration:</strong> ${traceData.registration || 'N/A'}</span>
-            <span><strong>Aircraft:</strong> ${traceData.aircraftType || 'N/A'} ${traceData.description ? `(${traceData.description})` : ''}</span>
-            <span><strong>Date:</strong> ${traceData.date || 'N/A'}</span>
+            <span><strong>ICAO:</strong> ${output.icao || 'N/A'}</span>
+            <span><strong>Registration:</strong> ${output.registration || 'N/A'}</span>
+            <span><strong>Aircraft:</strong> ${output.aircraftType || 'N/A'} ${output.description ? `(${output.description})` : ''}</span>
+            <span><strong>Date:</strong> ${output.date || 'N/A'}</span>
             <span><strong>Points:</strong> ${points.length.toLocaleString()}</span>
         </div>
     </div>
@@ -261,26 +316,21 @@ const html = `<!DOCTYPE html>
         const minAltitude = ${minAlt};
         const maxAltitude = ${maxAlt};
         
-        // Create map centered on first point
         const map = L.map('map').setView([tracePoints[0].lat, tracePoints[0].lon], 8);
         
-        // Add OpenStreetMap tiles
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors',
             maxZoom: 19
         }).addTo(map);
         
-        // Function to get color based on altitude
         function getAltitudeColor(alt, minAlt, maxAlt) {
             if (minAlt === maxAlt) return '#0066cc';
             const ratio = (alt - minAlt) / (maxAlt - minAlt);
-            // Color gradient from blue (low) to red (high)
             const r = Math.round(ratio * 255);
             const b = Math.round((1 - ratio) * 255);
             return \`rgb(\${r}, 0, \${b})\`;
         }
         
-        // Create altitude gradient for legend
         const gradient = document.getElementById('altitude-gradient');
         const ctx = document.createElement('canvas').getContext('2d');
         const grd = ctx.createLinearGradient(0, 0, 300, 0);
@@ -290,14 +340,9 @@ const html = `<!DOCTYPE html>
         ctx.fillRect(0, 0, 300, 20);
         gradient.style.background = \`linear-gradient(to right, \${getAltitudeColor(minAltitude, minAltitude, maxAltitude)}, \${getAltitudeColor(maxAltitude, minAltitude, maxAltitude)})\`;
         
-        // Function to create arrow icon
         function createArrowIcon(color, track) {
-            // Track is in degrees (0-360, where 0 is north, 90 is east)
-            // SVG rotation: transform="rotate(angle, centerX, centerY)"
-            // Arrow points up (north) by default, rotate around center (8, 8)
             const rotation = track !== null && track !== undefined ? track : 0;
             
-            // Create SVG arrow pointing up (north), rotated by track angle
             const svg = \`
                 <svg width="16" height="16" viewBox="0 0 16 16">
                     <g transform="rotate(\${rotation} 8 8)">
@@ -318,15 +363,12 @@ const html = `<!DOCTYPE html>
             });
         }
         
-        // Viewport-based rendering for performance
-        // Only render markers visible in the current viewport
         const markerLayer = L.layerGroup();
         map.addLayer(markerLayer);
         
         const latlngs = tracePoints.map(p => [p.lat, p.lon]);
         let visibleMarkers = new Map();
         
-        // Create marker data (don't create DOM elements yet)
         const markerData = tracePoints.map((point, index) => {
             const color = getAltitudeColor(point.alt, minAltitude, maxAltitude);
             const track = point.track !== null && point.track !== undefined ? point.track : 0;
@@ -352,27 +394,21 @@ const html = `<!DOCTYPE html>
             };
         });
         
-        // Function to update visible markers based on viewport
         function updateVisibleMarkers() {
             const bounds = map.getBounds();
             const zoom = map.getZoom();
             
-            // Determine which markers should be visible
-            // At lower zoom levels, show fewer markers (every Nth point)
             const skipFactor = zoom < 10 ? 10 : zoom < 12 ? 5 : zoom < 14 ? 2 : 1;
             
             const newVisible = new Map();
             
             markerData.forEach((data, index) => {
-                // Skip based on zoom level
                 if (index % skipFactor !== 0) return;
                 
-                // Check if marker is in viewport
                 if (bounds.contains([data.lat, data.lon])) {
                     const key = \`\${data.lat},\${data.lon},\${index}\`;
                     newVisible.set(key, data);
                     
-                    // Create marker if it doesn't exist
                     if (!visibleMarkers.has(key)) {
                         const marker = L.marker([data.lat, data.lon], {
                             icon: createArrowIcon(data.color, data.track)
@@ -387,7 +423,6 @@ const html = `<!DOCTYPE html>
                 }
             });
             
-            // Remove markers that are no longer visible
             visibleMarkers.forEach((marker, key) => {
                 if (!newVisible.has(key)) {
                     markerLayer.removeLayer(marker);
@@ -396,14 +431,11 @@ const html = `<!DOCTYPE html>
             });
         }
         
-        // Update markers on move/zoom
         map.on('moveend', updateVisibleMarkers);
         map.on('zoomend', updateVisibleMarkers);
         
-        // Initial render
         updateVisibleMarkers();
         
-        // Add markers at start and end
         const startMarker = L.marker([tracePoints[0].lat, tracePoints[0].lon], {
             icon: L.divIcon({
                 className: 'start-marker',
@@ -422,20 +454,16 @@ const html = `<!DOCTYPE html>
         }).addTo(map);
         endMarker.bindPopup(\`<strong>End</strong><br>Altitude: \${Math.round(tracePoints[tracePoints.length - 1].alt).toLocaleString()} ft\`);
         
-        // Fit map to bounds
         const bounds = L.latLngBounds(latlngs);
         map.fitBounds(bounds, { padding: [50, 50] });
         
-        // Helper functions
         function formatTime(timestamp) {
-            // Handle relative timestamps (seconds since start of day)
             if (timestamp < 86400 * 2) {
                 const hours = Math.floor(timestamp / 3600);
                 const minutes = Math.floor((timestamp % 3600) / 60);
                 const seconds = Math.floor(timestamp % 60);
                 return \`\${String(hours).padStart(2, '0')}:\${String(minutes).padStart(2, '0')}:\${String(seconds).padStart(2, '0')}\`;
             }
-            // Handle absolute Unix timestamps
             const date = new Date(timestamp * 1000);
             return date.toLocaleTimeString();
         }
@@ -456,22 +484,37 @@ const html = `<!DOCTYPE html>
 </body>
 </html>`;
 
-// Write HTML file
-try {
-  const outputPath = path.isAbsolute(outputFile) 
-    ? outputFile 
-    : path.resolve(process.cwd(), outputFile);
-  
-  fs.writeFileSync(outputPath, html);
-  console.log(`✓ Generated visualization: ${outputPath}`);
-  console.log(`  Points: ${displayPoints.length.toLocaleString()}${thinFactor > 1 ? ` (thinned from ${points.length.toLocaleString()})` : ''}`);
-  console.log(`  Altitude range: ${Math.round(minAlt).toLocaleString()} - ${Math.round(maxAlt).toLocaleString()} ft`);
-  if (points.length > 5000 && thinFactor === 1) {
-    console.log(`\n  Tip: Use --thin 2 or --thin 5 for better performance with large traces`);
+    const htmlFileName = `trace_${icao}_${date}.html`;
+    const htmlFilePath = path.resolve(process.cwd(), htmlFileName);
+    fs.writeFileSync(htmlFilePath, html);
+    
+    console.log(`✓ Generated visualization: ${htmlFilePath}`);
+    console.log(`  Points: ${displayPoints.length.toLocaleString()}${thinFactor > 1 ? ` (thinned from ${points.length.toLocaleString()})` : ''}`);
+    console.log(`  Altitude range: ${Math.round(minAlt).toLocaleString()} - ${Math.round(maxAlt).toLocaleString()} ft`);
+    if (points.length > 5000 && thinFactor === 1) {
+      console.log(`\n  Tip: Use --thin 2 or --thin 5 for better performance with large traces`);
+    }
+    console.log(`\nOpen ${htmlFilePath} in your browser to view the map.`);
+
+    logger.info('Successfully retrieved and visualized aircraft trace', {
+      icao,
+      date,
+      traceCount: output.traceCount,
+      traceFile: traceFileName,
+      htmlFile: htmlFileName,
+    });
+
+  } catch (error) {
+    logger.error('Failed to get and visualize aircraft trace', {
+      icao,
+      date,
+      error: error.message,
+      stack: error.stack,
+    });
+    console.error(`Error: ${error.message}`);
+    process.exit(1);
   }
-  console.log(`\nOpen ${outputPath} in your browser to view the map.`);
-} catch (error) {
-  console.error(`Error writing HTML file: ${error.message}`);
-  process.exit(1);
 }
+
+getAndVisualizeTrace();
 
