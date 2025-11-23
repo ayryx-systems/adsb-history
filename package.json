@@ -11,7 +11,8 @@
     "get-arrivals": "node scripts/get-arrivals.js",
     "backfill": "node scripts/backfill-historical.js",
     "daily-update": "node scripts/daily-update.js",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "serve-viewer": "cd viewer && node serve-viewer.js"
   },
   "keywords": [
     "adsb",
