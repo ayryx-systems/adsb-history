@@ -275,7 +275,7 @@
             </div>
 
             <div class="chart-container">
-                <h3>Arrival Time Distribution by Aircraft Type</h3>
+                <h3>Arrival Time Distribution by Aircraft Category</h3>
                 <div class="chart-wrapper">
                     <canvas id="aircraftTypeTimeChart"></canvas>
                 </div>
@@ -710,62 +710,69 @@
 
 
         function renderAircraftTypeTimeChart(data, selectedTypes) {
-            const types = selectedTypes.length > 0 
-                ? selectedTypes 
-                : Object.keys(data.byAircraftType)
-                    .sort((a, b) => data.byAircraftType[b].count - data.byAircraftType[a].count)
-                    .slice(0, 10);
-
+            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const slots = Object.keys(timeSlots).sort();
+            
             const datasets = [];
-            const colors = [
-                'rgba(255, 99, 132, 0.6)',
-                'rgba(54, 162, 235, 0.6)',
-                'rgba(255, 206, 86, 0.6)',
-                'rgba(75, 192, 192, 0.6)',
-                'rgba(153, 102, 255, 0.6)',
-                'rgba(255, 159, 64, 0.6)',
-                'rgba(201, 203, 207, 0.6)',
-                'rgba(255, 99, 132, 0.6)',
-                'rgba(54, 162, 235, 0.6)',
-                'rgba(255, 206, 86, 0.6)'
-            ];
-
-            types.forEach((type, idx) => {
-                if (!data.byAircraftType[type]) return;
+            const colors = {
+                small: 'rgba(201, 203, 207, 1)',
+                regional: 'rgba(54, 162, 235, 1)',
+                narrowbody: 'rgba(255, 99, 132, 1)',
+                widebody: 'rgba(75, 192, 192, 1)',
+                other: 'rgba(153, 102, 255, 1)'
+            };
+            
+            const categoryOrder = ['narrowbody', 'widebody', 'regional', 'small', 'other'];
+            
+            categoryOrder.forEach(category => {
+                const categoryTypes = aircraftCategories[category]?.types || [];
+                if (categoryTypes.length === 0) return;
                 
-                const milestone = data.byAircraftType[type].milestones.timeFrom50nm;
-                if (!milestone) return;
-
-                const timeSlots = data.overall.byTouchdownTimeSlot;
-                const slots = Object.keys(timeSlots).sort();
+                const categoryCounts = {};
+                let totalCount = 0;
+                
+                categoryTypes.forEach(type => {
+                    if (data.byAircraftType[type]) {
+                        categoryCounts[type] = data.byAircraftType[type].count;
+                        totalCount += data.byAircraftType[type].count;
+                    }
+                });
+                
+                if (totalCount === 0) return;
                 
                 const medians = slots.map(slot => {
                     const slotData = timeSlots[slot];
-                    const aircraft = slotData.aircraft.filter(ac => ac.type === type);
-                    if (aircraft.length === 0) return null;
+                    const allTimes = [];
                     
-                    const times = aircraft
-                        .map(ac => ac.milestones?.timeFrom50nm)
-                        .filter(t => t !== undefined);
+                    categoryTypes.forEach(type => {
+                        const aircraft = slotData.aircraft.filter(ac => ac.type === type);
+                        aircraft.forEach(ac => {
+                            if (ac.milestones?.timeFrom50nm !== undefined) {
+                                allTimes.push(ac.milestones.timeFrom50nm);
+                            }
+                        });
+                    });
                     
-                    if (times.length === 0) return null;
-                    return times.sort((a, b) => a - b)[Math.floor(times.length / 2)] / 60;
+                    if (allTimes.length === 0) return null;
+                    const sorted = allTimes.sort((a, b) => a - b);
+                    return sorted[Math.floor(sorted.length / 2)] / 60;
                 });
-
+                
                 datasets.push({
-                    label: `${type} (${data.byAircraftType[type].count})`,
+                    label: `${aircraftCategories[category].name} (${totalCount})`,
                     data: medians,
-                    borderColor: colors[idx % colors.length].replace('0.6', '1'),
-                    backgroundColor: colors[idx % colors.length],
+                    borderColor: colors[category] || 'rgba(128, 128, 128, 1)',
+                    backgroundColor: (colors[category] || 'rgba(128, 128, 128, 1)').replace('1)', '0.2)'),
                     tension: 0.1,
-                    pointRadius: 2
+                    pointRadius: 2,
+                    borderWidth: 2
                 });
             });
 
             charts['aircraftTypeTime'] = new Chart(document.getElementById('aircraftTypeTimeChart'), {
                 type: 'line',
                 data: {
-                    labels: Object.keys(data.overall.byTouchdownTimeSlot).sort(),
+                    labels: slots,
                     datasets: datasets
                 },
                 options: {
