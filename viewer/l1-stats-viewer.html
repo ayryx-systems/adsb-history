@@ -169,16 +169,6 @@
             <div class="control-group">
                 <label>Day</label>
                 <select id="daySelect">
-                    <option value="01">01</option>
-                    <option value="02">02</option>
-                    <option value="03">03</option>
-                    <option value="04">04</option>
-                    <option value="05" selected>05</option>
-                    <option value="06">06</option>
-                    <option value="07">07</option>
-                    <option value="08">08</option>
-                    <option value="09">09</option>
-                    <option value="10">10</option>
                 </select>
             </div>
             <div class="control-group">
@@ -363,6 +353,31 @@
         let currentData = null;
         let currentWeatherData = null;
         let selectedAircraftTypes = [];
+
+        function getDaysInMonth(year, month) {
+            return new Date(year, month, 0).getDate();
+        }
+
+        function populateDaySelect() {
+            const year = parseInt(document.getElementById('yearSelect').value);
+            const month = parseInt(document.getElementById('monthSelect').value);
+            const daySelect = document.getElementById('daySelect');
+            const currentDay = daySelect.value;
+            
+            const daysInMonth = getDaysInMonth(year, month);
+            daySelect.innerHTML = '';
+            
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dayStr = String(day).padStart(2, '0');
+                const option = document.createElement('option');
+                option.value = dayStr;
+                option.textContent = dayStr;
+                if (dayStr === currentDay || (day === 1 && !currentDay)) {
+                    option.selected = true;
+                }
+                daySelect.appendChild(option);
+            }
+        }
 
         function getDataPath() {
             const airport = document.getElementById('airportSelect').value;
@@ -1273,8 +1288,14 @@
         }
 
         document.getElementById('airportSelect').addEventListener('change', loadData);
-        document.getElementById('yearSelect').addEventListener('change', loadData);
-        document.getElementById('monthSelect').addEventListener('change', loadData);
+        document.getElementById('yearSelect').addEventListener('change', () => {
+            populateDaySelect();
+            loadData();
+        });
+        document.getElementById('monthSelect').addEventListener('change', () => {
+            populateDaySelect();
+            loadData();
+        });
         document.getElementById('daySelect').addEventListener('change', loadData);
         document.getElementById('categorySelect').addEventListener('change', () => {
             if (currentData) {
@@ -1288,6 +1309,7 @@
             }
         });
 
+        populateDaySelect();
         loadData();
     </script>
 </body>
