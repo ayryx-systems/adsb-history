@@ -191,6 +191,40 @@ node scripts/analysis/generate-l1-stats.js --airport KLGA --date 2025-11-08
 node scripts/analysis/generate-l1-stats.js --airport KLGA --date 2025-11-08
 ```
 
+### 3c. Yearly Baseline Generation
+
+Generate yearly baseline data for comparing daily statistics against yearly averages. This creates aggregated baseline data used by the viewer to show how each day compares to the yearly average.
+
+**Input**: Daily L1 statistics from Phase 3b (all days for a year)  
+**Output**:
+
+- **Local cache**: `./cache/AIRPORT/YYYY/yearly-baseline.json` (yearly averages per time slot)
+- Contains:
+  - Average arrival counts per time slot across the year
+  - Median time from 50nm per time slot (aggregated across all days)
+  - Median time from 100nm per time slot (aggregated across all days)
+
+**Note**: This script **must be run after Phase 3b** has generated L1 statistics for the year. It aggregates all daily L1 stats files to create baseline comparisons. The baseline data is used by the viewer to overlay yearly averages on daily charts.
+
+#### Local
+
+```bash
+# Generate baseline for a year
+node scripts/analysis/generate-yearly-baseline.js --airport KORD --year 2025
+
+# Force regeneration even if baseline exists
+node scripts/analysis/generate-yearly-baseline.js --airport KORD --year 2025 --force
+```
+
+#### EC2
+
+```bash
+# Same script, run on EC2 instance
+node scripts/analysis/generate-yearly-baseline.js --airport KORD --year 2025
+```
+
+**When to run**: After processing a full year of data (or when you want to update the baseline with new data). The baseline is used by the viewer to show how each day compares to the yearly average.
+
 ### Running Complete Analysis Pipeline
 
 Run all analysis phases (2, 3a, and 3b) for a date range in one command. This script processes each day sequentially, running:
@@ -236,6 +270,8 @@ Ground Aircraft List (S3)
 Flight Summaries (S3)
     ↓ (Phase 3b: L1 Statistics)
 L1 Statistics (S3)
+    ↓ (Phase 3c: Yearly Baseline - Optional)
+Yearly Baseline (Local Cache)
 ```
 
 ## Weather Data

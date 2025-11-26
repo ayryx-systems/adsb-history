@@ -352,6 +352,7 @@
         let charts = {};
         let currentData = null;
         let currentWeatherData = null;
+        let currentBaselineData = null;
         let selectedAircraftTypes = [];
 
         function getDaysInMonth(year, month) {
@@ -474,6 +475,28 @@
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
             return `cache/metar/${airport}/${airport}_${year}.json`;
+        }
+
+        function getBaselinePath() {
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            return `cache/${airport}/${year}/yearly-baseline.json`;
+        }
+
+        async function loadBaselineData() {
+            try {
+                const baselinePath = getBaselinePath();
+                const response = await fetch(baselinePath);
+                if (!response.ok) {
+                    console.warn(`Failed to load baseline data: ${response.status}`);
+                    return null;
+                }
+                const baselineData = await response.json();
+                return baselineData;
+            } catch (error) {
+                console.warn(`Error loading baseline data: ${error.message}`);
+                return null;
+            }
         }
 
         function getTimeSlotFromTimestamp(timestamp) {
@@ -647,6 +670,7 @@
                 
                 const dateStr = data.date || `${document.getElementById('yearSelect').value}-${document.getElementById('monthSelect').value}-${document.getElementById('daySelect').value}`;
                 currentWeatherData = await loadWeatherData(dateStr);
+                currentBaselineData = await loadBaselineData();
                 
                 loadingDiv.style.display = 'none';
                 displayInfo(data);
@@ -817,17 +841,39 @@
                 return filtered ? filtered.count : 0;
             });
 
+            const datasets = [{
+                label: 'Arrivals',
+                data: counts,
+                backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
+            }];
+
+            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+                const baselineCounts = slots.map(slot => {
+                    const baseline = currentBaselineData.byTimeSlot[slot];
+                    return baseline ? baseline.averageCount : null;
+                });
+
+                datasets.push({
+                    label: 'Yearly Average',
+                    data: baselineCounts,
+                    type: 'line',
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    pointRadius: 2,
+                    fill: false,
+                    tension: 0.1
+                });
+            }
+
             charts['arrivalCount'] = new Chart(document.getElementById('arrivalCountChart'), {
                 type: 'bar',
                 data: {
                     labels: slots,
-                    datasets: [{
-                        label: 'Arrivals',
-                        data: counts,
-                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        borderWidth: 1
-                    }]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
@@ -867,54 +913,75 @@
                 maxs.push(stats.max ? stats.max / 60 : null);
             });
 
+            const datasets = [{
+                label: 'Median (p50)',
+                data: medians,
+                borderColor: 'rgba(153, 102, 255, 1)',
+                backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                tension: 0.1,
+                pointRadius: 2,
+                borderWidth: 2
+            }, {
+                label: 'p75',
+                data: p75s,
+                borderColor: 'rgba(75, 192, 192, 1)',
+                backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                tension: 0.1,
+                pointRadius: 1,
+                borderWidth: 1,
+                borderDash: [5, 5]
+            }, {
+                label: 'p90',
+                data: p90s,
+                borderColor: 'rgba(255, 206, 86, 1)',
+                backgroundColor: 'rgba(255, 206, 86, 0.1)',
+                tension: 0.1,
+                pointRadius: 1,
+                borderWidth: 1,
+                borderDash: [5, 5]
+            }, {
+                label: 'p95',
+                data: p95s,
+                borderColor: 'rgba(255, 99, 132, 1)',
+                backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                tension: 0.1,
+                pointRadius: 1,
+                borderWidth: 1,
+                borderDash: [5, 5]
+            }, {
+                label: 'Max',
+                data: maxs,
+                borderColor: 'rgba(201, 203, 207, 1)',
+                backgroundColor: 'rgba(201, 203, 207, 0.1)',
+                tension: 0.1,
+                pointRadius: 2,
+                borderWidth: 1
+            }];
+
+            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+                const baselineMedians = slots.map(slot => {
+                    const baseline = currentBaselineData.byTimeSlot[slot];
+                    return baseline && baseline.medianTimeFrom100nm ? baseline.medianTimeFrom100nm / 60 : null;
+                });
+
+                datasets.push({
+                    label: 'Yearly Average',
+                    data: baselineMedians,
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                    borderWidth: 2,
+                    borderDash: [10, 5],
+                    pointRadius: 2,
+                    fill: false,
+                    tension: 0.1
+                });
+            }
+
             charts['time100nm'] = new Chart(document.getElementById('time100nmChart'), {
                 type: 'line',
                 data: {
                     labels: slots,
-                    datasets: [{
-                        label: 'Median (p50)',
-                        data: medians,
-                        borderColor: 'rgba(153, 102, 255, 1)',
-                        backgroundColor: 'rgba(153, 102, 255, 0.2)',
-                        tension: 0.1,
-                        pointRadius: 2,
-                        borderWidth: 2
-                    }, {
-                        label: 'p75',
-                        data: p75s,
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
-                        tension: 0.1,
-                        pointRadius: 1,
-                        borderWidth: 1,
-                        borderDash: [5, 5]
-                    }, {
-                        label: 'p90',
-                        data: p90s,
-                        borderColor: 'rgba(255, 206, 86, 1)',
-                        backgroundColor: 'rgba(255, 206, 86, 0.1)',
-                        tension: 0.1,
-                        pointRadius: 1,
-                        borderWidth: 1,
-                        borderDash: [5, 5]
-                    }, {
-                        label: 'p95',
-                        data: p95s,
-                        borderColor: 'rgba(255, 99, 132, 1)',
-                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
-                        tension: 0.1,
-                        pointRadius: 1,
-                        borderWidth: 1,
-                        borderDash: [5, 5]
-                    }, {
-                        label: 'Max',
-                        data: maxs,
-                        borderColor: 'rgba(201, 203, 207, 1)',
-                        backgroundColor: 'rgba(201, 203, 207, 0.1)',
-                        tension: 0.1,
-                        pointRadius: 2,
-                        borderWidth: 1
-                    }]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
@@ -954,54 +1021,75 @@
                 maxs.push(stats.max ? stats.max / 60 : null);
             });
 
+            const datasets = [{
+                label: 'Median (p50)',
+                data: medians,
+                borderColor: 'rgba(75, 192, 192, 1)',
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                tension: 0.1,
+                pointRadius: 2,
+                borderWidth: 2
+            }, {
+                label: 'p75',
+                data: p75s,
+                borderColor: 'rgba(54, 162, 235, 1)',
+                backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                tension: 0.1,
+                pointRadius: 1,
+                borderWidth: 1,
+                borderDash: [5, 5]
+            }, {
+                label: 'p90',
+                data: p90s,
+                borderColor: 'rgba(255, 206, 86, 1)',
+                backgroundColor: 'rgba(255, 206, 86, 0.1)',
+                tension: 0.1,
+                pointRadius: 1,
+                borderWidth: 1,
+                borderDash: [5, 5]
+            }, {
+                label: 'p95',
+                data: p95s,
+                borderColor: 'rgba(255, 99, 132, 1)',
+                backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                tension: 0.1,
+                pointRadius: 1,
+                borderWidth: 1,
+                borderDash: [5, 5]
+            }, {
+                label: 'Max',
+                data: maxs,
+                borderColor: 'rgba(201, 203, 207, 1)',
+                backgroundColor: 'rgba(201, 203, 207, 0.1)',
+                tension: 0.1,
+                pointRadius: 2,
+                borderWidth: 1
+            }];
+
+            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+                const baselineMedians = slots.map(slot => {
+                    const baseline = currentBaselineData.byTimeSlot[slot];
+                    return baseline && baseline.medianTimeFrom50nm ? baseline.medianTimeFrom50nm / 60 : null;
+                });
+
+                datasets.push({
+                    label: 'Yearly Average',
+                    data: baselineMedians,
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                    borderWidth: 2,
+                    borderDash: [10, 5],
+                    pointRadius: 2,
+                    fill: false,
+                    tension: 0.1
+                });
+            }
+
             charts['time50nm'] = new Chart(document.getElementById('time50nmChart'), {
                 type: 'line',
                 data: {
                     labels: slots,
-                    datasets: [{
-                        label: 'Median (p50)',
-                        data: medians,
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                        tension: 0.1,
-                        pointRadius: 2,
-                        borderWidth: 2
-                    }, {
-                        label: 'p75',
-                        data: p75s,
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
-                        tension: 0.1,
-                        pointRadius: 1,
-                        borderWidth: 1,
-                        borderDash: [5, 5]
-                    }, {
-                        label: 'p90',
-                        data: p90s,
-                        borderColor: 'rgba(255, 206, 86, 1)',
-                        backgroundColor: 'rgba(255, 206, 86, 0.1)',
-                        tension: 0.1,
-                        pointRadius: 1,
-                        borderWidth: 1,
-                        borderDash: [5, 5]
-                    }, {
-                        label: 'p95',
-                        data: p95s,
-                        borderColor: 'rgba(255, 99, 132, 1)',
-                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
-                        tension: 0.1,
-                        pointRadius: 1,
-                        borderWidth: 1,
-                        borderDash: [5, 5]
-                    }, {
-                        label: 'Max',
-                        data: maxs,
-                        borderColor: 'rgba(201, 203, 207, 1)',
-                        backgroundColor: 'rgba(201, 203, 207, 0.1)',
-                        tension: 0.1,
-                        pointRadius: 2,
-                        borderWidth: 1
-                    }]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
@@ -1373,6 +1461,7 @@
         document.getElementById('airportSelect').addEventListener('change', loadData);
         document.getElementById('yearSelect').addEventListener('change', () => {
             populateDaySelect();
+            currentBaselineData = null;
             loadData();
         });
         document.getElementById('monthSelect').addEventListener('change', () => {
