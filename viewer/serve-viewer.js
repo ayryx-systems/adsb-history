@@ -25,7 +25,11 @@ const server = http.createServer((req, res) => {
   }
 
   const extname = path.extname(filePath).toLowerCase();
-  const contentType = mimeTypes[extname] || 'application/octet-stream';
+  let contentType = mimeTypes[extname] || 'application/octet-stream';
+  
+  if (extname === '.json') {
+    contentType = 'application/json';
+  }
 
   fs.readFile(filePath, (err, content) => {
     if (err) {

@@ -280,6 +280,48 @@
                     <canvas id="aircraftTypeTimeChart"></canvas>
                 </div>
             </div>
+
+            <div class="chart-container">
+                <h3>Visibility by Time Slot</h3>
+                <div class="chart-wrapper">
+                    <canvas id="visibilityChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h3>Cloud Ceiling by Time Slot</h3>
+                <div class="chart-wrapper">
+                    <canvas id="ceilingChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h3>Wind Speed by Time Slot</h3>
+                <div class="chart-wrapper">
+                    <canvas id="windSpeedChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h3>Precipitation by Time Slot</h3>
+                <div class="chart-wrapper">
+                    <canvas id="precipitationChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h3>Temperature by Time Slot</h3>
+                <div class="chart-wrapper">
+                    <canvas id="temperatureChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h3>Altimeter Pressure by Time Slot</h3>
+                <div class="chart-wrapper">
+                    <canvas id="pressureChart"></canvas>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -319,6 +361,7 @@
 
         let charts = {};
         let currentData = null;
+        let currentWeatherData = null;
         let selectedAircraftTypes = [];
 
         function getDataPath() {
@@ -327,6 +370,161 @@
             const month = document.getElementById('monthSelect').value;
             const day = document.getElementById('daySelect').value;
             return `cache/${airport}/${year}/${month}/l1-stats-${day}.json`;
+        }
+
+        function getMetarPath() {
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            return `cache/metar/${airport}/${airport}_${year}.json`;
+        }
+
+        function getTimeSlotFromTimestamp(timestamp) {
+            if (!timestamp) return null;
+            const date = new Date(timestamp);
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(Math.floor(date.getMinutes() / 15) * 15).padStart(2, '0');
+            return `${hours}:${minutes}`;
+        }
+
+        function calculateCloudCeiling(cloudGroups) {
+            if (!cloudGroups || cloudGroups.length === 0) return null;
+            
+            let lowestCeiling = null;
+            for (const cloud of cloudGroups) {
+                const type = cloud.type_raw;
+                const heightStr = cloud.height_raw;
+                
+                if ((type === 'BKN' || type === 'OVC') && heightStr) {
+                    const height = parseFloat(heightStr);
+                    if (!isNaN(height) && (lowestCeiling === null || height < lowestCeiling)) {
+                        lowestCeiling = height;
+                    }
+                }
+            }
+            
+            return lowestCeiling;
+        }
+
+        function processWeatherData(metarData, targetDate) {
+            if (!metarData || !metarData.records) return {};
+            
+            const targetDateStr = targetDate.split('T')[0];
+            const weatherBySlot = {};
+            
+            for (const record of metarData.records) {
+                if (!record.valid) continue;
+                
+                let recordDate;
+                if (typeof record.valid === 'string') {
+                    if (record.valid.includes('T')) {
+                        recordDate = new Date(record.valid);
+                    } else {
+                        const dateStr = record.valid.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})$/, '$1T$2');
+                        recordDate = new Date(dateStr);
+                    }
+                } else {
+                    recordDate = new Date(record.valid);
+                }
+                
+                if (isNaN(recordDate.getTime())) continue;
+                
+                const recordDateStr = recordDate.toISOString().split('T')[0];
+                
+                if (recordDateStr !== targetDateStr) continue;
+                
+                const slot = getTimeSlotFromTimestamp(record.valid);
+                if (!slot) continue;
+                
+                if (!weatherBySlot[slot]) {
+                    weatherBySlot[slot] = {
+                        visibility: [],
+                        windSpeed: [],
+                        windGust: [],
+                        windDir: [],
+                        precipitation: [],
+                        cloudCeiling: [],
+                        temperature: [],
+                        pressure: []
+                    };
+                }
+                
+                const slotData = weatherBySlot[slot];
+                
+                if (record.visibility_sm_v !== null && record.visibility_sm_v !== undefined) {
+                    slotData.visibility.push(record.visibility_sm_v);
+                }
+                
+                if (record.wind_spd_kt_v !== null && record.wind_spd_kt_v !== undefined) {
+                    slotData.windSpeed.push(record.wind_spd_kt_v);
+                }
+                
+                if (record.gust_kt_v !== null && record.gust_kt_v !== undefined) {
+                    slotData.windGust.push(record.gust_kt_v);
+                }
+                
+                if (record.wind_dir_deg_v !== null && record.wind_dir_deg_v !== undefined) {
+                    slotData.windDir.push(record.wind_dir_deg_v);
+                }
+                
+                if (record.precip_1hr_in_v !== null && record.precip_1hr_in_v !== undefined && record.precip_1hr_in_v > 0) {
+                    slotData.precipitation.push(record.precip_1hr_in_v);
+                }
+                
+                if (record.cloud_groups_raw && record.cloud_groups_raw.length > 0) {
+                    const ceiling = calculateCloudCeiling(record.cloud_groups_raw);
+                    if (ceiling !== null) {
+                        slotData.cloudCeiling.push(ceiling);
+                    }
+                }
+                
+                if (record.tmpf_F_v !== null && record.tmpf_F_v !== undefined) {
+                    slotData.temperature.push(record.tmpf_F_v);
+                }
+                
+                if (record.altim_inHg_v !== null && record.altim_inHg_v !== undefined) {
+                    slotData.pressure.push(record.altim_inHg_v);
+                }
+            }
+            
+            const processed = {};
+            for (const [slot, data] of Object.entries(weatherBySlot)) {
+                processed[slot] = {
+                    visibility: data.visibility.length > 0 ? 
+                        data.visibility.reduce((a, b) => a + b, 0) / data.visibility.length : null,
+                    windSpeed: data.windSpeed.length > 0 ?
+                        data.windSpeed.reduce((a, b) => a + b, 0) / data.windSpeed.length : null,
+                    windGust: data.windGust.length > 0 ?
+                        Math.max(...data.windGust) : null,
+                    windDir: data.windDir.length > 0 ?
+                        data.windDir.reduce((a, b) => a + b, 0) / data.windDir.length : null,
+                    precipitation: data.precipitation.length > 0 ?
+                        data.precipitation.reduce((a, b) => a + b, 0) : 0,
+                    cloudCeiling: data.cloudCeiling.length > 0 ?
+                        Math.min(...data.cloudCeiling) : null,
+                    temperature: data.temperature.length > 0 ?
+                        data.temperature.reduce((a, b) => a + b, 0) / data.temperature.length : null,
+                    pressure: data.pressure.length > 0 ?
+                        data.pressure.reduce((a, b) => a + b, 0) / data.pressure.length : null
+                };
+            }
+            
+            return processed;
+        }
+
+        async function loadWeatherData(targetDate) {
+            try {
+                const metarPath = getMetarPath();
+                const response = await fetch(metarPath);
+                if (!response.ok) {
+                    console.warn(`Failed to load METAR data: ${response.status}`);
+                    return null;
+                }
+                const metarData = await response.json();
+                return processWeatherData(metarData, targetDate);
+            } catch (error) {
+                console.warn(`Error loading weather data: ${error.message}`);
+                return null;
+            }
         }
 
         async function loadData() {
@@ -348,6 +546,9 @@
                 }
                 const data = await response.json();
                 currentData = data;
+                
+                const dateStr = data.date || `${document.getElementById('yearSelect').value}-${document.getElementById('monthSelect').value}-${document.getElementById('daySelect').value}`;
+                currentWeatherData = await loadWeatherData(dateStr);
                 
                 loadingDiv.style.display = 'none';
                 displayInfo(data);
@@ -483,12 +684,27 @@
             destroyChart('time100nm');
             destroyChart('time50nm');
             destroyChart('aircraftTypeTime');
+            destroyChart('visibility');
+            destroyChart('ceiling');
+            destroyChart('windSpeed');
+            destroyChart('precipitation');
+            destroyChart('temperature');
+            destroyChart('pressure');
 
             const selectedTypes = getSelectedAircraftTypes();
             renderArrivalCountChart(data, selectedTypes);
             renderTime100nmChart(data, selectedTypes);
             renderTime50nmChart(data, selectedTypes);
             renderAircraftTypeTimeChart(data, selectedTypes);
+            
+            if (currentWeatherData) {
+                renderVisibilityChart(data, currentWeatherData);
+                renderCeilingChart(data, currentWeatherData);
+                renderWindSpeedChart(data, currentWeatherData);
+                renderPrecipitationChart(data, currentWeatherData);
+                renderTemperatureChart(data, currentWeatherData);
+                renderPressureChart(data, currentWeatherData);
+            }
         }
 
         function renderArrivalCountChart(data, selectedTypes) {
@@ -782,6 +998,268 @@
                         y: {
                             beginAtZero: true,
                             title: { display: true, text: 'Time from 50nm (minutes)' }
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderVisibilityChart(data, weatherData) {
+            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const slots = Object.keys(timeSlots).sort();
+            
+            const visibility = slots.map(slot => {
+                const weather = weatherData[slot];
+                return weather && weather.visibility !== null ? weather.visibility : null;
+            });
+
+            charts['visibility'] = new Chart(document.getElementById('visibilityChart'), {
+                type: 'line',
+                data: {
+                    labels: slots,
+                    datasets: [{
+                        label: 'Visibility (statute miles)',
+                        data: visibility,
+                        borderColor: 'rgba(33, 150, 243, 1)',
+                        backgroundColor: 'rgba(33, 150, 243, 0.2)',
+                        tension: 0.1,
+                        pointRadius: 2,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Visibility (SM)' }
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderCeilingChart(data, weatherData) {
+            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const slots = Object.keys(timeSlots).sort();
+            
+            const ceiling = slots.map(slot => {
+                const weather = weatherData[slot];
+                return weather && weather.cloudCeiling !== null ? weather.cloudCeiling / 100 : null;
+            });
+
+            charts['ceiling'] = new Chart(document.getElementById('ceilingChart'), {
+                type: 'line',
+                data: {
+                    labels: slots,
+                    datasets: [{
+                        label: 'Cloud Ceiling (hundreds of feet)',
+                        data: ceiling,
+                        borderColor: 'rgba(156, 39, 176, 1)',
+                        backgroundColor: 'rgba(156, 39, 176, 0.2)',
+                        tension: 0.1,
+                        pointRadius: 2,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Ceiling (hundreds of ft)' }
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderWindSpeedChart(data, weatherData) {
+            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const slots = Object.keys(timeSlots).sort();
+            
+            const windSpeed = slots.map(slot => {
+                const weather = weatherData[slot];
+                return weather && weather.windSpeed !== null ? weather.windSpeed : null;
+            });
+
+            const windGust = slots.map(slot => {
+                const weather = weatherData[slot];
+                return weather && weather.windGust !== null ? weather.windGust : null;
+            });
+
+            charts['windSpeed'] = new Chart(document.getElementById('windSpeedChart'), {
+                type: 'line',
+                data: {
+                    labels: slots,
+                    datasets: [{
+                        label: 'Wind Speed (knots)',
+                        data: windSpeed,
+                        borderColor: 'rgba(76, 175, 80, 1)',
+                        backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                        tension: 0.1,
+                        pointRadius: 2,
+                        borderWidth: 2
+                    }, {
+                        label: 'Wind Gust (knots)',
+                        data: windGust,
+                        borderColor: 'rgba(255, 152, 0, 1)',
+                        backgroundColor: 'rgba(255, 152, 0, 0.2)',
+                        tension: 0.1,
+                        pointRadius: 2,
+                        borderWidth: 2,
+                        borderDash: [5, 5]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Wind Speed (knots)' }
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderPrecipitationChart(data, weatherData) {
+            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const slots = Object.keys(timeSlots).sort();
+            
+            const precipitation = slots.map(slot => {
+                const weather = weatherData[slot];
+                return weather && weather.precipitation !== null ? weather.precipitation : 0;
+            });
+
+            charts['precipitation'] = new Chart(document.getElementById('precipitationChart'), {
+                type: 'bar',
+                data: {
+                    labels: slots,
+                    datasets: [{
+                        label: 'Precipitation (inches/hour)',
+                        data: precipitation,
+                        backgroundColor: 'rgba(3, 169, 244, 0.6)',
+                        borderColor: 'rgba(3, 169, 244, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Precipitation (in/hr)' }
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderTemperatureChart(data, weatherData) {
+            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const slots = Object.keys(timeSlots).sort();
+            
+            const temperature = slots.map(slot => {
+                const weather = weatherData[slot];
+                return weather && weather.temperature !== null ? weather.temperature : null;
+            });
+
+            charts['temperature'] = new Chart(document.getElementById('temperatureChart'), {
+                type: 'line',
+                data: {
+                    labels: slots,
+                    datasets: [{
+                        label: 'Temperature (°F)',
+                        data: temperature,
+                        borderColor: 'rgba(244, 67, 54, 1)',
+                        backgroundColor: 'rgba(244, 67, 54, 0.2)',
+                        tension: 0.1,
+                        pointRadius: 2,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            title: { display: true, text: 'Temperature (°F)' }
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderPressureChart(data, weatherData) {
+            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const slots = Object.keys(timeSlots).sort();
+            
+            const pressure = slots.map(slot => {
+                const weather = weatherData[slot];
+                return weather && weather.pressure !== null ? weather.pressure : null;
+            });
+
+            charts['pressure'] = new Chart(document.getElementById('pressureChart'), {
+                type: 'line',
+                data: {
+                    labels: slots,
+                    datasets: [{
+                        label: 'Altimeter Pressure (inHg)',
+                        data: pressure,
+                        borderColor: 'rgba(121, 85, 72, 1)',
+                        backgroundColor: 'rgba(121, 85, 72, 0.2)',
+                        tension: 0.1,
+                        pointRadius: 2,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            title: { display: true, text: 'Pressure (inHg)' }
                         },
                         x: {
                             ticks: {
