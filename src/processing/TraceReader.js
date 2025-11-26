@@ -4,6 +4,7 @@ import zlib from 'zlib';
 import { promisify } from 'util';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import DataExtractor from '../ingestion/DataExtractor.js';
+import ExtractedTraceData from '../extraction/ExtractedTraceData.js';
 import logger from '../utils/logger.js';
 
 const gunzip = promisify(zlib.gunzip);
@@ -53,6 +54,7 @@ class TraceReader {
     }
     
     this.extractor = new DataExtractor({ tempDir: this.tempDir });
+    this.extractedTraceData = new ExtractedTraceData(config);
     
     // Initialize S3 client
     // Don't set credentials - let SDK use default credential chain
@@ -149,6 +151,29 @@ class TraceReader {
 
     logger.info('Extracting tar', { tarPath });
     return await this.extractor.extractTar(tarPath, extractDir);
+  }
+
+  /**
+   * Download extracted traces for an airport from S3
+   * Returns the path to the extracted directory, or null if not found
+   */
+  async downloadExtractedTraces(airport, date) {
+    const localTarPath = path.join(this.tempDir, 'extracted', airport, date, `${airport}-${date}.tar`);
+    const extractDir = path.join(path.dirname(localTarPath), 'extracted');
+
+    if (fs.existsSync(extractDir)) {
+      logger.info('Extracted traces already downloaded and extracted', { airport, date, extractDir });
+      return extractDir;
+    }
+
+    const tarPath = await this.extractedTraceData.download(airport, date, localTarPath);
+    
+    if (!tarPath) {
+      return null;
+    }
+
+    logger.info('Extracting airport traces', { airport, date, tarPath });
+    return await this.extractTar(tarPath);
   }
 
   /**

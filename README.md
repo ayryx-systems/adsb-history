@@ -135,18 +135,55 @@ node scripts/identification/identify-ground-aircraft-multi.js --date 2025-11-08 
 AWS_PROFILE=your-profile-name ./scripts/identification/run-on-ec2.sh --date 2025-11-08
 ```
 
+## Phase 2.5: Extraction
+
+Extract traces for identified aircraft into per-airport tar files. This creates much smaller files (~50-200MB) that contain only the traces for aircraft that were on the ground at a specific airport, making downstream processing much more efficient.
+
+**Input**:
+- Ground aircraft list from Phase 2 (`s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json`)
+- Raw ADSB data from Phase 1 (`s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`)
+
+**Output**: `s3://ayryx-adsb-history/extracted/AIRPORT/YYYY/MM/DD/AIRPORT-YYYY-MM-DD.tar` (tar file containing only traces for identified aircraft)
+
+**Important**: This phase **must be completed** before Phase 3a. Downstream scripts will fail if extracted traces don't exist. Run extraction once for all dates and airports, then never download raw tar files again.
+
+### Blanket Extraction (Recommended)
+
+Extract traces for all enabled airports for a date range:
+
+```bash
+# Extract all enabled airports for January 2025
+node scripts/extraction/extract-all-airports.js --start-date 2025-01-01 --end-date 2025-01-31
+
+# Extract specific airports for a date range
+node scripts/extraction/extract-all-airports.js --start-date 2025-01-01 --end-date 2025-01-15 --airports KORD,KLGA
+```
+
+**Requirements**: ~50GB disk space for extraction (processes one day at a time)
+
+### Single Airport Extraction
+
+For processing a single airport:
+
+```bash
+# Single date
+node scripts/extraction/extract-airport-traces.js --airport KORD --date 2025-01-15
+
+# Date range
+node scripts/extraction/extract-airport-traces.js --airport KORD --start-date 2025-01-15 --days 7
+```
+
 ## Phase 3: Analysis
 
 ### 3a. Flight Analysis
 
 Analyze flights to create detailed summaries with distance milestones.
 
-**Input**:
-
-- Ground aircraft list from Phase 2 (`s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json`)
-- Raw ADSB data from Phase 1 (`s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`)
+**Input**: Extracted traces from Phase 2.5 (`s3://ayryx-adsb-history/extracted/AIRPORT/YYYY/MM/DD/AIRPORT-YYYY-MM-DD.tar`)
 
 **Output**: `s3://ayryx-adsb-history/flight-summaries/AIRPORT/YYYY/MM/DD.json` (detailed flight data with milestones, classifications, touchdown/takeoff points)
+
+**Important**: Extracted traces **must exist** before running this phase. Run `extract-all-airports.js` first. The script will fail if extracted traces are not found.
 
 #### Local
 
@@ -154,7 +191,7 @@ Analyze flights to create detailed summaries with distance milestones.
 node scripts/analysis/analyze-airport-day.js --airport KLGA --date 2025-11-08
 ```
 
-**Requirements**: ~50GB disk space for extraction
+**Requirements**: ~1-5GB disk space (uses extracted traces, much smaller than raw tar)
 
 #### EC2
 
@@ -227,13 +264,16 @@ node scripts/analysis/generate-yearly-baseline.js --airport KORD --year 2025
 
 ### Running Complete Analysis Pipeline
 
-Run all analysis phases (2, 3a, and 3b) for a date range in one command. This script processes each day sequentially, running:
+Run analysis phases (2, 3a, and 3b) for a date range in one command. This script processes each day sequentially, running:
 
 1. Phase 2: Identify ground aircraft
-2. Phase 3a: Analyze flights (create flight summaries)
+2. Phase 3a: Analyze flights (create flight summaries) - **requires extracted traces to exist**
 3. Phase 3b: Generate L1 statistics
 
-**Input**: Raw ADSB data from Phase 1 (must be ingested first)  
+**Prerequisites**: 
+- Raw ADSB data from Phase 1 (must be ingested first)
+- Extracted traces from Phase 2.5 (run `extract-all-airports.js` first)
+
 **Output**: Complete analysis pipeline outputs (ground aircraft lists, flight summaries, and L1 statistics)
 
 #### Local
@@ -263,16 +303,20 @@ node scripts/analysis/process-analysis-pipeline.js --airport KORD --start-date 2
 ```
 GitHub Releases
     ↓ (Phase 1: Ingestion)
-Raw ADSB Data (S3)
+Raw ADSB Data (S3) ~2GB/day
     ↓ (Phase 2: Identification)
-Ground Aircraft List (S3)
+Ground Aircraft List (S3) ~100KB/day
+    ↓ (Phase 2.5: Extraction - REQUIRED)
+Extracted Traces (S3) ~50-200MB/day per airport
     ↓ (Phase 3a: Flight Analysis)
-Flight Summaries (S3)
+Flight Summaries (S3) ~1-10MB/day per airport
     ↓ (Phase 3b: L1 Statistics)
-L1 Statistics (S3)
+L1 Statistics (S3) ~100KB/day per airport
     ↓ (Phase 3c: Yearly Baseline - Optional)
 Yearly Baseline (Local Cache)
 ```
+
+**Important**: Phase 2.5 (Extraction) **must be completed** before Phase 3a. Once extraction is done for a date range, you never need to download raw tar files again. Downstream scripts will fail if extracted traces don't exist.
 
 ## Weather Data
 

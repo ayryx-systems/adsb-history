@@ -8,7 +8,8 @@
  * 2. Phase 3a: Analyze flights (analyze-airport-day.js) - creates flight summaries
  * 3. Phase 3b: Generate L1 statistics (generate-l1-stats.js)
  * 
- * Processes one day at a time to manage disk space (~3GB/day raw data)
+ * Note: Extracted traces must already exist (run extract-all-airports.js first).
+ * This script assumes extraction has been completed for the date range.
  * 
  * Usage:
  *   node scripts/analysis/process-analysis-pipeline.js --airport KORD
@@ -135,6 +136,7 @@ async function processDay(airport, date, force) {
     logger.info('Ground aircraft identification complete', { airport, date });
 
     // Step 2: Analyze flights (Phase 3a - creates flight summaries)
+    // Note: Requires extracted traces to exist (run extract-all-airports.js first)
     logger.info('Step 2: Analyzing flights', { airport, date });
     const analyzeArgs = ['--airport', airport, '--date', date];
     if (force) {

@@ -1,5 +1,4 @@
 import TraceReader from '../processing/TraceReader.js';
-import GroundAircraftData from '../processing/GroundAircraftData.js';
 import FlightAnalyzer from './FlightAnalyzer.js';
 import logger from '../utils/logger.js';
 
@@ -10,7 +9,6 @@ import logger from '../utils/logger.js';
 class AirportDayAnalyzer {
   constructor(config = {}) {
     this.traceReader = new TraceReader(config);
-    this.groundAircraftData = new GroundAircraftData(config);
     this.flightAnalyzer = new FlightAnalyzer(config);
   }
 
@@ -24,58 +22,26 @@ class AirportDayAnalyzer {
   async analyzeDay(airport, date, airportConfig) {
     logger.info('Starting airport day analysis', { airport, date });
 
-    // Step 1: Load ground aircraft list
-    logger.info('Step 1: Loading ground aircraft list', { airport, date });
-    const aircraftIds = await this.groundAircraftData.load(airport, date);
-    
-    if (!aircraftIds || aircraftIds.length === 0) {
-      logger.warn('No ground aircraft found', { airport, date });
-      return {
-        airport,
-        date,
-        airportElevation_ft: airportConfig.elevation_ft || 0,
-        flights: [],
-        summary: {
-          totalMovements: 0,
-          arrivals: 0,
-          departures: 0,
-          missedApproaches: 0,
-          other: 0,
-        },
-      };
+    logger.info('Step 1: Downloading extracted traces', { airport, date });
+    const extractDir = await this.traceReader.downloadExtractedTraces(airport, date);
+
+    if (!extractDir) {
+      throw new Error(
+        `Extracted traces not found for ${airport} on ${date}. ` +
+        `Please run extraction first: node scripts/extraction/extract-all-airports.js --start-date ${date} --end-date ${date}`
+      );
     }
 
-    logger.info('Loaded ground aircraft list', {
+    logger.info('Step 2: Analyzing flights', {
       airport,
       date,
-      count: aircraftIds.length,
-    });
-
-    // Step 2: Download and extract tar from S3
-    logger.info('Step 2: Downloading tar from S3', { date });
-    const tarPath = await this.traceReader.downloadTarFromS3(date);
-    logger.info('Tar downloaded', { tarPath });
-
-    logger.info('Step 3: Extracting tar', { date });
-    const extractDir = await this.traceReader.extractTar(tarPath);
-    logger.info('Tar extracted', { extractDir });
-
-    // Step 3: Analyze flights for each aircraft
-    logger.info('Step 4: Analyzing flights', {
-      airport,
-      date,
-      aircraftCount: aircraftIds.length,
     });
 
     const flights = [];
     let processedCount = 0;
     const progressInterval = 50;
 
-    // Stream only the traces we need (filtered by ICAO)
-    for await (const { icao, trace, registration, aircraftType, description } of this.traceReader.streamFilteredTraces(
-      extractDir,
-      aircraftIds
-    )) {
+    for await (const { icao, trace, registration, aircraftType, description } of this.traceReader.streamAllTraces(extractDir)) {
       processedCount++;
 
       if (processedCount % progressInterval === 0) {
