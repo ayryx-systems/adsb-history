@@ -547,21 +547,6 @@ class FlightAnalyzer {
       ? Math.max(...positionsWithDistance.map(p => p.timestamp))
       : 0;
     
-    // Find the last position in approach configuration (low altitude, close to airport)
-    // This is the most reliable indicator of when the aircraft actually landed
-    let lastApproachPosition = null;
-    for (let i = positionsWithDistance.length - 1; i >= 0; i--) {
-      const pos = positionsWithDistance[i];
-      if (pos.timestamp > segmentMaxTimestamp) {
-        continue; // Skip positions from later segments
-      }
-      const agl = pos.alt_agl !== null ? pos.alt_agl : (pos.alt_baro !== null ? pos.alt_baro - airportElevation : null);
-      if (agl !== null && agl < approachThresholdAGL && pos.distance <= approachDistanceThreshold) {
-        lastApproachPosition = pos;
-        break; // Found the last approach position
-      }
-    }
-    
     // Find all ground positions near airport (only from this segment)
     const groundPositions = [];
     for (const pos of positionsWithDistance) {
@@ -575,27 +560,47 @@ class FlightAnalyzer {
       }
     }
     
-    // If we have both approach and ground positions, determine which to use
-    if (lastApproachPosition && groundPositions.length > 0) {
-      // Sort ground positions by timestamp
+    // Find the last approach position before the first ground position
+    // This ensures we use the approach position right before landing, not a later one
+    let lastApproachPosition = null;
+    if (groundPositions.length > 0) {
+      // Sort ground positions to find the first one
       groundPositions.sort((a, b) => a.timestamp - b.timestamp);
       const firstGroundPos = groundPositions[0];
       
-      // If ground positions occur after the approach position, we lost contact during approach
-      // Use the approach position as touchdown
-      if (firstGroundPos.timestamp > lastApproachPosition.timestamp) {
-        touchdown = lastApproachPosition;
-      } else {
-        // Ground position is before or at same time as approach - use ground position (actual landing)
-        touchdown = firstGroundPos;
+      // Find last approach position before first ground position
+      for (let i = positionsWithDistance.length - 1; i >= 0; i--) {
+        const pos = positionsWithDistance[i];
+        if (pos.timestamp > segmentMaxTimestamp || pos.timestamp >= firstGroundPos.timestamp) {
+          continue; // Skip positions from later segments or after first ground position
+        }
+        const agl = pos.alt_agl !== null ? pos.alt_agl : (pos.alt_baro !== null ? pos.alt_baro - airportElevation : null);
+        if (agl !== null && agl < approachThresholdAGL && pos.distance <= approachDistanceThreshold) {
+          lastApproachPosition = pos;
+          break; // Found the last approach position before landing
+        }
       }
-    } else if (lastApproachPosition) {
-      // Only have approach position - use it
-      touchdown = lastApproachPosition;
-    } else if (groundPositions.length > 0) {
-      // Only have ground positions - use first one
+    } else {
+      // No ground positions - find last approach position in entire segment
+      for (let i = positionsWithDistance.length - 1; i >= 0; i--) {
+        const pos = positionsWithDistance[i];
+        if (pos.timestamp > segmentMaxTimestamp) {
+          continue; // Skip positions from later segments
+        }
+        const agl = pos.alt_agl !== null ? pos.alt_agl : (pos.alt_baro !== null ? pos.alt_baro - airportElevation : null);
+        if (agl !== null && agl < approachThresholdAGL && pos.distance <= approachDistanceThreshold) {
+          lastApproachPosition = pos;
+          break; // Found the last approach position
+        }
+      }
+    }
+    
+    // Determine touchdown: use first ground position if available, otherwise use approach position
+    if (groundPositions.length > 0) {
       groundPositions.sort((a, b) => a.timestamp - b.timestamp);
       touchdown = groundPositions[0];
+    } else if (lastApproachPosition) {
+      touchdown = lastApproachPosition;
     }
     
     // Also check if the last position in the segment is on ground near airport
