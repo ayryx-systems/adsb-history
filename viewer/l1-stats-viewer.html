@@ -690,8 +690,10 @@
                 `${data.airport} - ${data.date}`;
             
             const grid = document.getElementById('infoGrid');
+            const goAroundCount = data.totalGoArounds || (data.overall && data.overall.goAroundCount) || 0;
             grid.innerHTML = `
                 <div class="info-item"><strong>Total Arrivals:</strong> ${data.totalArrivals.toLocaleString()}</div>
+                <div class="info-item"><strong>Go-Arounds:</strong> ${goAroundCount.toLocaleString()}</div>
                 <div class="info-item"><strong>Aircraft Types:</strong> ${Object.keys(data.byAircraftType).length}</div>
                 <div class="info-item"><strong>Generated:</strong> ${new Date(data.generatedAt).toLocaleString()}</div>
             `;
@@ -1085,6 +1087,44 @@
                 });
             }
 
+            const goAroundMarkers = {};
+            slots.forEach(slot => {
+                const slotData = timeSlots[slot];
+                const goArounds = slotData.goArounds || [];
+                if (goArounds.length > 0) {
+                    const stats = getTimeSlotStats(timeSlots[slot], 'timeFrom50nm', selectedTypes);
+                    const median = stats.median ? stats.median / 60 : null;
+                    if (median !== null) {
+                        goAroundMarkers[slot] = { y: median, count: goArounds.length };
+                    }
+                }
+            });
+
+            const hasGoArounds = Object.keys(goAroundMarkers).length > 0;
+            if (hasGoArounds) {
+                const goAroundData = slots.map(slot => {
+                    const marker = goAroundMarkers[slot];
+                    return marker ? marker.y : null;
+                });
+
+                datasets.push({
+                    label: 'Go-Arounds',
+                    data: goAroundData,
+                    type: 'scatter',
+                    backgroundColor: 'rgba(255, 0, 0, 0.8)',
+                    borderColor: 'rgba(255, 0, 0, 1)',
+                    pointRadius: (ctx) => {
+                        const slot = slots[ctx.dataIndex];
+                        const marker = goAroundMarkers[slot];
+                        return marker ? 6 + (marker.count - 1) * 2 : 0;
+                    },
+                    pointStyle: 'triangle',
+                    pointHoverRadius: 8,
+                    showLine: false,
+                    yAxisID: 'y',
+                });
+            }
+
             charts['time50nm'] = new Chart(document.getElementById('time50nmChart'), {
                 type: 'line',
                 data: {
@@ -1103,6 +1143,25 @@
                             ticks: {
                                 maxRotation: 45,
                                 minRotation: 45
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.dataset.label === 'Go-Arounds' && context.parsed.y !== null) {
+                                        const slot = slots[context.dataIndex];
+                                        const marker = goAroundMarkers[slot];
+                                        if (marker) {
+                                            return `Go-Arounds: ${marker.count} at ${marker.y.toFixed(1)} min`;
+                                        }
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        return context.dataset.label + ': ' + context.parsed.y.toFixed(2);
+                                    }
+                                    return '';
+                                }
                             }
                         }
                     }

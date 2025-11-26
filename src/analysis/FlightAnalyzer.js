@@ -61,6 +61,13 @@ class FlightAnalyzer {
     this.missedApproachBoundary = config.missedApproachBoundary || this.MIN_DISTANCE_THRESHOLD; // nm
     this.missedApproachMaxAGL = config.missedApproachMaxAGL || 1000; // feet AGL
     this.missedApproachMaxTime = config.missedApproachMaxTime || 2 * 60; // 2 minutes in seconds
+    this.goAroundBoundary = config.goAroundBoundary || this.MIN_DISTANCE_THRESHOLD; // nm
+    this.goAroundMaxAGL = config.goAroundMaxAGL || 1000; // feet AGL
+    this.goAroundMaxTime = config.goAroundMaxTime || 2 * 60; // 2 minutes in seconds
+    this.goAroundMinDistance = config.goAroundMinDistance || 5; // nm - must have passed this distance before go-around
+    this.goAroundMaxTimeFromThreshold = config.goAroundMaxTimeFromThreshold || 15 * 60; // 15 minutes - max time between passing threshold and go-around
+    this.goAroundMinApproachDistance = config.goAroundMinApproachDistance || 20; // nm - must have been beyond this distance in past 90 minutes (filters pattern work)
+    this.goAroundMaxApproachTime = config.goAroundMaxApproachTime || 90 * 60; // 90 minutes - look back window for approach distance check
   }
 
   /**
@@ -123,7 +130,16 @@ class FlightAnalyzer {
     
     const events = [];
     
-    // Analyze each segment independently
+    // First pass: detect all go-arounds across all segments
+    // This allows us to exclude go-around positions when analyzing arrivals
+    const goAroundsBySegment = [];
+    for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+      const segment = segments[segIdx];
+      const goAround = this.detectGoAround(segment, airportElevation, positionsWithDistance);
+      goAroundsBySegment[segIdx] = goAround;
+    }
+    
+    // Second pass: analyze segments and create events
     for (let segIdx = 0; segIdx < segments.length; segIdx++) {
       const segment = segments[segIdx];
       const segmentClosestApproach = segment.reduce((min, pos) => 
@@ -132,25 +148,70 @@ class FlightAnalyzer {
       // Check for missed approach
       const missedApproach = this.detectMissedApproach(segment, airportElevation);
 
-      // Classify this segment
+      // Get go-around for this segment (already detected in first pass)
+      const goAround = goAroundsBySegment[segIdx];
+
+      // Classify this segment (go-arounds are now independent, so don't pass to classification)
       const classification = this.classifyFlightSegment(
         segment,
         segmentClosestApproach,
-        missedApproach
+        missedApproach,
+        null
       );
-
-      if (!classification) {
-        continue;
-      }
 
       // Check if there's a gap after this segment (next segment starts much later)
       const hasGapAfter = segIdx < segments.length - 1 && 
         segments[segIdx + 1].length > 0 &&
         segments[segIdx + 1][0].timestamp - segment[segment.length - 1].timestamp >= 5 * 60;
 
-      // Analyze based on classification
+      // Add go-around as independent event if detected (before other classifications)
+      if (goAround) {
+        events.push({
+          icao,
+          registration,
+          type: aircraftType,
+          desc: description,
+          classification: 'go_around',
+          closestApproach: {
+            distance_nm: segmentClosestApproach.distance,
+            altitude_ft: segmentClosestApproach.alt_baro,
+            altitudeAGL_ft: segmentClosestApproach.alt_baro - airportElevation,
+            timestamp: segmentClosestApproach.timestamp,
+            lat: segmentClosestApproach.lat,
+            lon: segmentClosestApproach.lon,
+          },
+          goAround: {
+            entryTime: goAround.entryTime,
+            exitTime: goAround.exitTime,
+            duration: goAround.exitTime - goAround.entryTime,
+            entryAltitudeAGL_ft: goAround.entryAltitudeAGL,
+            exitAltitudeAGL_ft: goAround.exitAltitudeAGL,
+            maxAltitudeAGL_ft: goAround.maxAltitudeAGL,
+          },
+          timeRange: {
+            first: segment[0].timestamp,
+            last: segment[segment.length - 1].timestamp,
+          },
+        });
+      }
+
+      // Analyze based on classification (can coexist with go-around)
       if (classification === 'arrival') {
-        const arrivalEvent = this.analyzeArrival(icao, segment, airport, segmentClosestApproach, airportElevation, { registration, aircraftType, description }, hasGapAfter);
+        // Collect all go-arounds from all segments for this aircraft
+        // This ensures we exclude go-around positions even if they're in different segments
+        const allGoArounds = [];
+        for (let i = 0; i < segments.length; i++) {
+          if (goAroundsBySegment[i]) {
+            const gaSegment = segments[i];
+            allGoArounds.push({
+              goAround: {
+                entryTime: goAroundsBySegment[i].entryTime,
+                exitTime: goAroundsBySegment[i].exitTime,
+              },
+            });
+          }
+        }
+        const arrivalEvent = this.analyzeArrival(icao, segment, airport, segmentClosestApproach, airportElevation, { registration, aircraftType, description }, hasGapAfter, allGoArounds);
         if (arrivalEvent) events.push(arrivalEvent);
       } else if (classification === 'departure') {
         const departureEvent = this.analyzeDeparture(icao, segment, airport, segmentClosestApproach, airportElevation, { registration, aircraftType, description });
@@ -278,7 +339,7 @@ class FlightAnalyzer {
    * Classify a flight segment (similar to classifyFlight but for a segment)
    * Segments are already split, so we only need to classify as arrival or departure
    */
-  classifyFlightSegment(positionsWithDistance, closestApproach, missedApproach = null) {
+  classifyFlightSegment(positionsWithDistance, closestApproach, missedApproach = null, goAround = null) {
     const nearbyPositions = positionsWithDistance.filter(
       pos => pos.distance <= this.airportProximityRadius
     );
@@ -341,6 +402,7 @@ class FlightAnalyzer {
       return 'departure';
     }
 
+    // Note: Go-arounds are now detected independently, not as a classification
     // Only check for missed approach if it's not a valid arrival or departure
     // Missed approaches are aircraft that approach but don't complete the landing
     if (missedApproach) {
@@ -437,6 +499,159 @@ class FlightAnalyzer {
   }
 
   /**
+   * Detect go-around: aircraft approaches (passes 5nm), enters 2nm boundary below 1000ft AGL,
+   * exits within 2 minutes, and climbs above 1000ft AGL
+   * Go-arounds are distinct from missed approaches in that they climb significantly after entry
+   * 
+   * @param {Array} segment - Current segment being analyzed
+   * @param {number} airportElevation - Airport elevation in feet
+   * @param {Array} fullTrace - Full trace positions (for checking approach history to filter pattern work)
+   */
+  detectGoAround(segment, airportElevation, fullTrace = null) {
+    const positionsWithDistance = segment;
+    const boundary = this.goAroundBoundary;
+    
+    // Find entry and exit points for the boundary
+    let entryPos = null;
+    let entryIndex = -1;
+    
+    // Find first entry into boundary below 1000ft AGL
+    for (let i = 0; i < positionsWithDistance.length; i++) {
+      const pos = positionsWithDistance[i];
+      const agl = pos.alt_baro - airportElevation;
+      
+      // Check if entering boundary (was outside, now inside) and below max AGL
+      const wasOutside = i === 0 || positionsWithDistance[i - 1].distance > boundary;
+      if (wasOutside && pos.distance <= boundary && agl < this.goAroundMaxAGL) {
+        entryPos = { ...pos, agl };
+        entryIndex = i;
+        break;
+      }
+    }
+    
+    if (!entryPos) {
+      return null;
+    }
+    
+    // Check that aircraft passed the threshold distance (5nm) before entry
+    // This ensures it was approaching from a reasonable distance
+    const positionsBeforeEntry = positionsWithDistance.slice(0, entryIndex);
+    if (positionsBeforeEntry.length === 0) {
+      return null; // No approach pattern visible
+    }
+    
+    // Find when aircraft passed the threshold distance (5nm) going towards airport
+    let thresholdCrossTime = null;
+    let thresholdCrossIndex = -1;
+    for (let i = positionsBeforeEntry.length - 1; i >= 0; i--) {
+      const pos = positionsBeforeEntry[i];
+      if (pos.distance >= this.goAroundMinDistance) {
+        thresholdCrossTime = pos.timestamp;
+        thresholdCrossIndex = i;
+        break;
+      }
+    }
+    
+    if (!thresholdCrossTime) {
+      return null; // Never passed the threshold distance - not a go-around
+    }
+    
+    // Check time limit: go-around must occur within reasonable time after passing threshold
+    const timeFromThreshold = entryPos.timestamp - thresholdCrossTime;
+    if (timeFromThreshold < 0 || timeFromThreshold > this.goAroundMaxTimeFromThreshold) {
+      return null; // Too much time passed between threshold and go-around
+    }
+
+    // CRITICAL: Filter out pattern work by checking if aircraft was beyond approach distance
+    // in the past 90 minutes. This ensures it's a real approach, not just circuits.
+    // Use fullTrace if provided, otherwise use segment (for testing/backwards compatibility)
+    const traceToCheck = fullTrace && fullTrace.length > 0 ? fullTrace : positionsWithDistance;
+    const lookbackStartTime = entryPos.timestamp - this.goAroundMaxApproachTime;
+    const relevantPositions = traceToCheck.filter(pos => 
+      pos.timestamp >= lookbackStartTime && pos.timestamp <= entryPos.timestamp
+    );
+    
+    if (relevantPositions.length > 0) {
+      const maxDistanceInWindow = Math.max(...relevantPositions.map(pos => pos.distance));
+      if (maxDistanceInWindow < this.goAroundMinApproachDistance) {
+        return null; // Aircraft was never far enough away - likely pattern work, not a real approach
+      }
+    } else {
+      return null; // No positions in lookback window
+    }
+    
+    // Check that aircraft was descending before entry (approach pattern)
+    if (positionsBeforeEntry.length >= 3) {
+      const recentBefore = positionsBeforeEntry.slice(-5); // Last 5 positions before entry
+      const altitudes = recentBefore.map(pos => pos.alt_baro).filter(alt => alt !== null);
+      if (altitudes.length >= 2) {
+        const firstAlt = altitudes[0];
+        const lastAlt = altitudes[altitudes.length - 1];
+        // Should be descending (or at least not climbing significantly)
+        if (lastAlt > firstAlt + 500) {
+          return null; // Was climbing, not approaching
+        }
+      }
+    }
+    
+    // Find first exit from boundary after entry
+    let exitPos = null;
+    let exitIndex = -1;
+    for (let i = entryIndex + 1; i < positionsWithDistance.length; i++) {
+      const pos = positionsWithDistance[i];
+      
+      // Check if exiting boundary (was inside, now outside)
+      if (pos.distance > boundary) {
+        exitPos = { ...pos, agl: pos.alt_baro - airportElevation };
+        exitIndex = i;
+        break;
+      }
+    }
+    
+    if (!exitPos) {
+      return null;
+    }
+    
+    const duration = exitPos.timestamp - entryPos.timestamp;
+    
+    // Check if left within 2 minutes
+    // Also require minimum duration of at least 10 seconds to avoid very brief passes
+    if (duration < 10 || duration > this.goAroundMaxTime) {
+      return null;
+    }
+    
+    // CRITICAL: Check that aircraft climbed above 1000ft AGL after entry
+    // This distinguishes go-arounds from missed approaches
+    // Look for positions after entry but before/at exit that are above 1000ft AGL
+    const positionsAfterEntry = positionsWithDistance.slice(entryIndex, exitIndex + 1);
+    let maxAltitudeAGL = entryPos.agl;
+    let climbedAboveThreshold = false;
+    
+    for (const pos of positionsAfterEntry) {
+      const agl = pos.alt_baro - airportElevation;
+      if (agl > maxAltitudeAGL) {
+        maxAltitudeAGL = agl;
+      }
+      if (agl > this.goAroundMaxAGL) {
+        climbedAboveThreshold = true;
+      }
+    }
+    
+    // Must have climbed above 1000ft AGL to be considered a go-around
+    if (!climbedAboveThreshold) {
+      return null; // Didn't climb - might be a missed approach instead
+    }
+    
+    return {
+      entryTime: entryPos.timestamp,
+      exitTime: exitPos.timestamp,
+      entryAltitudeAGL: entryPos.agl,
+      exitAltitudeAGL: exitPos.agl,
+      maxAltitudeAGL: maxAltitudeAGL,
+    };
+  }
+
+  /**
    * Classify flight as arrival, departure, missed approach, or other
    */
   classifyFlight(positionsWithDistance, closestApproach, missedApproach = null) {
@@ -529,8 +744,9 @@ class FlightAnalyzer {
 
   /**
    * Analyze an arrival flight
+   * @param {Array} goArounds - Array of go-around events for this aircraft (to exclude from touchdown detection)
    */
-  analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation = 0, metadata = {}, hasGapAfter = false) {
+  analyzeArrival(icao, positionsWithDistance, airport, closestApproach, airportElevation = 0, metadata = {}, hasGapAfter = false, goArounds = []) {
     const { registration = null, aircraftType = null, description = null } = metadata;
     
     // Check for lost contact scenarios where aircraft was approaching
@@ -538,8 +754,23 @@ class FlightAnalyzer {
     const approachDistanceThreshold = 2; // nm
     const lostContactTimeout = 2 * 60; // 2 minutes in seconds
     
+    // CRITICAL: Exclude positions that are part of go-arounds
+    // Go-arounds can cause false touchdown detection during the low-altitude phase
+    const goAroundTimeRanges = goArounds.map(ga => ({
+      start: ga.goAround.entryTime,
+      end: ga.goAround.exitTime,
+    }));
+    
+    // Filter out positions that fall within any go-around time window
+    const positionsExcludingGoArounds = positionsWithDistance.filter(pos => {
+      return !goAroundTimeRanges.some(range => 
+        pos.timestamp >= range.start && pos.timestamp <= range.end
+      );
+    });
+    
     // Find touchdown - prioritize last approach position before losing contact
     // CRITICAL: Only use positions from this segment, never from later segments
+    // AND exclude positions that are part of go-arounds
     let touchdown = null;
     
     // Get the maximum timestamp in this segment to ensure we never use later data
@@ -547,9 +778,9 @@ class FlightAnalyzer {
       ? Math.max(...positionsWithDistance.map(p => p.timestamp))
       : 0;
     
-    // Find all ground positions near airport (only from this segment)
+    // Find all ground positions near airport (only from this segment, excluding go-arounds)
     const groundPositions = [];
-    for (const pos of positionsWithDistance) {
+    for (const pos of positionsExcludingGoArounds) {
       // Safety check: ensure position is actually in this segment
       if (pos.timestamp > segmentMaxTimestamp) {
         continue; // Skip positions from later segments
@@ -568,9 +799,9 @@ class FlightAnalyzer {
       groundPositions.sort((a, b) => a.timestamp - b.timestamp);
       const firstGroundPos = groundPositions[0];
       
-      // Find last approach position before first ground position
-      for (let i = positionsWithDistance.length - 1; i >= 0; i--) {
-        const pos = positionsWithDistance[i];
+      // Find last approach position before first ground position (excluding go-arounds)
+      for (let i = positionsExcludingGoArounds.length - 1; i >= 0; i--) {
+        const pos = positionsExcludingGoArounds[i];
         if (pos.timestamp > segmentMaxTimestamp || pos.timestamp >= firstGroundPos.timestamp) {
           continue; // Skip positions from later segments or after first ground position
         }
@@ -581,9 +812,9 @@ class FlightAnalyzer {
         }
       }
     } else {
-      // No ground positions - find last approach position in entire segment
-      for (let i = positionsWithDistance.length - 1; i >= 0; i--) {
-        const pos = positionsWithDistance[i];
+      // No ground positions - find last approach position in entire segment (excluding go-arounds)
+      for (let i = positionsExcludingGoArounds.length - 1; i >= 0; i--) {
+        const pos = positionsExcludingGoArounds[i];
         if (pos.timestamp > segmentMaxTimestamp) {
           continue; // Skip positions from later segments
         }
@@ -606,9 +837,10 @@ class FlightAnalyzer {
     // Also check if the last position in the segment is on ground near airport
     // This handles cases where we lose contact right after landing
     // CRITICAL: This must be the actual last position in the segment (before any gap)
-    if (!touchdown && positionsWithDistance.length > 0) {
-      // Find the actual last position in this segment (not from later segments)
-      const segmentPositions = positionsWithDistance.filter(p => p.timestamp <= segmentMaxTimestamp);
+    // AND exclude go-around positions
+    if (!touchdown && positionsExcludingGoArounds.length > 0) {
+      // Find the actual last position in this segment (not from later segments, excluding go-arounds)
+      const segmentPositions = positionsExcludingGoArounds.filter(p => p.timestamp <= segmentMaxTimestamp);
       if (segmentPositions.length > 0) {
         const lastPos = segmentPositions[segmentPositions.length - 1];
         if (lastPos.distance <= this.touchdownProximity && 
@@ -619,12 +851,12 @@ class FlightAnalyzer {
       }
     }
     
-    // If no clear touchdown, check for lost contact scenarios
+    // If no clear touchdown, check for lost contact scenarios (excluding go-arounds)
     if (!touchdown) {
       // Check for gaps in the data where aircraft was approaching
-      for (let i = 1; i < positionsWithDistance.length; i++) {
-        const prevPos = positionsWithDistance[i - 1];
-        const currPos = positionsWithDistance[i];
+      for (let i = 1; i < positionsExcludingGoArounds.length; i++) {
+        const prevPos = positionsExcludingGoArounds[i - 1];
+        const currPos = positionsExcludingGoArounds[i];
         const timeGap = currPos.timestamp - prevPos.timestamp;
         
         // If gap is between 2 minutes and 5 minutes (lost contact but not segment split)
@@ -651,8 +883,9 @@ class FlightAnalyzer {
       
       // Also check if segment ends with aircraft in approach configuration
       // (no more data after this segment, so we lost contact)
-      if (!touchdown && positionsWithDistance.length > 0) {
-        const lastPos = positionsWithDistance[positionsWithDistance.length - 1];
+      // Exclude go-around positions
+      if (!touchdown && positionsExcludingGoArounds.length > 0) {
+        const lastPos = positionsExcludingGoArounds[positionsExcludingGoArounds.length - 1];
         const lastAGL = lastPos.alt_agl !== null ? lastPos.alt_agl : (lastPos.alt_baro !== null ? lastPos.alt_baro - airportElevation : null);
         const wasApproaching = lastAGL !== null && 
                                lastAGL < approachThresholdAGL && 
@@ -669,8 +902,9 @@ class FlightAnalyzer {
     // If there's a gap after this segment and we still don't have a touchdown,
     // use the last position in the segment if it's in approach configuration
     // This handles cases where we lose contact during approach
-    if (!touchdown && hasGapAfter && positionsWithDistance.length > 0) {
-      const lastPos = positionsWithDistance[positionsWithDistance.length - 1];
+    // Exclude go-around positions
+    if (!touchdown && hasGapAfter && positionsExcludingGoArounds.length > 0) {
+      const lastPos = positionsExcludingGoArounds[positionsExcludingGoArounds.length - 1];
       const lastAGL = lastPos.alt_agl !== null ? lastPos.alt_agl : (lastPos.alt_baro !== null ? lastPos.alt_baro - airportElevation : null);
       const wasApproaching = lastAGL !== null && 
                              lastAGL < approachThresholdAGL && 
@@ -683,6 +917,7 @@ class FlightAnalyzer {
 
     // CRITICAL: Final safety check - ensure touchdown is from this segment only
     // Verify touchdown is actually in the positionsWithDistance array for this segment
+    // AND is not part of a go-around
     if (touchdown) {
       const touchdownInSegment = positionsWithDistance.find(p => 
         p.timestamp === touchdown.timestamp && 
@@ -693,23 +928,44 @@ class FlightAnalyzer {
       if (!touchdownInSegment) {
         // Touchdown is not in this segment - reset it
         touchdown = null;
+      } else {
+        // Double-check it's not in a go-around time window
+        const isInGoAround = goAroundTimeRanges.some(range => 
+          touchdown.timestamp >= range.start && touchdown.timestamp <= range.end
+        );
+        if (isInGoAround) {
+          // Touchdown is during a go-around - reset it
+          touchdown = null;
+        }
       }
     }
     
-    // If still no touchdown, use closest approach from THIS segment only
+    // If still no touchdown, use closest approach from THIS segment only (excluding go-arounds)
     if (!touchdown) {
-      // Recalculate closest approach from this segment to ensure it's correct
-      const segmentClosest = positionsWithDistance.reduce((min, pos) => 
-        pos.distance < min.distance ? pos : min, positionsWithDistance[0]);
-      touchdown = segmentClosest;
+      // Recalculate closest approach from this segment, excluding go-around positions
+      if (positionsExcludingGoArounds.length > 0) {
+        const segmentClosest = positionsExcludingGoArounds.reduce((min, pos) => 
+          pos.distance < min.distance ? pos : min, positionsExcludingGoArounds[0]);
+        touchdown = segmentClosest;
+      } else {
+        // Fallback: use closest from all positions if no positions remain after excluding go-arounds
+        const segmentClosest = positionsWithDistance.reduce((min, pos) => 
+          pos.distance < min.distance ? pos : min, positionsWithDistance[0]);
+        touchdown = segmentClosest;
+      }
     }
 
     // Find distance milestones (100nm, 50nm, 20nm) before touchdown
+    // Use original positionsWithDistance for milestone calculation (go-arounds don't affect milestones)
     const milestones = [100, 50, 20];
     const milestoneTimes = {};
 
-    // Find touchdown index
-    const touchdownIndex = positionsWithDistance.findIndex(p => p === touchdown);
+    // Find touchdown index in original positions array
+    const touchdownIndex = positionsWithDistance.findIndex(p => 
+      p.timestamp === touchdown.timestamp && 
+      p.lat === touchdown.lat && 
+      p.lon === touchdown.lon
+    );
     
     // Work backwards from touchdown to find when aircraft crossed each milestone
     for (const milestone of milestones) {

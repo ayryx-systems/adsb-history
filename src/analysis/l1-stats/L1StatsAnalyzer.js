@@ -115,6 +115,10 @@ class L1StatsAnalyzer {
     const arrivals = flights.filter(f => f.classification === 'arrival');
     logger.info('Filtered arrivals', { arrivals: arrivals.length });
 
+    // Filter for go-arounds
+    const goArounds = flights.filter(f => f.classification === 'go_around');
+    logger.info('Filtered go-arounds', { goArounds: goArounds.length });
+
     if (arrivals.length === 0) {
       return {
         airport,
@@ -197,6 +201,33 @@ class L1StatsAnalyzer {
     // Group by 15-minute time slots
     const byTimeSlot = {};
 
+    // Track go-arounds by time slot (use entry time for go-arounds)
+    const goAroundsByTimeSlot = {};
+
+    for (const goAround of goArounds) {
+      if (!goAround.goAround || !goAround.goAround.entryTime) {
+        continue;
+      }
+
+      const entryDate = new Date(goAround.goAround.entryTime * 1000);
+      const hour = entryDate.getUTCHours();
+      const minute = entryDate.getUTCMinutes();
+      const timeSlot = this.getTimeSlot(hour, minute);
+
+      if (!goAroundsByTimeSlot[timeSlot]) {
+        goAroundsByTimeSlot[timeSlot] = [];
+      }
+
+      goAroundsByTimeSlot[timeSlot].push({
+        icao: goAround.icao,
+        type: goAround.type || 'UNKNOWN',
+        entryTime: entryDate.toISOString(),
+        duration: goAround.goAround.duration,
+        entryAltitudeAGL_ft: goAround.goAround.entryAltitudeAGL_ft,
+        maxAltitudeAGL_ft: goAround.goAround.maxAltitudeAGL_ft,
+      });
+    }
+
     for (const arrival of arrivals) {
       if (!arrival.touchdown || !arrival.touchdown.timestamp) {
         continue;
@@ -216,7 +247,13 @@ class L1StatsAnalyzer {
           timeFrom50nm: [],
           timeFrom20nm: [],
           aircraft: [],
+          goArounds: goAroundsByTimeSlot[timeSlot] || [],
         };
+      } else {
+        // Add go-arounds to existing time slot if not already added
+        if (goAroundsByTimeSlot[timeSlot]) {
+          byTimeSlot[timeSlot].goArounds = goAroundsByTimeSlot[timeSlot];
+        }
       }
 
       // Track aircraft information for this time slot
@@ -283,6 +320,8 @@ class L1StatsAnalyzer {
       timeSlotData[slot] = {
         count: slotData.aircraft.length,
         aircraft: slotData.aircraft,
+        goArounds: slotData.goArounds || [],
+        goAroundCount: (slotData.goArounds || []).length,
       };
       
       timeSlotMedians[slot] = {};
@@ -308,6 +347,7 @@ class L1StatsAnalyzer {
 
     const overall = {
       count: arrivals.length,
+      goAroundCount: goArounds.length,
       milestones: {
         timeFrom100nm: this.calculateStats(overallMilestones.timeFrom100nm),
         timeFrom50nm: this.calculateStats(overallMilestones.timeFrom50nm),
@@ -330,6 +370,7 @@ class L1StatsAnalyzer {
       date,
       generatedAt: new Date().toISOString(),
       totalArrivals: arrivals.length,
+      totalGoArounds: goArounds.length,
       byAircraftType: typeStats,
       overall,
     };
