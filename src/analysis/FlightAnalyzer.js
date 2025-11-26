@@ -538,7 +538,7 @@ class FlightAnalyzer {
     const approachDistanceThreshold = 2; // nm
     const lostContactTimeout = 2 * 60; // 2 minutes in seconds
     
-    // Find touchdown - prioritize last ground position in segment (handles gaps better)
+    // Find touchdown - prioritize last approach position before losing contact
     // CRITICAL: Only use positions from this segment, never from later segments
     let touchdown = null;
     
@@ -547,8 +547,22 @@ class FlightAnalyzer {
       ? Math.max(...positionsWithDistance.map(p => p.timestamp))
       : 0;
     
-    // First, find all ground positions near airport (only from this segment)
-    // Prioritize positions that are actually in this segment (before any gap)
+    // Find the last position in approach configuration (low altitude, close to airport)
+    // This is the most reliable indicator of when the aircraft actually landed
+    let lastApproachPosition = null;
+    for (let i = positionsWithDistance.length - 1; i >= 0; i--) {
+      const pos = positionsWithDistance[i];
+      if (pos.timestamp > segmentMaxTimestamp) {
+        continue; // Skip positions from later segments
+      }
+      const agl = pos.alt_agl !== null ? pos.alt_agl : (pos.alt_baro !== null ? pos.alt_baro - airportElevation : null);
+      if (agl !== null && agl < approachThresholdAGL && pos.distance <= approachDistanceThreshold) {
+        lastApproachPosition = pos;
+        break; // Found the last approach position
+      }
+    }
+    
+    // Find all ground positions near airport (only from this segment)
     const groundPositions = [];
     for (const pos of positionsWithDistance) {
       // Safety check: ensure position is actually in this segment
@@ -561,18 +575,33 @@ class FlightAnalyzer {
       }
     }
     
-    // Use the last ground position (most likely to be the actual landing)
-    // This is especially important when there's a gap after landing
-    if (groundPositions.length > 0) {
-      // Sort by timestamp to get the last one
+    // If we have both approach and ground positions, determine which to use
+    if (lastApproachPosition && groundPositions.length > 0) {
+      // Sort ground positions by timestamp
       groundPositions.sort((a, b) => a.timestamp - b.timestamp);
-      touchdown = groundPositions[groundPositions.length - 1];
+      const firstGroundPos = groundPositions[0];
+      
+      // If ground positions occur after the approach position, we lost contact during approach
+      // Use the approach position as touchdown
+      if (firstGroundPos.timestamp > lastApproachPosition.timestamp) {
+        touchdown = lastApproachPosition;
+      } else {
+        // Ground position is before or at same time as approach - use ground position (actual landing)
+        touchdown = firstGroundPos;
+      }
+    } else if (lastApproachPosition) {
+      // Only have approach position - use it
+      touchdown = lastApproachPosition;
+    } else if (groundPositions.length > 0) {
+      // Only have ground positions - use first one
+      groundPositions.sort((a, b) => a.timestamp - b.timestamp);
+      touchdown = groundPositions[0];
     }
     
     // Also check if the last position in the segment is on ground near airport
     // This handles cases where we lose contact right after landing
     // CRITICAL: This must be the actual last position in the segment (before any gap)
-    if (positionsWithDistance.length > 0) {
+    if (!touchdown && positionsWithDistance.length > 0) {
       // Find the actual last position in this segment (not from later segments)
       const segmentPositions = positionsWithDistance.filter(p => p.timestamp <= segmentMaxTimestamp);
       if (segmentPositions.length > 0) {
