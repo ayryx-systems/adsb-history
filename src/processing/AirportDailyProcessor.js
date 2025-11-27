@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import TraceReader from './TraceReader.js';
 import FlightClassifier from './FlightClassifier.js';
 import logger from '../utils/logger.js';
@@ -51,15 +53,18 @@ class AirportDailyProcessor {
     };
 
     try {
-      // Step 1: Download and extract tar from S3
-      logger.info('Step 1: Downloading tar from S3', { date });
-      const tarPath = await this.traceReader.downloadTarFromS3(date);
+      // Step 1: Download extracted traces for this airport from S3
+      logger.info('Step 1: Downloading extracted traces from S3', { date, airport: airport.icao });
+      const extractDir = await this.traceReader.downloadExtractedTraces(airport.icao, date);
+      
+      if (!extractDir) {
+        throw new Error(`Extracted traces not found for ${airport.icao} on ${date}. Run extraction phase first.`);
+      }
+      
+      logger.info('Extracted traces downloaded and extracted', { date, airport: airport.icao, extractDir });
 
-      logger.info('Step 2: Extracting tar', { date });
-      const extractDir = await this.traceReader.extractTar(tarPath);
-
-      // Step 3: Stream and classify all traces
-      logger.info('Step 3: Processing traces', { date, airport: airport.icao });
+      // Step 2: Stream and classify all traces
+      logger.info('Step 2: Processing traces', { date, airport: airport.icao });
       
       let processedCount = 0;
       const progressInterval = 10000; // Log every 10k traces
@@ -130,9 +135,13 @@ class AirportDailyProcessor {
         duration: `${(results.processingInfo.duration / 1000).toFixed(1)}s`,
       });
 
-      // Clean up
-      logger.info('Cleaning up extracted data', { date });
-      this.traceReader.cleanup(date);
+      // Clean up extracted traces directory
+      logger.info('Cleaning up extracted data', { date, airport: airport.icao });
+      const extractedTarPath = path.join(this.traceReader.tempDir, 'extracted', airport.icao, date, `${airport.icao}-${date}.tar`);
+      const extractedExtractDir = path.join(path.dirname(extractedTarPath), 'extracted');
+      if (fs.existsSync(extractedExtractDir)) {
+        fs.rmSync(extractedExtractDir, { recursive: true, force: true });
+      }
 
       return results;
 

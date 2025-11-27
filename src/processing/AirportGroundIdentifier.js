@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import TraceReader from './TraceReader.js';
 import logger from '../utils/logger.js';
 
@@ -121,19 +123,19 @@ class AirportGroundIdentifier {
     const aircraftIds = new Set();
 
     try {
-      // Step 1: Download and extract tar from S3
-      console.log(`[${new Date().toISOString()}] Step 1: Downloading tar from S3 for ${date}`);
-      logger.info('Step 1: Downloading tar from S3', { date });
-      const tarPath = await this.traceReader.downloadTarFromS3(date);
-      console.log(`[${new Date().toISOString()}] ✓ Tar downloaded: ${tarPath}`);
+      // Step 1: Download extracted traces for this airport from S3
+      console.log(`[${new Date().toISOString()}] Step 1: Downloading extracted traces for ${airport.icao} from S3`);
+      logger.info('Step 1: Downloading extracted traces from S3', { date, airport: airport.icao });
+      const extractDir = await this.traceReader.downloadExtractedTraces(airport.icao, date);
+      
+      if (!extractDir) {
+        throw new Error(`Extracted traces not found for ${airport.icao} on ${date}. Run extraction phase first.`);
+      }
+      
+      console.log(`[${new Date().toISOString()}] ✓ Extracted traces downloaded and extracted to: ${extractDir}`);
 
-      console.log(`[${new Date().toISOString()}] Step 2: Extracting tar`);
-      logger.info('Step 2: Extracting tar', { date });
-      const extractDir = await this.traceReader.extractTar(tarPath);
-      console.log(`[${new Date().toISOString()}] ✓ Tar extracted to: ${extractDir}`);
-
-      // Step 3: Stream and check all traces
-      logger.info('Step 3: Processing traces', { date, airport: airport.icao });
+      // Step 2: Stream and check all traces
+      logger.info('Step 2: Processing traces', { date, airport: airport.icao });
       
       let processedCount = 0;
       const progressInterval = 10000;
@@ -170,10 +172,14 @@ class AirportGroundIdentifier {
         duration: `${(duration / 1000).toFixed(1)}s`,
       });
 
-      // Clean up
+      // Clean up extracted traces directory
       console.log(`[${new Date().toISOString()}] Cleaning up extracted data`);
-      logger.info('Cleaning up extracted data', { date });
-      this.traceReader.cleanup(date);
+      logger.info('Cleaning up extracted data', { date, airport: airport.icao });
+      const extractedTarPath = path.join(this.traceReader.tempDir, 'extracted', airport.icao, date, `${airport.icao}-${date}.tar`);
+      const extractedExtractDir = path.join(path.dirname(extractedTarPath), 'extracted');
+      if (fs.existsSync(extractedExtractDir)) {
+        fs.rmSync(extractedExtractDir, { recursive: true, force: true });
+      }
 
       // Return as sorted array
       const result = Array.from(aircraftIds).sort();
