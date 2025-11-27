@@ -1046,12 +1046,17 @@
                     maintainAspectRatio: false,
                     scales: {
                         x: {
+                            min: 0,
+                            max: 24,
                             title: {
                                 display: true,
                                 text: 'Touchdown Time (UTC hours)'
                             },
                             ticks: {
                                 callback: function(value) {
+                                    if (value >= 24) {
+                                        return '24:00';
+                                    }
                                     const hours = Math.floor(value);
                                     const minutes = Math.floor((value - hours) * 60);
                                     return String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
