@@ -1051,6 +1051,42 @@
                 }
             });
             
+            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+                const baselineLineData = [];
+                const slots = Object.keys(currentBaselineData.byTimeSlot).sort();
+                
+                slots.forEach(slot => {
+                    const baseline = currentBaselineData.byTimeSlot[slot];
+                    if (baseline && baseline.medianTimeFrom50nm) {
+                        const [hours, minutes] = slot.split(':').map(Number);
+                        const hourDecimal = hours + minutes / 60;
+                        const durationMinutes = baseline.medianTimeFrom50nm / 60;
+                        baselineLineData.push({ 
+                            x: hourDecimal, 
+                            y: durationMinutes,
+                            slot: slot
+                        });
+                    }
+                });
+                
+                if (baselineLineData.length > 0) {
+                    datasets.push({
+                        label: 'Yearly Average',
+                        data: baselineLineData,
+                        type: 'line',
+                        borderColor: 'rgba(0, 0, 0, 1)',
+                        backgroundColor: 'rgba(0, 0, 0, 0.1)',
+                        borderWidth: 2,
+                        borderDash: [10, 5],
+                        pointRadius: 2,
+                        pointHoverRadius: 4,
+                        fill: false,
+                        tension: 0.1,
+                        showLine: true
+                    });
+                }
+            }
+            
             const chart = new Chart(document.getElementById('arrivalsScatterChart'), {
                 type: 'scatter',
                 data: {
@@ -1092,33 +1128,51 @@
                                 title: function(context) {
                                     const datasetIndex = context[0].datasetIndex;
                                     const dataIndex = context[0].dataIndex;
-                                    const category = datasets[datasetIndex].category;
-                                    const arrival = categoryData[category][dataIndex];
-                                    if (arrival) {
-                                        const d = arrival.touchdownTime;
-                                        const year = d.getUTCFullYear();
-                                        const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-                                        const day = String(d.getUTCDate()).padStart(2, '0');
-                                        const hours = String(d.getUTCHours()).padStart(2, '0');
-                                        const minutes = String(d.getUTCMinutes()).padStart(2, '0');
-                                        const seconds = String(d.getUTCSeconds()).padStart(2, '0');
-                                        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
+                                    const dataset = datasets[datasetIndex];
+                                    
+                                    if (dataset.category) {
+                                        const arrival = categoryData[dataset.category][dataIndex];
+                                        if (arrival) {
+                                            const d = arrival.touchdownTime;
+                                            const year = d.getUTCFullYear();
+                                            const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+                                            const day = String(d.getUTCDate()).padStart(2, '0');
+                                            const hours = String(d.getUTCHours()).padStart(2, '0');
+                                            const minutes = String(d.getUTCMinutes()).padStart(2, '0');
+                                            const seconds = String(d.getUTCSeconds()).padStart(2, '0');
+                                            return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
+                                        }
+                                    } else if (dataset.type === 'line' && dataset.label === 'Yearly Average') {
+                                        const point = dataset.data[dataIndex];
+                                        if (point && point.slot) {
+                                            return `Time Slot: ${point.slot} UTC (Yearly Average)`;
+                                        }
                                     }
                                     return '';
                                 },
                                 label: function(context) {
                                     const datasetIndex = context.datasetIndex;
                                     const dataIndex = context.dataIndex;
-                                    const category = datasets[datasetIndex].category;
-                                    const arrival = categoryData[category][dataIndex];
-                                    if (arrival) {
-                                        const hours = Math.floor(arrival.durationMinutes / 60);
-                                        const minutes = Math.round(arrival.durationMinutes % 60);
-                                        return [
-                                            `Duration from 50nm: ${hours}h ${minutes}m (${arrival.durationMinutes.toFixed(1)} min)`,
-                                            `Aircraft: ${arrival.type}`,
-                                            `ICAO: ${arrival.icao}`
-                                        ];
+                                    const dataset = datasets[datasetIndex];
+                                    
+                                    if (dataset.category) {
+                                        const arrival = categoryData[dataset.category][dataIndex];
+                                        if (arrival) {
+                                            const hours = Math.floor(arrival.durationMinutes / 60);
+                                            const minutes = Math.round(arrival.durationMinutes % 60);
+                                            return [
+                                                `Duration from 50nm: ${hours}h ${minutes}m (${arrival.durationMinutes.toFixed(1)} min)`,
+                                                `Aircraft: ${arrival.type}`,
+                                                `ICAO: ${arrival.icao}`
+                                            ];
+                                        }
+                                    } else if (dataset.type === 'line' && dataset.label === 'Yearly Average') {
+                                        const point = dataset.data[dataIndex];
+                                        if (point) {
+                                            const hours = Math.floor(point.y / 60);
+                                            const minutes = Math.round(point.y % 60);
+                                            return `Yearly Average: ${hours}h ${minutes}m (${point.y.toFixed(1)} min)`;
+                                        }
                                     }
                                     return '';
                                 }
@@ -1133,25 +1187,28 @@
                             const element = elements[0];
                             const datasetIndex = element.datasetIndex;
                             const dataIndex = element.index;
-                            const category = datasets[datasetIndex].category;
-                            const arrival = categoryData[category][dataIndex];
-                            if (arrival) {
-                                const d = arrival.touchdownTime;
-                                const year = d.getUTCFullYear();
-                                const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-                                const day = String(d.getUTCDate()).padStart(2, '0');
-                                const hours = String(d.getUTCHours()).padStart(2, '0');
-                                const minutes = String(d.getUTCMinutes()).padStart(2, '0');
-                                const seconds = String(d.getUTCSeconds()).padStart(2, '0');
-                                const utcTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
-                                const durationHours = Math.floor(arrival.durationMinutes / 60);
-                                const durationMins = Math.round(arrival.durationMinutes % 60);
-                                alert(
-                                    `Touchdown Time: ${utcTime}\n` +
-                                    `Duration from 50nm: ${durationHours}h ${durationMins}m (${arrival.durationMinutes.toFixed(1)} minutes)\n` +
-                                    `Aircraft Type: ${arrival.type}\n` +
-                                    `ICAO: ${arrival.icao}`
-                                );
+                            const dataset = datasets[datasetIndex];
+                            
+                            if (dataset.category) {
+                                const arrival = categoryData[dataset.category][dataIndex];
+                                if (arrival) {
+                                    const d = arrival.touchdownTime;
+                                    const year = d.getUTCFullYear();
+                                    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+                                    const day = String(d.getUTCDate()).padStart(2, '0');
+                                    const hours = String(d.getUTCHours()).padStart(2, '0');
+                                    const minutes = String(d.getUTCMinutes()).padStart(2, '0');
+                                    const seconds = String(d.getUTCSeconds()).padStart(2, '0');
+                                    const utcTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
+                                    const durationHours = Math.floor(arrival.durationMinutes / 60);
+                                    const durationMins = Math.round(arrival.durationMinutes % 60);
+                                    alert(
+                                        `Touchdown Time: ${utcTime}\n` +
+                                        `Duration from 50nm: ${durationHours}h ${durationMins}m (${arrival.durationMinutes.toFixed(1)} minutes)\n` +
+                                        `Aircraft Type: ${arrival.type}\n` +
+                                        `ICAO: ${arrival.icao}`
+                                    );
+                                }
                             }
                         }
                     }
@@ -1177,8 +1234,17 @@
                 
                 const colorBox = document.createElement('div');
                 colorBox.className = 'legend-color';
-                colorBox.style.background = dataset.backgroundColor;
-                colorBox.style.border = `1px solid ${dataset.borderColor}`;
+                
+                if (dataset.type === 'line') {
+                    colorBox.style.background = 'transparent';
+                    colorBox.style.border = `2px solid ${dataset.borderColor}`;
+                    colorBox.style.borderStyle = 'dashed';
+                    colorBox.style.width = '30px';
+                    colorBox.style.height = '2px';
+                } else {
+                    colorBox.style.background = dataset.backgroundColor;
+                    colorBox.style.border = `1px solid ${dataset.borderColor}`;
+                }
                 
                 const label = document.createElement('span');
                 label.textContent = dataset.label;
