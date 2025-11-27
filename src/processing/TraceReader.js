@@ -6,6 +6,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import DataExtractor from '../ingestion/DataExtractor.js';
 import ExtractedTraceData from '../extraction/ExtractedTraceData.js';
 import logger from '../utils/logger.js';
+import { describeAwsError } from '../utils/awsErrorUtils.js';
 
 const gunzip = promisify(zlib.gunzip);
 
@@ -129,11 +130,14 @@ class TraceReader {
 
       return localTarPath;
     } catch (error) {
+      const details = describeAwsError(error);
       logger.error('Failed to download tar from S3', {
         date,
         s3Key,
-        error: error.message,
+        error: details,
       });
+      console.error(`[TraceReader] Failed to download ${s3Key}: ${details}`);
+      error.message = details;
       throw error;
     }
   }

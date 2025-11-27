@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import logger from '../utils/logger.js';
+import { describeAwsError } from '../utils/awsErrorUtils.js';
 
 /**
  * Stores and retrieves lists of aircraft that were on the ground at an airport
@@ -92,12 +93,15 @@ class GroundAircraftData {
         logger.info('Saved to cache', { cachePath });
       }
     } catch (error) {
+      const details = describeAwsError(error);
       logger.error('Failed to save ground aircraft data', {
         airport,
         date,
         s3Key,
-        error: error.message,
+        error: details,
       });
+      console.error(`[GroundAircraftData] Failed to save ${s3Key}: ${details}`);
+      error.message = details;
       throw error;
     }
   }
@@ -159,12 +163,15 @@ class GroundAircraftData {
         return null;
       }
       
+      const details = describeAwsError(error);
       logger.error('Failed to load ground aircraft data', {
         airport,
         date,
         s3Key,
-        error: error.message,
+        error: details,
       });
+      console.error(`[GroundAircraftData] Failed to load ${s3Key}: ${details}`);
+      error.message = details;
       throw error;
     }
   }

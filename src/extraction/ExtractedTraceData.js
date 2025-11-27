@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import logger from '../utils/logger.js';
+import { describeAwsError } from '../utils/awsErrorUtils.js';
 
 class ExtractedTraceData {
   constructor(config = {}) {
@@ -60,12 +61,15 @@ class ExtractedTraceData {
         sizeMB,
       });
     } catch (error) {
+      const details = describeAwsError(error);
       logger.error('Failed to upload extracted traces', {
         airport,
         date,
         s3Key,
-        error: error.message,
+        error: details,
       });
+      console.error(`[ExtractedTraceData] Failed to upload ${s3Key}: ${details}`);
+      error.message = details;
       throw error;
     }
   }
@@ -115,12 +119,15 @@ class ExtractedTraceData {
         return null;
       }
       
+      const details = describeAwsError(error);
       logger.error('Failed to download extracted traces', {
         airport,
         date,
         s3Key,
-        error: error.message,
+        error: details,
       });
+      console.error(`[ExtractedTraceData] Failed to download ${s3Key}: ${details}`);
+      error.message = details;
       throw error;
     }
   }
@@ -140,6 +147,15 @@ class ExtractedTraceData {
       if (error.name === 'NotFound' || error.name === 'NoSuchKey') {
         return false;
       }
+      const details = describeAwsError(error);
+      logger.error('Failed to check extracted traces', {
+        airport,
+        date,
+        s3Key,
+        error: details,
+      });
+      console.error(`[ExtractedTraceData] Failed to head ${s3Key}: ${details}`);
+      error.message = details;
       throw error;
     }
   }

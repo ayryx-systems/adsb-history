@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import TraceExtractor from '../../src/extraction/TraceExtractor.js';
 import ExtractedTraceData from '../../src/extraction/ExtractedTraceData.js';
 import logger from '../../src/utils/logger.js';
+import { describeAwsError } from '../../src/utils/awsErrorUtils.js';
 
 dotenv.config();
 
@@ -173,14 +174,15 @@ async function processDate(airport, date, extractor, dataStore, force) {
     console.log(`  ✓ ${date}: Extracted (${sizeMB} MB)`);
     return { date, sizeMB, skipped: false };
   } catch (error) {
+    const errorDetails = describeAwsError(error);
     logger.error('Failed to extract traces', {
       airport: airport.icao,
       date,
-      error: error.message,
+      error: errorDetails,
       stack: error.stack,
     });
-    console.log(`  ✗ ${date}: Error - ${error.message}`);
-    return { date, error: error.message };
+    console.log(`  ✗ ${date}: Error - ${errorDetails}`);
+    return { date, error: errorDetails };
   }
 }
 

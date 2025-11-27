@@ -1,6 +1,6 @@
 #!/bin/bash
-# Simple script to run ground aircraft identification on EC2
-# Usage: ./scripts/processing/run-on-ec2.sh --date 2025-11-08 [--airports KLGA,KSFO]
+# Simple script to run trace extraction on EC2
+# Usage: ./scripts/extraction/run-on-ec2.sh --start-date 2025-01-01 --end-date 2025-01-31 [--airports KORD,KLGA] [--force]
 
 set -e
 
@@ -8,23 +8,38 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Parse arguments
-DATE=""
-AIRPORTS_ARG="--all"
+START_DATE=""
+END_DATE=""
+AIRPORTS_ARG=""
+FORCE_ARG=""
 AWS_PROFILE="${AWS_PROFILE:-}"
+KEY_NAME=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --date)
-      DATE="$2"
+    --start-date)
+      START_DATE="$2"
+      shift 2
+      ;;
+    --end-date)
+      END_DATE="$2"
       shift 2
       ;;
     --airports)
       AIRPORTS_ARG="--airports $2"
       shift 2
       ;;
+    --force)
+      FORCE_ARG="--force"
+      shift
+      ;;
     --aws-profile)
       AWS_PROFILE="$2"
       export AWS_PROFILE
+      shift 2
+      ;;
+    --key-name)
+      KEY_NAME="$2"
       shift 2
       ;;
     *)
@@ -58,17 +73,18 @@ if [ "$CURRENT_ACCOUNT" != "632391382381" ]; then
 fi
 echo ""
 
-if [ -z "$DATE" ]; then
-  echo "Error: --date is required"
+if [ -z "$START_DATE" ] || [ -z "$END_DATE" ]; then
+  echo "Error: --start-date and --end-date are required"
   exit 1
 fi
 
 # Configuration
 REGION="us-west-1"
 IAM_ROLE_NAME="adsb-history-processor-role"
-IAM_INSTANCE_PROFILE="adsb-history-processor-role"  # Same name as role
+IAM_INSTANCE_PROFILE="adsb-history-processor-role"
 SECURITY_GROUP_NAME="adsb-history-processor-sg"
 S3_BUCKET="ayryx-adsb-history"
+DEFAULT_KEY_NAME="adsb-history-processor-key"
 
 # Step 1: Create IAM role if it doesn't exist
 echo "Step 1: Setting up IAM role..."
@@ -181,6 +197,26 @@ else
 fi
 echo ""
 
+# Ensure SSH access rule exists when requested
+echo "Detecting your public IP address for optional SSH access..."
+MY_IP=$(curl -s https://checkip.amazonaws.com 2>/dev/null || curl -s https://api.ipify.org 2>/dev/null || echo "")
+if [ -n "$MY_IP" ]; then
+  if aws ec2 authorize-security-group-ingress \
+    --group-id "$SG_ID" \
+    --region "$REGION" \
+    --protocol tcp \
+    --port 22 \
+    --cidr "${MY_IP}/32" \
+    > /dev/null 2>&1; then
+    echo "✓ SSH access opened for ${MY_IP}/32"
+  else
+    echo "✓ SSH rule already present for ${MY_IP}/32 (or rule exists)."
+  fi
+else
+  echo "⚠️  Could not detect your public IP automatically. If you plan to SSH, add a rule to $SECURITY_GROUP_NAME manually."
+fi
+echo ""
+
 # Step 3: Auto-detect AMI
 echo "Step 3: Detecting AMI..."
 AMI_ID=$(aws ec2 describe-images \
@@ -257,7 +293,7 @@ exec > >(tee /var/log/user-data.log)
 exec 2>&1
 
 echo "=========================================="
-echo "ADSB History Processing Starting"
+echo "ADSB History Trace Extraction Starting"
 echo "Start time: \$(date)"
 echo "=========================================="
 
@@ -357,15 +393,15 @@ echo ""
 
 # Run processing
 echo "=========================================="
-echo "Starting processing: $DATE"
+echo "Starting extraction: $START_DATE to $END_DATE"
 echo "=========================================="
 
-node scripts/processing/identify-ground-aircraft-multi.js --date "$DATE" $AIRPORTS_ARG
+node scripts/extraction/extract-all-airports.js --start-date "$START_DATE" --end-date "$END_DATE" $AIRPORTS_ARG $FORCE_ARG
 
 EXIT_CODE=\$?
 
 echo "=========================================="
-echo "Processing Complete"
+echo "Extraction Complete"
 echo "Exit code: \$EXIT_CODE"
 echo "End time: \$(date)"
 echo "=========================================="
@@ -376,22 +412,55 @@ if [ \$EXIT_CODE -eq 0 ]; then
   INSTANCE_ID=\$(ec2-metadata --instance-id | cut -d " " -f 2)
   aws ec2 terminate-instances --instance-ids "\$INSTANCE_ID" --region "\$AWS_REGION"
 else
-  echo "✗ Processing failed. Instance will remain running for debugging."
+  echo "✗ Extraction failed. Instance will remain running for debugging."
   echo "Check logs at /var/log/user-data.log"
 fi
 EOF
 
-# Step 6: Launch instance
-echo "Step 6: Launching EC2 instance..."
+# Step 6: Set up SSH key (optional but recommended for debugging)
+if [ -z "$KEY_NAME" ]; then
+  KEY_NAME="$DEFAULT_KEY_NAME"
+fi
+
+echo "Step 6: Setting up SSH key ($KEY_NAME)..."
+KEY_FILE="$HOME/.ssh/${KEY_NAME}.pem"
+if aws ec2 describe-key-pairs --key-names "$KEY_NAME" --region "$REGION" > /dev/null 2>&1; then
+  echo "✓ Key pair already exists in AWS: $KEY_NAME"
+  if [ -f "$KEY_FILE" ]; then
+    echo "✓ Private key present at $KEY_FILE"
+  else
+    echo "⚠️  Private key file not found at $KEY_FILE. If you intend to SSH, place the .pem file there or create a new key."
+  fi
+else
+  echo "Creating new key pair: $KEY_NAME"
+  mkdir -p "$HOME/.ssh"
+  aws ec2 create-key-pair \
+    --key-name "$KEY_NAME" \
+    --region "$REGION" \
+    --query 'KeyMaterial' \
+    --output text > "$KEY_FILE"
+  chmod 400 "$KEY_FILE"
+  echo "✓ Key pair created and saved to $KEY_FILE"
+fi
+echo ""
+
+# Step 7: Launch instance
+echo "Step 7: Launching EC2 instance..."
+KEY_NAME_PARAM=()
+if [ -n "$KEY_NAME" ]; then
+  KEY_NAME_PARAM=( --key-name "$KEY_NAME" )
+fi
+
 INSTANCE_ID=$(aws ec2 run-instances \
     --region "$REGION" \
     --image-id "$AMI_ID" \
     --instance-type t3.xlarge \
     --iam-instance-profile "Name=$IAM_INSTANCE_PROFILE" \
     --security-group-ids "$SG_ID" \
+    "${KEY_NAME_PARAM[@]}" \
     --user-data file:///tmp/user-data.sh \
     --block-device-mappings "[{\"DeviceName\":\"/dev/xvda\",\"Ebs\":{\"VolumeSize\":50,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=adsb-processor-$DATE},{Key=Purpose,Value=data-processing},{Key=AutoTerminate,Value=true}]" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=adsb-extractor-$START_DATE-to-$END_DATE},{Key=Purpose,Value=trace-extraction},{Key=AutoTerminate,Value=true}]" \
     --query 'Instances[0].InstanceId' \
     --output text)
 
@@ -405,9 +474,14 @@ echo "Instance ID: $INSTANCE_ID"
 echo "Region: $REGION"
 echo ""
 echo "The instance will:"
-echo "  1. Process date: $DATE"
-echo "  2. Upload results to S3 (s3://$S3_BUCKET/ground-aircraft/)"
-echo "  3. Self-terminate when complete"
+echo "  1. Extract traces for date range: $START_DATE to $END_DATE"
+if [ -n "$AIRPORTS_ARG" ]; then
+  echo "  2. Process airports: $(echo $AIRPORTS_ARG | sed 's/--airports //')"
+else
+  echo "  2. Process all enabled airports"
+fi
+echo "  3. Upload results to S3 (s3://$S3_BUCKET/extracted/)"
+echo "  4. Self-terminate when complete"
 echo ""
 echo "Monitor progress:"
 echo "  aws ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query 'Reservations[0].Instances[0].State.Name'"
@@ -416,9 +490,14 @@ echo "View logs in AWS Console:"
 echo "  https://console.aws.amazon.com/ec2/v2/home?region=$REGION#Instances:instanceId=$INSTANCE_ID"
 echo "  → Actions → Monitor and troubleshoot → Get system log"
 echo ""
+if [ -n "$KEY_NAME" ]; then
+  echo "SSH access (if needed):"
+  echo "  aws ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query 'Reservations[0].Instances[0].PublicIpAddress' --output text"
+  echo "  ssh -i $KEY_FILE ec2-user@<public-ip>"
+  echo ""
+fi
 echo "Check results:"
-echo "  aws s3 ls s3://$S3_BUCKET/ground-aircraft/ --recursive | grep $DATE"
+echo "  aws s3 ls s3://$S3_BUCKET/extracted/ --recursive | grep -E '($START_DATE|$END_DATE)'"
 echo ""
-echo "Estimated completion: 30-90 minutes (depends on number of airports)"
+echo "Estimated completion: 1-4 hours (depends on date range and number of airports)"
 echo "=========================================="
-
