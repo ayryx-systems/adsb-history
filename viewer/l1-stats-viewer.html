@@ -240,14 +240,8 @@
                 <div class="chart-wrapper">
                     <canvas id="arrivalsScatterChart"></canvas>
                 </div>
-                <small style="color: #666; display: block; margin-top: 10px;">Click on any dot to see touchdown time and duration</small>
-            </div>
-
-            <div class="chart-container">
-                <h3>Arrival Time Distribution by Aircraft Category</h3>
-                <div class="chart-wrapper">
-                    <canvas id="aircraftTypeTimeChart"></canvas>
-                </div>
+                <div class="legend" id="scatterLegend" style="margin-top: 15px;"></div>
+                <small style="color: #666; display: block; margin-top: 10px;">Click on any dot to see touchdown time and duration. Click legend items to show/hide categories.</small>
             </div>
 
             <div class="chart-container">
@@ -786,7 +780,6 @@
             destroyChart('arrivalCount');
             destroyChart('time50nm');
             destroyChart('arrivalsScatter');
-            destroyChart('aircraftTypeTime');
             destroyChart('visibility');
             destroyChart('ceiling');
             destroyChart('windSpeed');
@@ -798,7 +791,6 @@
             renderArrivalCountChart(data, selectedTypes);
             renderTime50nmChart(data, selectedTypes);
             renderArrivalsScatterChart(data, selectedTypes);
-            renderAircraftTypeTimeChart(data, selectedTypes);
             
             if (currentWeatherData) {
                 renderVisibilityChart(data, currentWeatherData);
@@ -1000,12 +992,14 @@
                         const durationMinutes = ac.milestones.timeFrom50nm / 60;
                         
                         const hoursSinceMidnight = touchdownTime.getUTCHours() + touchdownTime.getUTCMinutes() / 60;
+                        const category = getAircraftCategory(ac.type || 'UNKNOWN');
                         
                         allArrivals.push({
                             x: hoursSinceMidnight,
                             y: durationMinutes,
                             icao: ac.icao,
                             type: ac.type || 'UNKNOWN',
+                            category: category,
                             touchdownTime: touchdownTime,
                             durationMinutes: durationMinutes
                         });
@@ -1021,25 +1015,46 @@
                 ctx.font = '14px sans-serif';
                 ctx.textAlign = 'center';
                 ctx.fillText('No arrival data available', canvas.width / 2, canvas.height / 2);
+                document.getElementById('scatterLegend').innerHTML = '';
                 return;
             }
             
-            const scatterData = allArrivals.map(arrival => ({
-                x: arrival.x,
-                y: arrival.y
-            }));
+            const colors = {
+                small: 'rgba(201, 203, 207, 1)',
+                regional: 'rgba(54, 162, 235, 1)',
+                narrowbody: 'rgba(255, 99, 132, 1)',
+                widebody: 'rgba(75, 192, 192, 1)',
+                other: 'rgba(153, 102, 255, 1)'
+            };
+            
+            const categoryOrder = ['narrowbody', 'widebody', 'regional', 'small', 'other'];
+            const datasets = [];
+            const categoryData = {};
+            
+            categoryOrder.forEach(category => {
+                categoryData[category] = allArrivals.filter(arr => arr.category === category);
+                if (categoryData[category].length > 0) {
+                    const scatterData = categoryData[category].map(arrival => ({
+                        x: arrival.x,
+                        y: arrival.y
+                    }));
+                    
+                    datasets.push({
+                        label: `${aircraftCategories[category].name} (${categoryData[category].length})`,
+                        data: scatterData,
+                        backgroundColor: colors[category].replace('1)', '0.6)'),
+                        borderColor: colors[category],
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        category: category
+                    });
+                }
+            });
             
             const chart = new Chart(document.getElementById('arrivalsScatterChart'), {
                 type: 'scatter',
                 data: {
-                    datasets: [{
-                        label: 'Arrivals',
-                        data: scatterData,
-                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        pointRadius: 4,
-                        pointHoverRadius: 6
-                    }]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
@@ -1075,8 +1090,10 @@
                         tooltip: {
                             callbacks: {
                                 title: function(context) {
-                                    const index = context[0].dataIndex;
-                                    const arrival = allArrivals[index];
+                                    const datasetIndex = context[0].datasetIndex;
+                                    const dataIndex = context[0].dataIndex;
+                                    const category = datasets[datasetIndex].category;
+                                    const arrival = categoryData[category][dataIndex];
                                     if (arrival) {
                                         const d = arrival.touchdownTime;
                                         const year = d.getUTCFullYear();
@@ -1090,8 +1107,10 @@
                                     return '';
                                 },
                                 label: function(context) {
-                                    const index = context.dataIndex;
-                                    const arrival = allArrivals[index];
+                                    const datasetIndex = context.datasetIndex;
+                                    const dataIndex = context.dataIndex;
+                                    const category = datasets[datasetIndex].category;
+                                    const arrival = categoryData[category][dataIndex];
                                     if (arrival) {
                                         const hours = Math.floor(arrival.durationMinutes / 60);
                                         const minutes = Math.round(arrival.durationMinutes % 60);
@@ -1104,13 +1123,18 @@
                                     return '';
                                 }
                             }
+                        },
+                        legend: {
+                            display: false
                         }
                     },
                     onClick: function(event, elements) {
                         if (elements.length > 0) {
                             const element = elements[0];
-                            const index = element.index;
-                            const arrival = allArrivals[index];
+                            const datasetIndex = element.datasetIndex;
+                            const dataIndex = element.index;
+                            const category = datasets[datasetIndex].category;
+                            const arrival = categoryData[category][dataIndex];
                             if (arrival) {
                                 const d = arrival.touchdownTime;
                                 const year = d.getUTCFullYear();
@@ -1135,6 +1159,34 @@
             });
             
             charts['arrivalsScatter'] = chart;
+            
+            const legendContainer = document.getElementById('scatterLegend');
+            legendContainer.innerHTML = '';
+            
+            datasets.forEach((dataset, index) => {
+                const legendItem = document.createElement('div');
+                legendItem.className = 'legend-item';
+                legendItem.style.cursor = 'pointer';
+                legendItem.style.opacity = '1';
+                legendItem.onclick = function() {
+                    const meta = chart.getDatasetMeta(index);
+                    meta.hidden = !meta.hidden;
+                    chart.update();
+                    legendItem.style.opacity = meta.hidden ? '0.3' : '1';
+                };
+                
+                const colorBox = document.createElement('div');
+                colorBox.className = 'legend-color';
+                colorBox.style.background = dataset.backgroundColor;
+                colorBox.style.border = `1px solid ${dataset.borderColor}`;
+                
+                const label = document.createElement('span');
+                label.textContent = dataset.label;
+                
+                legendItem.appendChild(colorBox);
+                legendItem.appendChild(label);
+                legendContainer.appendChild(legendItem);
+            });
         }
 
         function renderTime50nmChart(data, selectedTypes) {
