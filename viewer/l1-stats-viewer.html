@@ -1022,7 +1022,7 @@
             const colors = {
                 small: 'rgba(201, 203, 207, 1)',
                 regional: 'rgba(54, 162, 235, 1)',
-                narrowbody: 'rgba(255, 99, 132, 1)',
+                narrowbody: 'rgba(255, 159, 64, 1)',
                 widebody: 'rgba(75, 192, 192, 1)',
                 other: 'rgba(153, 102, 255, 1)'
             };
@@ -1089,10 +1089,6 @@
             
             const goAroundData = [];
             const goAroundInfo = [];
-            let maxY = 0;
-            if (allArrivals.length > 0) {
-                maxY = Math.max(...allArrivals.map(a => a.y));
-            }
             
             for (const [slot, slotData] of Object.entries(timeSlots)) {
                 const goArounds = slotData.goArounds || [];
@@ -1104,11 +1100,10 @@
                     if (goAround.entryTime) {
                         const entryTime = new Date(goAround.entryTime);
                         const hoursSinceMidnight = entryTime.getUTCHours() + entryTime.getUTCMinutes() / 60;
-                        const yPosition = maxY * 1.05;
                         
                         goAroundData.push({
                             x: hoursSinceMidnight,
-                            y: yPosition
+                            y: 0
                         });
                         
                         goAroundInfo.push({
@@ -1238,23 +1233,10 @@
                                     } else if (dataset.goAroundInfo) {
                                         const goAround = dataset.goAroundInfo[dataIndex];
                                         if (goAround) {
-                                            const durationMinutes = goAround.duration ? goAround.duration / 60 : null;
-                                            const lines = [
+                                            return [
                                                 `Aircraft: ${goAround.type}`,
                                                 `ICAO: ${goAround.icao}`
                                             ];
-                                            if (durationMinutes !== null) {
-                                                const hours = Math.floor(durationMinutes);
-                                                const mins = Math.round((durationMinutes - hours) * 60);
-                                                lines.push(`Duration: ${hours}h ${mins}m (${durationMinutes.toFixed(1)} min)`);
-                                            }
-                                            if (goAround.entryAltitudeAGL_ft !== undefined) {
-                                                lines.push(`Entry Altitude: ${goAround.entryAltitudeAGL_ft.toFixed(0)} ft AGL`);
-                                            }
-                                            if (goAround.maxAltitudeAGL_ft !== undefined) {
-                                                lines.push(`Max Altitude: ${goAround.maxAltitudeAGL_ft.toFixed(0)} ft AGL`);
-                                            }
-                                            return lines;
                                         }
                                     }
                                     return '';
@@ -1303,22 +1285,11 @@
                                     const minutes = String(d.getUTCMinutes()).padStart(2, '0');
                                     const seconds = String(d.getUTCSeconds()).padStart(2, '0');
                                     const entryTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
-                                    const durationMinutes = goAround.duration ? goAround.duration / 60 : null;
-                                    let message = `Go-Around Entry Time: ${entryTime}\n` +
+                                    alert(
+                                        `Go-Around Entry Time: ${entryTime}\n` +
                                         `Aircraft Type: ${goAround.type}\n` +
-                                        `ICAO: ${goAround.icao}\n`;
-                                    if (durationMinutes !== null) {
-                                        const durationHours = Math.floor(durationMinutes);
-                                        const durationMins = Math.round((durationMinutes - durationHours) * 60);
-                                        message += `Duration: ${durationHours}h ${durationMins}m (${durationMinutes.toFixed(1)} minutes)\n`;
-                                    }
-                                    if (goAround.entryAltitudeAGL_ft !== undefined) {
-                                        message += `Entry Altitude: ${goAround.entryAltitudeAGL_ft.toFixed(0)} ft AGL\n`;
-                                    }
-                                    if (goAround.maxAltitudeAGL_ft !== undefined) {
-                                        message += `Max Altitude: ${goAround.maxAltitudeAGL_ft.toFixed(0)} ft AGL`;
-                                    }
-                                    alert(message);
+                                        `ICAO: ${goAround.icao}`
+                                    );
                                 }
                             }
                         }
@@ -1548,7 +1519,7 @@
             const colors = {
                 small: 'rgba(201, 203, 207, 1)',
                 regional: 'rgba(54, 162, 235, 1)',
-                narrowbody: 'rgba(255, 99, 132, 1)',
+                narrowbody: 'rgba(255, 159, 64, 1)',
                 widebody: 'rgba(75, 192, 192, 1)',
                 other: 'rgba(153, 102, 255, 1)'
             };
