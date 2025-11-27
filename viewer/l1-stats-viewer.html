@@ -265,6 +265,14 @@
             </div>
 
             <div class="chart-container">
+                <h3>Individual Arrivals: 100nm to Touchdown</h3>
+                <div class="chart-wrapper">
+                    <canvas id="arrivalsScatterChart"></canvas>
+                </div>
+                <small style="color: #666; display: block; margin-top: 10px;">Click on any dot to see touchdown time and duration</small>
+            </div>
+
+            <div class="chart-container">
                 <h3>Arrival Time Distribution by Aircraft Category</h3>
                 <div class="chart-wrapper">
                     <canvas id="aircraftTypeTimeChart"></canvas>
@@ -807,6 +815,7 @@
             destroyChart('arrivalCount');
             destroyChart('time100nm');
             destroyChart('time50nm');
+            destroyChart('arrivalsScatter');
             destroyChart('aircraftTypeTime');
             destroyChart('visibility');
             destroyChart('ceiling');
@@ -819,6 +828,7 @@
             renderArrivalCountChart(data, selectedTypes);
             renderTime100nmChart(data, selectedTypes);
             renderTime50nmChart(data, selectedTypes);
+            renderArrivalsScatterChart(data, selectedTypes);
             renderAircraftTypeTimeChart(data, selectedTypes);
             
             if (currentWeatherData) {
@@ -1002,6 +1012,155 @@
                     }
                 }
             });
+        }
+
+        function renderArrivalsScatterChart(data, selectedTypes) {
+            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const allArrivals = [];
+            
+            for (const [slot, slotData] of Object.entries(timeSlots)) {
+                const aircraft = slotData.aircraft || [];
+                
+                for (const ac of aircraft) {
+                    if (selectedTypes.length > 0 && !selectedTypes.includes(ac.type)) {
+                        continue;
+                    }
+                    
+                    if (ac.milestones?.timeFrom100nm !== undefined && ac.touchdown?.utc) {
+                        const touchdownTime = new Date(ac.touchdown.utc);
+                        const durationMinutes = ac.milestones.timeFrom100nm / 60;
+                        
+                        const hoursSinceMidnight = touchdownTime.getUTCHours() + touchdownTime.getUTCMinutes() / 60;
+                        
+                        allArrivals.push({
+                            x: hoursSinceMidnight,
+                            y: durationMinutes,
+                            icao: ac.icao,
+                            type: ac.type || 'UNKNOWN',
+                            touchdownTime: touchdownTime,
+                            durationMinutes: durationMinutes
+                        });
+                    }
+                }
+            }
+            
+            if (allArrivals.length === 0) {
+                const canvas = document.getElementById('arrivalsScatterChart');
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#666';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('No arrival data available', canvas.width / 2, canvas.height / 2);
+                return;
+            }
+            
+            const scatterData = allArrivals.map(arrival => ({
+                x: arrival.x,
+                y: arrival.y
+            }));
+            
+            const chart = new Chart(document.getElementById('arrivalsScatterChart'), {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Arrivals',
+                        data: scatterData,
+                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Touchdown Time (UTC hours)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    const hours = Math.floor(value);
+                                    const minutes = Math.floor((value - hours) * 60);
+                                    return String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+                                }
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Time from 100nm (minutes)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    const index = context[0].dataIndex;
+                                    const arrival = allArrivals[index];
+                                    if (arrival) {
+                                        const d = arrival.touchdownTime;
+                                        const year = d.getUTCFullYear();
+                                        const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+                                        const day = String(d.getUTCDate()).padStart(2, '0');
+                                        const hours = String(d.getUTCHours()).padStart(2, '0');
+                                        const minutes = String(d.getUTCMinutes()).padStart(2, '0');
+                                        const seconds = String(d.getUTCSeconds()).padStart(2, '0');
+                                        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
+                                    }
+                                    return '';
+                                },
+                                label: function(context) {
+                                    const index = context.dataIndex;
+                                    const arrival = allArrivals[index];
+                                    if (arrival) {
+                                        const hours = Math.floor(arrival.durationMinutes / 60);
+                                        const minutes = Math.round(arrival.durationMinutes % 60);
+                                        return [
+                                            `Duration: ${hours}h ${minutes}m (${arrival.durationMinutes.toFixed(1)} min)`,
+                                            `Aircraft: ${arrival.type}`,
+                                            `ICAO: ${arrival.icao}`
+                                        ];
+                                    }
+                                    return '';
+                                }
+                            }
+                        }
+                    },
+                    onClick: function(event, elements) {
+                        if (elements.length > 0) {
+                            const element = elements[0];
+                            const index = element.index;
+                            const arrival = allArrivals[index];
+                            if (arrival) {
+                                const d = arrival.touchdownTime;
+                                const year = d.getUTCFullYear();
+                                const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+                                const day = String(d.getUTCDate()).padStart(2, '0');
+                                const hours = String(d.getUTCHours()).padStart(2, '0');
+                                const minutes = String(d.getUTCMinutes()).padStart(2, '0');
+                                const seconds = String(d.getUTCSeconds()).padStart(2, '0');
+                                const utcTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
+                                const durationHours = Math.floor(arrival.durationMinutes / 60);
+                                const durationMins = Math.round(arrival.durationMinutes % 60);
+                                alert(
+                                    `Touchdown Time: ${utcTime}\n` +
+                                    `Duration from 100nm: ${durationHours}h ${durationMins}m (${arrival.durationMinutes.toFixed(1)} minutes)\n` +
+                                    `Aircraft Type: ${arrival.type}\n` +
+                                    `ICAO: ${arrival.icao}`
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+            
+            charts['arrivalsScatter'] = chart;
         }
 
         function renderTime50nmChart(data, selectedTypes) {
