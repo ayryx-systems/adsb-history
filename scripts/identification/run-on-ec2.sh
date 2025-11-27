@@ -1,6 +1,8 @@
 #!/bin/bash
 # Simple script to run ground aircraft identification on EC2
-# Usage: ./scripts/processing/run-on-ec2.sh --date 2025-11-08 [--airports KLGA,KSFO]
+# Usage: 
+#   Single date: ./scripts/identification/run-on-ec2.sh --date 2025-11-08 [--airports KLGA,KSFO]
+#   Date range:  ./scripts/identification/run-on-ec2.sh --start-date 2025-01-01 --end-date 2025-01-31 [--airports KLGA]
 
 set -e
 
@@ -9,6 +11,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Parse arguments
 DATE=""
+START_DATE=""
+END_DATE=""
 AIRPORTS_ARG="--all"
 AWS_PROFILE="${AWS_PROFILE:-}"
 
@@ -16,6 +20,14 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --date)
       DATE="$2"
+      shift 2
+      ;;
+    --start-date)
+      START_DATE="$2"
+      shift 2
+      ;;
+    --end-date)
+      END_DATE="$2"
       shift 2
       ;;
     --airports)
@@ -58,10 +70,52 @@ if [ "$CURRENT_ACCOUNT" != "632391382381" ]; then
 fi
 echo ""
 
-if [ -z "$DATE" ]; then
-  echo "Error: --date is required"
+# Validate date arguments
+if [ -z "$DATE" ] && [ -z "$START_DATE" ]; then
+  echo "Error: Either --date or --start-date (with --end-date) is required"
+  echo ""
+  echo "Usage:"
+  echo "  Single date:  $0 --date YYYY-MM-DD [--airports ICAO,...]"
+  echo "  Date range:   $0 --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--airports ICAO,...]"
   exit 1
 fi
+
+if [ -n "$START_DATE" ] && [ -z "$END_DATE" ]; then
+  echo "Error: --end-date is required when using --start-date"
+  exit 1
+fi
+
+if [ -n "$END_DATE" ] && [ -z "$START_DATE" ]; then
+  echo "Error: --start-date is required when using --end-date"
+  exit 1
+fi
+
+# Build list of dates to process
+DATES=()
+if [ -n "$DATE" ]; then
+  DATES=("$DATE")
+else
+  # Use Python for reliable date arithmetic across platforms
+  while IFS= read -r d; do
+    DATES+=("$d")
+  done < <(python3 -c "
+from datetime import datetime, timedelta
+start = datetime.strptime('$START_DATE', '%Y-%m-%d')
+end = datetime.strptime('$END_DATE', '%Y-%m-%d')
+current = start
+while current <= end:
+    print(current.strftime('%Y-%m-%d'))
+    current += timedelta(days=1)
+")
+fi
+
+if [ ${#DATES[@]} -eq 0 ]; then
+  echo "Error: No dates to process"
+  exit 1
+fi
+
+echo "Will process ${#DATES[@]} date(s): ${DATES[*]}"
+echo ""
 
 # Configuration
 REGION="us-west-1"
@@ -248,8 +302,16 @@ rm -rf "$PACKAGE_DIR" /tmp/adsb-code.tar.gz
 echo "✓ Code uploaded to s3://$S3_BUCKET/$PACKAGE_KEY"
 echo ""
 
-# Step 5: Create user-data script
+# Step 5: Create user-data script that processes all dates
 echo "Step 5: Preparing user-data script..."
+
+# Build date command arguments
+if [ ${#DATES[@]} -eq 1 ]; then
+  DATE_CMD="--date ${DATES[0]}"
+else
+  DATE_CMD="--start-date ${DATES[0]} --end-date ${DATES[-1]}"
+fi
+
 cat > /tmp/user-data.sh <<EOF
 #!/bin/bash
 set -e
@@ -357,13 +419,21 @@ echo ""
 
 # Run processing
 echo "=========================================="
-echo "Starting processing: $DATE"
+echo "Starting processing"
+if [ ${#DATES[@]} -eq 1 ]; then
+  echo "Date: ${DATES[0]}"
+  DATE_CMD="--date ${DATES[0]}"
+else
+  echo "Date range: ${DATES[0]} to ${DATES[-1]} (${#DATES[@]} days)"
+  DATE_CMD="--start-date ${DATES[0]} --end-date ${DATES[-1]}"
+fi
 echo "=========================================="
 
-node scripts/processing/identify-ground-aircraft-multi.js --date "$DATE" $AIRPORTS_ARG
+node scripts/identification/identify-ground-aircraft.js $DATE_CMD $AIRPORTS_ARG
 
 EXIT_CODE=\$?
 
+echo ""
 echo "=========================================="
 echo "Processing Complete"
 echo "Exit code: \$EXIT_CODE"
@@ -376,10 +446,11 @@ if [ \$EXIT_CODE -eq 0 ]; then
   INSTANCE_ID=\$(ec2-metadata --instance-id | cut -d " " -f 2)
   aws ec2 terminate-instances --instance-ids "\$INSTANCE_ID" --region "\$AWS_REGION"
 else
-  echo "✗ Processing failed. Instance will remain running for debugging."
+  echo "✗ Some dates failed. Instance will remain running for debugging."
   echo "Check logs at /var/log/user-data.log"
 fi
 EOF
+
 
 # Step 6: Launch instance
 echo "Step 6: Launching EC2 instance..."
@@ -391,7 +462,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
     --security-group-ids "$SG_ID" \
     --user-data file:///tmp/user-data.sh \
     --block-device-mappings "[{\"DeviceName\":\"/dev/xvda\",\"Ebs\":{\"VolumeSize\":50,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=adsb-processor-$DATE},{Key=Purpose,Value=data-processing},{Key=AutoTerminate,Value=true}]" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=adsb-processor-${DATES[0]}-to-${DATES[-1]}},{Key=Purpose,Value=data-processing},{Key=AutoTerminate,Value=true}]" \
     --query 'Instances[0].InstanceId' \
     --output text)
 
@@ -405,9 +476,14 @@ echo "Instance ID: $INSTANCE_ID"
 echo "Region: $REGION"
 echo ""
 echo "The instance will:"
-echo "  1. Process date: $DATE"
-echo "  2. Upload results to S3 (s3://$S3_BUCKET/ground-aircraft/)"
-echo "  3. Self-terminate when complete"
+echo "  1. Process ${#DATES[@]} date(s): ${DATES[0]} to ${DATES[-1]}"
+if [ -n "$AIRPORTS_ARG" ] && [ "$AIRPORTS_ARG" != "--all" ]; then
+  echo "  2. Process airports: $(echo $AIRPORTS_ARG | sed 's/--airports //')"
+else
+  echo "  2. Process all enabled airports"
+fi
+echo "  3. Upload results to S3 (s3://$S3_BUCKET/ground-aircraft/)"
+echo "  4. Self-terminate when complete"
 echo ""
 echo "Monitor progress:"
 echo "  aws ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query 'Reservations[0].Instances[0].State.Name'"
@@ -417,8 +493,12 @@ echo "  https://console.aws.amazon.com/ec2/v2/home?region=$REGION#Instances:inst
 echo "  → Actions → Monitor and troubleshoot → Get system log"
 echo ""
 echo "Check results:"
-echo "  aws s3 ls s3://$S3_BUCKET/ground-aircraft/ --recursive | grep $DATE"
+if [ ${#DATES[@]} -eq 1 ]; then
+  echo "  aws s3 ls s3://$S3_BUCKET/ground-aircraft/ --recursive | grep ${DATES[0]}"
+else
+  echo "  aws s3 ls s3://$S3_BUCKET/ground-aircraft/ --recursive | grep -E '($(IFS='|'; echo "${DATES[*]}"))'"
+fi
 echo ""
-echo "Estimated completion: 30-90 minutes (depends on number of airports)"
+echo "Estimated completion: 30-90 minutes per date (depends on number of airports)"
 echo "=========================================="
 

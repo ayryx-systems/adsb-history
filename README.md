@@ -117,7 +117,7 @@ Identify aircraft that were on the ground at airports.
 node scripts/identification/identify-ground-aircraft.js --airport KLGA --date 2025-11-08
 
 # Multiple airports
-node scripts/identification/identify-ground-aircraft-multi.js --date 2025-11-08 --all
+node scripts/identification/identify-ground-aircraft.js --all --date 2025-11-08
 ```
 
 **Requirements**: ~50GB disk space for extraction
