@@ -140,6 +140,51 @@ class TraceExtractor {
       fs.rmSync(extractDir, { recursive: true, force: true });
     }
 
+    logger.info('Cleaning up raw tar file and extracted directory', {
+      rawTarPath,
+      rawExtractDir,
+    });
+    
+    if (fs.existsSync(rawTarPath)) {
+      try {
+        fs.unlinkSync(rawTarPath);
+        logger.info('Deleted raw tar file', { path: rawTarPath });
+      } catch (error) {
+        logger.warn('Failed to delete raw tar file', {
+          path: rawTarPath,
+          error: error.message,
+        });
+      }
+    }
+    
+    if (fs.existsSync(rawExtractDir)) {
+      try {
+        fs.rmSync(rawExtractDir, { recursive: true, force: true });
+        logger.info('Deleted raw extracted directory', { path: rawExtractDir });
+      } catch (error) {
+        logger.warn('Failed to delete raw extracted directory', {
+          path: rawExtractDir,
+          error: error.message,
+        });
+      }
+    }
+    
+    const rawTarDateDir = path.dirname(rawTarPath);
+    if (fs.existsSync(rawTarDateDir)) {
+      try {
+        const files = fs.readdirSync(rawTarDateDir);
+        if (files.length === 0) {
+          fs.rmdirSync(rawTarDateDir);
+          logger.info('Removed empty raw tar date directory', { path: rawTarDateDir });
+        }
+      } catch (error) {
+        logger.warn('Failed to remove raw tar date directory', {
+          path: rawTarDateDir,
+          error: error.message,
+        });
+      }
+    }
+
     return extractedTarPath;
   }
 }
