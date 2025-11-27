@@ -16,10 +16,11 @@
  * 2. Otherwise: Download the full raw tar file from S3 (slower, but works for any aircraft)
  * 3. Extract the tar file (if not already extracted)
  * 4. Find and read the trace file for the specified ICAO code
- * 5. Save the trace data to trace_<icao>_<date>.txt
- * 6. Generate an HTML visualization to trace_<icao>_<date>.html
+ * 5. Save the trace data to cache/traces/trace_<icao>_<date>.txt
+ * 6. Generate an HTML visualization to cache/traces/trace_<icao>_<date>.html
  * 
  * Files are cached in ./temp/ to avoid re-downloading.
+ * Output files are saved to cache/traces/ (excluded from git).
  */
 
 import TraceReader from '../../src/processing/TraceReader.js';
@@ -194,8 +195,13 @@ async function getAndVisualizeTrace() {
       traceCount: traceData.trace ? traceData.trace.length : 0,
     };
 
+    const cacheTracesDir = path.join(__dirname, '..', '..', 'cache', 'traces');
+    if (!fs.existsSync(cacheTracesDir)) {
+      fs.mkdirSync(cacheTracesDir, { recursive: true });
+    }
+
     const traceFileName = `trace_${icao}_${date}.txt`;
-    const traceFilePath_output = path.resolve(process.cwd(), traceFileName);
+    const traceFilePath_output = path.join(cacheTracesDir, traceFileName);
     fs.writeFileSync(traceFilePath_output, JSON.stringify(output, null, 2));
     logger.info('Trace data written to file', { 
       icao, 
@@ -553,7 +559,7 @@ async function getAndVisualizeTrace() {
 </html>`;
 
     const htmlFileName = `trace_${icao}_${date}.html`;
-    const htmlFilePath = path.resolve(process.cwd(), htmlFileName);
+    const htmlFilePath = path.join(cacheTracesDir, htmlFileName);
     fs.writeFileSync(htmlFilePath, html);
     
     console.log(`✓ Generated visualization: ${htmlFilePath}`);
