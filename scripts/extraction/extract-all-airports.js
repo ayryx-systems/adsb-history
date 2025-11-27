@@ -205,8 +205,9 @@ async function processDateForAirport(airport, date, extractor, dataStore, ground
     return { date, airport: airport.icao, skipped: true, reason: 'no_ground_aircraft' };
   }
 
+  let tarPath;
   try {
-    const tarPath = await extractor.extractTracesForAirport(airport.icao, date);
+    tarPath = await extractor.extractTracesForAirport(airport.icao, date);
     
     if (!tarPath) {
       return { date, airport: airport.icao, skipped: true, reason: 'no_traces' };
@@ -216,6 +217,8 @@ async function processDateForAirport(airport, date, extractor, dataStore, ground
 
     const stats = fs.statSync(tarPath);
     const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
+
+    safelyRemoveLocalFile(tarPath, airport.icao, date);
 
     return { date, airport: airport.icao, sizeMB, skipped: false };
   } catch (error) {
@@ -227,6 +230,26 @@ async function processDateForAirport(airport, date, extractor, dataStore, ground
       stack: error.stack,
     });
     return { date, airport: airport.icao, error: errorDetails };
+  } finally {
+    if (tarPath) {
+      safelyRemoveLocalFile(tarPath, airport.icao, date);
+    }
+  }
+}
+
+function safelyRemoveLocalFile(filePath, airport, date) {
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      logger.debug('Removed local tar after upload', { filePath, airport, date });
+    }
+  } catch (cleanupError) {
+    logger.warn('Failed to remove local tar file', {
+      filePath,
+      airport,
+      date,
+      error: cleanupError.message,
+    });
   }
 }
 
