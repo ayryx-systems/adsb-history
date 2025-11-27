@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import TraceReader from '../processing/TraceReader.js';
 import FlightAnalyzer from './FlightAnalyzer.js';
 import logger from '../utils/logger.js';
@@ -49,7 +51,6 @@ class AirportDayAnalyzer {
           airport,
           date,
           processed: processedCount,
-          total: aircraftIds.length,
           flightsFound: flights.length,
         });
       }
@@ -88,9 +89,14 @@ class AirportDayAnalyzer {
       summary,
     });
 
-    // Clean up extracted data
-    logger.info('Cleaning up extracted data', { date });
-    this.traceReader.cleanup(date);
+    // Clean up extracted traces directory
+    logger.info('Cleaning up extracted data', { airport, date });
+    const extractedTarPath = path.join(this.traceReader.tempDir, 'extracted', airport, date, `${airport}-${date}.tar`);
+    const extractedExtractDir = path.join(path.dirname(extractedTarPath), 'extracted');
+    if (fs.existsSync(extractedExtractDir)) {
+      fs.rmSync(extractedExtractDir, { recursive: true, force: true });
+      logger.info('Cleaned up extracted traces directory', { airport, date, path: extractedExtractDir });
+    }
 
     return {
       airport,
