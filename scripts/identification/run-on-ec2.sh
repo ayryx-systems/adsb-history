@@ -309,7 +309,8 @@ echo "Step 5: Preparing user-data script..."
 if [ ${#DATES[@]} -eq 1 ]; then
   DATE_CMD="--date ${DATES[0]}"
 else
-  DATE_CMD="--start-date ${DATES[0]} --end-date ${DATES[-1]}"
+  LAST_DATE_IDX=$((${#DATES[@]} - 1))
+  DATE_CMD="--start-date ${DATES[0]} --end-date ${DATES[$LAST_DATE_IDX]}"
 fi
 
 cat > /tmp/user-data.sh <<EOF
@@ -424,8 +425,9 @@ if [ ${#DATES[@]} -eq 1 ]; then
   echo "Date: ${DATES[0]}"
   DATE_CMD="--date ${DATES[0]}"
 else
-  echo "Date range: ${DATES[0]} to ${DATES[-1]} (${#DATES[@]} days)"
-  DATE_CMD="--start-date ${DATES[0]} --end-date ${DATES[-1]}"
+  LAST_DATE_IDX=$((${#DATES[@]} - 1))
+  echo "Date range: ${DATES[0]} to ${DATES[$LAST_DATE_IDX]} (${#DATES[@]} days)"
+  DATE_CMD="--start-date ${DATES[0]} --end-date ${DATES[$LAST_DATE_IDX]}"
 fi
 echo "=========================================="
 
@@ -454,6 +456,13 @@ EOF
 
 # Step 6: Launch instance
 echo "Step 6: Launching EC2 instance..."
+if [ ${#DATES[@]} -eq 1 ]; then
+  INSTANCE_NAME="adsb-processor-${DATES[0]}"
+else
+  LAST_DATE_IDX=$((${#DATES[@]} - 1))
+  INSTANCE_NAME="adsb-processor-${DATES[0]}-to-${DATES[$LAST_DATE_IDX]}"
+fi
+
 INSTANCE_ID=$(aws ec2 run-instances \
     --region "$REGION" \
     --image-id "$AMI_ID" \
@@ -462,7 +471,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
     --security-group-ids "$SG_ID" \
     --user-data file:///tmp/user-data.sh \
     --block-device-mappings "[{\"DeviceName\":\"/dev/xvda\",\"Ebs\":{\"VolumeSize\":50,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=adsb-processor-${DATES[0]}-to-${DATES[-1]}},{Key=Purpose,Value=data-processing},{Key=AutoTerminate,Value=true}]" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME},{Key=Purpose,Value=data-processing},{Key=AutoTerminate,Value=true}]" \
     --query 'Instances[0].InstanceId' \
     --output text)
 
@@ -476,7 +485,12 @@ echo "Instance ID: $INSTANCE_ID"
 echo "Region: $REGION"
 echo ""
 echo "The instance will:"
-echo "  1. Process ${#DATES[@]} date(s): ${DATES[0]} to ${DATES[-1]}"
+if [ ${#DATES[@]} -eq 1 ]; then
+  echo "  1. Process date: ${DATES[0]}"
+else
+  LAST_DATE_IDX=$((${#DATES[@]} - 1))
+  echo "  1. Process ${#DATES[@]} date(s): ${DATES[0]} to ${DATES[$LAST_DATE_IDX]}"
+fi
 if [ -n "$AIRPORTS_ARG" ] && [ "$AIRPORTS_ARG" != "--all" ]; then
   echo "  2. Process airports: $(echo $AIRPORTS_ARG | sed 's/--airports //')"
 else
