@@ -177,11 +177,38 @@ class AirportGroundIdentifier {
         duration: `${(duration / 1000).toFixed(1)}s`,
       });
 
-      // Clean up extracted directory (keep tar for potential reuse)
-      console.log(`[${new Date().toISOString()}] Cleaning up extracted data`);
-      logger.info('Cleaning up extracted data', { date, airport: airport.icao });
+      // Clean up extracted directory and tar file to free up disk space
+      console.log(`[${new Date().toISOString()}] Cleaning up extracted data and tar file`);
+      logger.info('Cleaning up extracted data and tar file', { date, airport: airport.icao });
+      
       if (fs.existsSync(extractDir)) {
         fs.rmSync(extractDir, { recursive: true, force: true });
+        logger.info('Removed extracted directory', { date, path: extractDir });
+      }
+      
+      if (fs.existsSync(rawTarPath)) {
+        const tarStats = fs.statSync(rawTarPath);
+        fs.unlinkSync(rawTarPath);
+        logger.info('Removed tar file', {
+          date,
+          path: rawTarPath,
+          size: `${(tarStats.size / 1024 / 1024 / 1024).toFixed(2)} GB`,
+        });
+        console.log(`[${new Date().toISOString()}] ✓ Removed tar file (${(tarStats.size / 1024 / 1024 / 1024).toFixed(2)} GB freed)`);
+      }
+      
+      // Clean up empty date directory if it exists
+      const dateTempDir = path.dirname(rawTarPath);
+      try {
+        if (fs.existsSync(dateTempDir)) {
+          const files = fs.readdirSync(dateTempDir);
+          if (files.length === 0) {
+            fs.rmdirSync(dateTempDir);
+            logger.info('Removed empty date directory', { date, path: dateTempDir });
+          }
+        }
+      } catch (err) {
+        // Directory not empty or other error, ignore
       }
 
       // Return as sorted array
