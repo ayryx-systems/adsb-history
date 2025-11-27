@@ -26,6 +26,16 @@ import TraceReader from '../../src/processing/TraceReader.js';
 import logger from '../../src/utils/logger.js';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function loadAirportConfig() {
+  const configPath = path.join(__dirname, '..', '..', 'config', 'airports.json');
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  return config.airports.filter(a => a.enabled);
+}
 
 const args = process.argv.slice(2);
 let icao = null;
@@ -108,11 +118,45 @@ async function getAndVisualizeTrace() {
         logger.info('Using extracted traces', { airport, date, extractDir });
       }
     } else {
-      // Use full raw tar (for backward compatibility and aircraft not on ground)
-      logger.info('Step 1: Downloading/checking tar file', { date });
-      const tarPath = await traceReader.downloadTarFromS3(date);
-      logger.info('Step 2: Extracting/checking extracted tar', { date });
-      extractDir = await traceReader.extractTar(tarPath);
+      // Try all enabled airports' extracted traces first
+      const enabledAirports = loadAirportConfig();
+      logger.info('Step 1: Searching extracted traces for all enabled airports', { 
+        date, 
+        airports: enabledAirports.map(a => a.icao).join(', ') 
+      });
+      
+      extractDir = null;
+      let foundAirport = null;
+      
+      for (const airportConfig of enabledAirports) {
+        const testExtractDir = await traceReader.downloadExtractedTraces(airportConfig.icao, date);
+        if (testExtractDir) {
+          // Check if the trace file exists for this ICAO
+          const hexSubdir = icao.slice(-2);
+          const tracesDir = path.join(testExtractDir, 'traces');
+          const subdirPath = path.join(tracesDir, hexSubdir);
+          const traceFilePath = path.join(subdirPath, `trace_full_${icao}.json`);
+          
+          if (fs.existsSync(traceFilePath)) {
+            extractDir = testExtractDir;
+            foundAirport = airportConfig.icao;
+            logger.info('Found trace in extracted traces', { 
+              airport: foundAirport, 
+              date, 
+              extractDir 
+            });
+            break;
+          }
+        }
+      }
+      
+      if (!extractDir) {
+        // Fall back to full raw tar only if not found in any extracted traces
+        logger.info('Step 2: Trace not found in extracted traces, downloading full raw tar', { date });
+        const tarPath = await traceReader.downloadTarFromS3(date);
+        logger.info('Step 3: Extracting/checking extracted tar', { date });
+        extractDir = await traceReader.extractTar(tarPath);
+      }
     }
 
     const hexSubdir = icao.slice(-2);
