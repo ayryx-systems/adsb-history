@@ -4,20 +4,22 @@
  * Get raw ADSB trace data for a specific aircraft and generate an HTML visualization
  * 
  * Usage:
- *   node scripts/trace_utils/get-and-visualize-trace.js --icao <ICAO_CODE> --date <YYYY-MM-DD> [--thin N]
+ *   node scripts/trace_utils/get-and-visualize-trace.js --icao <ICAO_CODE> --date <YYYY-MM-DD> [--airport <AIRPORT>] [--thin N]
  * 
  * Example:
  *   node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06
+ *   node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06 --airport KORD
  *   node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06 --thin 5
  * 
  * The script will:
- * 1. Download the tar file from S3 (if not already in temp/)
- * 2. Extract the tar file (if not already extracted)
- * 3. Find and read the trace file for the specified ICAO code
- * 4. Save the trace data to trace_<icao>_<date>.txt
- * 5. Generate an HTML visualization to trace_<icao>_<date>.html
+ * 1. If --airport is provided: Download extracted traces for that airport (faster, smaller)
+ * 2. Otherwise: Download the full raw tar file from S3 (slower, but works for any aircraft)
+ * 3. Extract the tar file (if not already extracted)
+ * 4. Find and read the trace file for the specified ICAO code
+ * 5. Save the trace data to trace_<icao>_<date>.txt
+ * 6. Generate an HTML visualization to trace_<icao>_<date>.html
  * 
- * Files are cached in ./temp/YYYY-MM-DD/ to avoid re-downloading.
+ * Files are cached in ./temp/ to avoid re-downloading.
  */
 
 import TraceReader from '../../src/processing/TraceReader.js';
@@ -28,6 +30,7 @@ import fs from 'fs';
 const args = process.argv.slice(2);
 let icao = null;
 let date = null;
+let airport = null;
 let thinFactor = 1;
 
 for (let i = 0; i < args.length; i++) {
@@ -36,6 +39,9 @@ for (let i = 0; i < args.length; i++) {
     i++;
   } else if (args[i] === '--date' && args[i + 1]) {
     date = args[i + 1];
+    i++;
+  } else if (args[i] === '--airport' && args[i + 1]) {
+    airport = args[i + 1].toUpperCase();
     i++;
   } else if (args[i] === '--thin' && args[i + 1]) {
     thinFactor = parseInt(args[i + 1], 10);
@@ -48,8 +54,9 @@ for (let i = 0; i < args.length; i++) {
 }
 
 if (!icao || !date) {
-  console.error('Usage: node scripts/trace_utils/get-and-visualize-trace.js --icao <ICAO_CODE> --date <YYYY-MM-DD> [--thin N]');
+  console.error('Usage: node scripts/trace_utils/get-and-visualize-trace.js --icao <ICAO_CODE> --date <YYYY-MM-DD> [--airport <AIRPORT>] [--thin N]');
   console.error('Example: node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06');
+  console.error('         node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06 --airport KORD');
   console.error('         node scripts/trace_utils/get-and-visualize-trace.js --icao a1b2c3 --date 2025-01-06 --thin 5');
   process.exit(1);
 }
@@ -81,15 +88,32 @@ function formatDuration(seconds) {
 
 async function getAndVisualizeTrace() {
   try {
-    logger.info('Getting and visualizing aircraft trace', { icao, date });
+    logger.info('Getting and visualizing aircraft trace', { icao, date, airport });
 
     const traceReader = new TraceReader();
 
-    logger.info('Step 1: Downloading/checking tar file', { date });
-    const tarPath = await traceReader.downloadTarFromS3(date);
-
-    logger.info('Step 2: Extracting/checking extracted tar', { date });
-    const extractDir = await traceReader.extractTar(tarPath);
+    let extractDir;
+    if (airport) {
+      // Use extracted traces for the specified airport (faster, smaller)
+      logger.info('Step 1: Downloading extracted traces for airport', { airport, date });
+      extractDir = await traceReader.downloadExtractedTraces(airport, date);
+      
+      if (!extractDir) {
+        logger.warn('Extracted traces not found, falling back to full raw tar', { airport, date });
+        logger.info('Step 1: Downloading/checking full raw tar file', { date });
+        const tarPath = await traceReader.downloadTarFromS3(date);
+        logger.info('Step 2: Extracting/checking extracted tar', { date });
+        extractDir = await traceReader.extractTar(tarPath);
+      } else {
+        logger.info('Using extracted traces', { airport, date, extractDir });
+      }
+    } else {
+      // Use full raw tar (for backward compatibility and aircraft not on ground)
+      logger.info('Step 1: Downloading/checking tar file', { date });
+      const tarPath = await traceReader.downloadTarFromS3(date);
+      logger.info('Step 2: Extracting/checking extracted tar', { date });
+      extractDir = await traceReader.extractTar(tarPath);
+    }
 
     const hexSubdir = icao.slice(-2);
     const tracesDir = path.join(extractDir, 'traces');
@@ -107,7 +131,7 @@ async function getAndVisualizeTrace() {
       process.exit(1);
     }
 
-    logger.info('Step 3: Reading trace file', { icao, date, traceFilePath });
+    logger.info('Step 3: Reading trace file', { icao, date, traceFilePath, extractDir });
     const traceData = await traceReader.readTraceFile(traceFilePath);
 
     if (!traceData) {
