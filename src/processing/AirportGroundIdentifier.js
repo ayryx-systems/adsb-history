@@ -123,19 +123,23 @@ class AirportGroundIdentifier {
     const aircraftIds = new Set();
 
     try {
-      // Step 1: Download extracted traces for this airport from S3
-      console.log(`[${new Date().toISOString()}] Step 1: Downloading extracted traces for ${airport.icao} from S3`);
-      logger.info('Step 1: Downloading extracted traces from S3', { date, airport: airport.icao });
-      const extractDir = await this.traceReader.downloadExtractedTraces(airport.icao, date);
+      // Step 1: Download raw tar from S3
+      console.log(`[${new Date().toISOString()}] Step 1: Downloading raw ADSB data from S3`);
+      logger.info('Step 1: Downloading raw tar from S3', { date, airport: airport.icao });
+      const rawTarPath = await this.traceReader.downloadTarFromS3(date);
       
-      if (!extractDir) {
-        throw new Error(`Extracted traces not found for ${airport.icao} on ${date}. Run extraction phase first.`);
-      }
-      
-      console.log(`[${new Date().toISOString()}] ✓ Extracted traces downloaded and extracted to: ${extractDir}`);
+      console.log(`[${new Date().toISOString()}] ✓ Raw tar downloaded: ${rawTarPath}`);
 
-      // Step 2: Stream and check all traces
-      logger.info('Step 2: Processing traces', { date, airport: airport.icao });
+      // Step 2: Extract raw tar
+      console.log(`[${new Date().toISOString()}] Step 2: Extracting raw tar`);
+      logger.info('Step 2: Extracting raw tar', { date, airport: airport.icao });
+      const extractDir = await this.traceReader.extractTar(rawTarPath);
+      
+      console.log(`[${new Date().toISOString()}] ✓ Raw tar extracted to: ${extractDir}`);
+
+      // Step 3: Stream and check all traces
+      logger.info('Step 3: Processing traces', { date, airport: airport.icao });
+      console.log(`[${new Date().toISOString()}] Step 3: Processing all traces to identify ground aircraft`);
       
       let processedCount = 0;
       const progressInterval = 10000;
@@ -150,6 +154,7 @@ class AirportGroundIdentifier {
             tracesProcessed: processedCount,
             groundAircraft: aircraftIds.size,
           });
+          console.log(`[${new Date().toISOString()}] Progress: ${processedCount.toLocaleString()} traces processed, ${aircraftIds.size} ground aircraft found`);
         }
 
         // Check if aircraft was on ground at airport
@@ -172,13 +177,11 @@ class AirportGroundIdentifier {
         duration: `${(duration / 1000).toFixed(1)}s`,
       });
 
-      // Clean up extracted traces directory
+      // Clean up extracted directory (keep tar for potential reuse)
       console.log(`[${new Date().toISOString()}] Cleaning up extracted data`);
       logger.info('Cleaning up extracted data', { date, airport: airport.icao });
-      const extractedTarPath = path.join(this.traceReader.tempDir, 'extracted', airport.icao, date, `${airport.icao}-${date}.tar`);
-      const extractedExtractDir = path.join(path.dirname(extractedTarPath), 'extracted');
-      if (fs.existsSync(extractedExtractDir)) {
-        fs.rmSync(extractedExtractDir, { recursive: true, force: true });
+      if (fs.existsSync(extractDir)) {
+        fs.rmSync(extractDir, { recursive: true, force: true });
       }
 
       // Return as sorted array
