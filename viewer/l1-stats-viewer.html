@@ -236,36 +236,7 @@
             </div>
 
             <div class="chart-container">
-                <h3>Time from 100nm by Time Slot</h3>
-                <div class="chart-wrapper">
-                    <canvas id="time100nmChart"></canvas>
-                </div>
-                <div class="legend">
-                    <div class="legend-item">
-                        <div class="legend-color" style="background: rgba(153, 102, 255, 0.6);"></div>
-                        <span>Median (p50)</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color" style="background: rgba(75, 192, 192, 0.4);"></div>
-                        <span>p75</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color" style="background: rgba(255, 206, 86, 0.4);"></div>
-                        <span>p90</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color" style="background: rgba(255, 99, 132, 0.4);"></div>
-                        <span>p95</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color" style="background: rgba(201, 203, 207, 0.6);"></div>
-                        <span>Max</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="chart-container">
-                <h3>Individual Arrivals: 100nm to Touchdown</h3>
+                <h3>Individual Arrivals: 50nm to Touchdown</h3>
                 <div class="chart-wrapper">
                     <canvas id="arrivalsScatterChart"></canvas>
                 </div>
@@ -813,7 +784,6 @@
 
         function renderCharts(data) {
             destroyChart('arrivalCount');
-            destroyChart('time100nm');
             destroyChart('time50nm');
             destroyChart('arrivalsScatter');
             destroyChart('aircraftTypeTime');
@@ -826,7 +796,6 @@
 
             const selectedTypes = getSelectedAircraftTypes();
             renderArrivalCountChart(data, selectedTypes);
-            renderTime100nmChart(data, selectedTypes);
             renderTime50nmChart(data, selectedTypes);
             renderArrivalsScatterChart(data, selectedTypes);
             renderAircraftTypeTimeChart(data, selectedTypes);
@@ -1026,9 +995,9 @@
                         continue;
                     }
                     
-                    if (ac.milestones?.timeFrom100nm !== undefined && ac.touchdown?.utc) {
+                    if (ac.milestones?.timeFrom50nm !== undefined && ac.touchdown?.utc) {
                         const touchdownTime = new Date(ac.touchdown.utc);
-                        const durationMinutes = ac.milestones.timeFrom100nm / 60;
+                        const durationMinutes = ac.milestones.timeFrom50nm / 60;
                         
                         const hoursSinceMidnight = touchdownTime.getUTCHours() + touchdownTime.getUTCMinutes() / 60;
                         
@@ -1093,7 +1062,7 @@
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'Time from 100nm (minutes)'
+                                text: 'Time from 50nm (minutes)'
                             }
                         }
                     },
@@ -1122,7 +1091,7 @@
                                         const hours = Math.floor(arrival.durationMinutes / 60);
                                         const minutes = Math.round(arrival.durationMinutes % 60);
                                         return [
-                                            `Duration: ${hours}h ${minutes}m (${arrival.durationMinutes.toFixed(1)} min)`,
+                                            `Duration from 50nm: ${hours}h ${minutes}m (${arrival.durationMinutes.toFixed(1)} min)`,
                                             `Aircraft: ${arrival.type}`,
                                             `ICAO: ${arrival.icao}`
                                         ];
@@ -1150,7 +1119,7 @@
                                 const durationMins = Math.round(arrival.durationMinutes % 60);
                                 alert(
                                     `Touchdown Time: ${utcTime}\n` +
-                                    `Duration from 100nm: ${durationHours}h ${durationMins}m (${arrival.durationMinutes.toFixed(1)} minutes)\n` +
+                                    `Duration from 50nm: ${durationHours}h ${durationMins}m (${arrival.durationMinutes.toFixed(1)} minutes)\n` +
                                     `Aircraft Type: ${arrival.type}\n` +
                                     `ICAO: ${arrival.icao}`
                                 );
