@@ -457,10 +457,10 @@ EOF
 # Step 6: Launch instance
 echo "Step 6: Launching EC2 instance..."
 if [ ${#DATES[@]} -eq 1 ]; then
-  INSTANCE_NAME="adsb-processor-${DATES[0]}"
+  INSTANCE_NAME="adsb-identification-${DATES[0]}"
 else
   LAST_DATE_IDX=$((${#DATES[@]} - 1))
-  INSTANCE_NAME="adsb-processor-${DATES[0]}-to-${DATES[$LAST_DATE_IDX]}"
+  INSTANCE_NAME="adsb-identification-${DATES[0]}-to-${DATES[$LAST_DATE_IDX]}"
 fi
 
 INSTANCE_ID=$(aws ec2 run-instances \
