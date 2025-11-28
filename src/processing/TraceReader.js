@@ -188,8 +188,27 @@ class TraceReader {
    */
   async readTraceFile(tracePath) {
     try {
+      // Check file size first
+      const stats = fs.statSync(tracePath);
+      if (stats.size === 0) {
+        logger.warn('Trace file is empty, skipping', {
+          file: path.basename(tracePath),
+          path: tracePath,
+        });
+        return null;
+      }
+
       // Read gzipped data
       const gzippedData = fs.readFileSync(tracePath);
+      
+      // Validate minimum gzip size (gzip header is at least 10 bytes)
+      if (gzippedData.length < 10) {
+        logger.warn('Trace file too small to be valid gzip, skipping', {
+          file: path.basename(tracePath),
+          size: gzippedData.length,
+        });
+        return null;
+      }
       
       // Decompress
       const decompressed = await gunzip(gzippedData);
@@ -219,9 +238,13 @@ class TraceReader {
         description,
       };
     } catch (error) {
+      // Provide more context in error message
+      const stats = fs.existsSync(tracePath) ? fs.statSync(tracePath) : null;
       logger.error('Failed to read trace file', {
         file: path.basename(tracePath),
         error: error.message,
+        size: stats?.size ?? 'unknown',
+        errorType: error.name,
       });
       return null;
     }
