@@ -431,7 +431,7 @@ else
 fi
 echo "=========================================="
 
-node scripts/identification/identify-ground-aircraft.js $DATE_CMD $AIRPORTS_ARG
+NODE_OPTIONS="--max-old-space-size=8192 --expose-gc" node scripts/identification/identify-ground-aircraft.js $DATE_CMD $AIRPORTS_ARG
 
 EXIT_CODE=\$?
 

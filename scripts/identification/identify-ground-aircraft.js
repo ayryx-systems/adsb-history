@@ -242,7 +242,16 @@ async function processAirportDate(airport, date, identifier, dataStore, force) {
   });
   await dataStore.save(airport.icao, date, aircraftIds);
 
-  return { airport: airport.icao, date, count: aircraftIds.length, skipped: false };
+  // Explicitly clean up trace reader for this date to free memory
+  if (identifier.traceReader && typeof identifier.traceReader.cleanup === 'function') {
+    identifier.traceReader.cleanup(date);
+  }
+
+  // Clear the aircraftIds array reference to help GC
+  const count = aircraftIds.length;
+  aircraftIds.length = 0;
+
+  return { airport: airport.icao, date, count, skipped: false };
 }
 
 async function main() {
@@ -361,6 +370,21 @@ async function main() {
             results.push({ airport: airport.icao, date, error: error.message });
           }
         }
+      }
+
+      // Cleanup after each date to free memory
+      if (dateIdx < dates.length - 1) {
+        logger.info('Cleaning up after date', { date });
+        console.log(`\n[Date ${dateIdx + 1}/${dates.length}] Cleanup: Freeing memory...`);
+        
+        // Force garbage collection if available (requires --expose-gc flag)
+        if (global.gc) {
+          global.gc();
+          logger.info('Garbage collection triggered', { date });
+        }
+        
+        // Small delay to allow GC to complete
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
