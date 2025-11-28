@@ -3,13 +3,12 @@
 /**
  * Run complete analysis pipeline for date range
  * 
- * Runs the complete analysis pipeline for each day in the specified date range:
- * 1. Phase 2: Identify ground aircraft (identify-ground-aircraft.js)
- * 2. Phase 3a: Analyze flights (analyze-airport-day.js) - creates flight summaries
- * 3. Phase 3b: Generate L1 statistics (generate-l1-stats.js)
+ * Runs the analysis pipeline (Phase 3a and 3b) for each day in the specified date range:
+ * 1. Phase 3a: Analyze flights (analyze-airport-day.js) - creates flight summaries
+ * 2. Phase 3b: Generate L1 statistics (generate-l1-stats.js)
  * 
- * Note: Extracted traces must already exist (run extract-all-airports.js first).
- * This script assumes extraction has been completed for the date range.
+ * **Important**: Extracted traces must already exist (run extract-all-airports.js first).
+ * This script will fail if extracted traces are not found - it does NOT download raw tar files.
  * 
  * Usage:
  *   node scripts/analysis/process-analysis-pipeline.js --airport KORD
@@ -18,10 +17,10 @@
  */
 
 import { spawn } from 'child_process';
-import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import logger from '../../src/utils/logger.js';
+import ExtractedTraceData from '../../src/extraction/ExtractedTraceData.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,7 +50,10 @@ function parseArgs() {
       options.force = true;
     } else if (arg === '--help' || arg === '-h') {
       console.log(`
-Run complete analysis pipeline (Phase 2, 3a, and 3b) for date range
+Run analysis pipeline (Phase 3a and 3b) for date range
+
+**Prerequisites**: Extracted traces must exist (run extract-all-airports.js first).
+This script will fail if extracted traces are not found - it does NOT download raw tar files.
 
 Usage:
   node scripts/analysis/process-analysis-pipeline.js --airport ICAO [options]
@@ -120,24 +122,27 @@ function runCommand(command, args, options = {}) {
 async function processDay(airport, date, force) {
   logger.info('Processing day', { airport, date });
 
-  const identifyScript = path.join(__dirname, '..', 'identification', 'identify-ground-aircraft.js');
+  const extractedTraceData = new ExtractedTraceData();
   const analyzeScript = path.join(__dirname, 'analyze-airport-day.js');
   const statsScript = path.join(__dirname, 'generate-l1-stats.js');
 
   try {
-    // Step 1: Identify ground aircraft (Phase 2)
-    logger.info('Step 1: Identifying ground aircraft', { airport, date });
-    const identifyArgs = ['--airport', airport, '--date', date];
-    if (force) {
-      identifyArgs.push('--force');
+    // Check if extracted traces exist (required before analysis)
+    logger.info('Checking for extracted traces', { airport, date });
+    const extractedExists = await extractedTraceData.exists(airport, date);
+    
+    if (!extractedExists) {
+      const errorMsg = `Extracted traces not found for ${airport} on ${date}. ` +
+        `Please run extraction first: node scripts/extraction/extract-all-airports.js --start-date ${date} --end-date ${date} --airports ${airport}`;
+      logger.error('Extracted traces not found', { airport, date });
+      return { success: false, date, error: errorMsg };
     }
 
-    await runCommand('node', [identifyScript, ...identifyArgs]);
-    logger.info('Ground aircraft identification complete', { airport, date });
+    logger.info('Extracted traces found, proceeding with analysis', { airport, date });
 
-    // Step 2: Analyze flights (Phase 3a - creates flight summaries)
-    // Note: Requires extracted traces to exist (run extract-all-airports.js first)
-    logger.info('Step 2: Analyzing flights', { airport, date });
+    // Step 1: Analyze flights (Phase 3a - creates flight summaries)
+    // Uses extracted traces (no raw tar download needed)
+    logger.info('Step 1: Analyzing flights', { airport, date });
     const analyzeArgs = ['--airport', airport, '--date', date];
     if (force) {
       analyzeArgs.push('--force');
@@ -146,8 +151,8 @@ async function processDay(airport, date, force) {
     await runCommand('node', [analyzeScript, ...analyzeArgs]);
     logger.info('Flight analysis complete', { airport, date });
 
-    // Step 3: Generate L1 statistics (Phase 3b)
-    logger.info('Step 3: Generating L1 statistics', { airport, date });
+    // Step 2: Generate L1 statistics (Phase 3b)
+    logger.info('Step 2: Generating L1 statistics', { airport, date });
     const statsArgs = ['--airport', airport, '--date', date];
     if (force) {
       statsArgs.push('--force');
@@ -176,6 +181,8 @@ async function main() {
     endDate: options.endDate,
     force: options.force,
   });
+
+  logger.info('Note: This script requires extracted traces to exist. It will not download raw tar files.');
 
   const dates = generateDateRange(options.startDate, options.endDate);
   logger.info('Date range generated', { nDates: dates.length, dates });
