@@ -2037,6 +2037,20 @@
                 return `rgb(${r}, 0, ${b})`;
             }
             
+            function formatTimestamp(timestamp) {
+                if (timestamp < 86400 * 2) {
+                    const hours = Math.floor(timestamp / 3600);
+                    const minutes = Math.floor((timestamp % 3600) / 60);
+                    const seconds = Math.floor(timestamp % 60);
+                    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')} UTC`;
+                }
+                const date = new Date(timestamp * 1000);
+                const hours = String(date.getUTCHours()).padStart(2, '0');
+                const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+                const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+                return `${hours}:${minutes}:${seconds} UTC`;
+            }
+            
             const segments = [];
             for (let i = 0; i < points.length - 1; i++) {
                 const p1 = points[i];
@@ -2046,7 +2060,10 @@
                     latlngs: [[p1[0], p1[1]], [p2[0], p2[1]]],
                     color: color,
                     alt: p1[2],
-                    track: p1[4]
+                    track: p1[4],
+                    timestamp: p1[3],
+                    nextTimestamp: p2[3],
+                    index: i
                 });
             }
             
@@ -2090,8 +2107,11 @@
                     traceMapLayer.addLayer(arrow);
                 }
                 
+                const nextTimestampFormatted = formatTimestamp(segment.nextTimestamp);
+                
                 polyline.bindPopup(`
                     <strong>Segment ${index + 1}</strong><br>
+                    Time: ${nextTimestampFormatted}<br>
                     Altitude: ${Math.round(segment.alt).toLocaleString()} ft<br>
                     Track: ${segment.track !== null ? segment.track + '°' : 'N/A'}
                 `);
@@ -2104,6 +2124,9 @@
             const startPoint = points[0];
             const endPoint = points[points.length - 1];
             
+            const startTimestamp = formatTimestamp(startPoint[3]);
+            const endTimestamp = formatTimestamp(endPoint[3]);
+            
             const startMarker = L.marker([startPoint[0], startPoint[1]], {
                 icon: L.divIcon({
                     className: 'start-marker',
@@ -2112,7 +2135,7 @@
                     iconAnchor: [6, 6]
                 })
             }).addTo(traceMap);
-            startMarker.bindPopup(`<strong>Start</strong><br>Altitude: ${Math.round(startPoint[2]).toLocaleString()} ft`);
+            startMarker.bindPopup(`<strong>Start</strong><br>Time: ${startTimestamp}<br>Altitude: ${Math.round(startPoint[2]).toLocaleString()} ft`);
             
             const endMarker = L.marker([endPoint[0], endPoint[1]], {
                 icon: L.divIcon({
@@ -2122,7 +2145,7 @@
                     iconAnchor: [6, 6]
                 })
             }).addTo(traceMap);
-            endMarker.bindPopup(`<strong>End</strong><br>Altitude: ${Math.round(endPoint[2]).toLocaleString()} ft`);
+            endMarker.bindPopup(`<strong>End</strong><br>Time: ${endTimestamp}<br>Altitude: ${Math.round(endPoint[2]).toLocaleString()} ft`);
             
             traceMap.fitBounds(bounds, { padding: [50, 50] });
             
