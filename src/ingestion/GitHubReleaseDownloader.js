@@ -33,9 +33,10 @@ class GitHubReleaseDownloader {
   /**
    * Format date for release tag
    * @param {Date|string} date - Date object or ISO string
-   * @returns {string} Formatted as v2025.11.08
+   * @param {boolean} withTmp - Whether to add "tmp" suffix
+   * @returns {string} Formatted as v2025.11.08-planes-readsb-prod-0 or v2025.11.08-planes-readsb-prod-0tmp
    */
-  formatReleaseTag(date) {
+  formatReleaseTag(date, withTmp = false) {
     let dateStr;
     if (typeof date === 'string') {
       // If already a string in YYYY-MM-DD format, use it directly
@@ -47,35 +48,53 @@ class GitHubReleaseDownloader {
     
     // Parse the date string to avoid timezone issues
     const [year, month, day] = dateStr.split('-');
-    return `v${year}.${month}.${day}-planes-readsb-prod-0`;
+    const suffix = withTmp ? 'tmp' : '';
+    return `v${year}.${month}.${day}-planes-readsb-prod-0${suffix}`;
   }
 
   /**
    * Get release information by date
+   * Tries standard format first, then falls back to "tmp" suffix variant
    * @param {Date|string} date - Date to fetch
+   * @returns {object|null} Release data or null if not found
    */
   async getReleaseByDate(date) {
-    const tag = this.formatReleaseTag(date);
-    const url = `https://api.github.com/repos/${this.repo}/releases/tags/${tag}`;
+    const standardTag = this.formatReleaseTag(date, false);
+    const tmpTag = this.formatReleaseTag(date, true);
     
-    logger.info('Fetching release info', { tag, repo: this.repo, url });
+    // Try standard format first
+    const tags = [standardTag, tmpTag];
     
-    try {
-      const response = await axios.get(url, this.axiosConfig);
-      return response.data;
-    } catch (error) {
-      if (error.response?.status === 404) {
-        logger.warn('Release not found', { tag, repo: this.repo, url });
-        return null;
+    for (const tag of tags) {
+      const url = `https://api.github.com/repos/${this.repo}/releases/tags/${tag}`;
+      
+      logger.info('Fetching release info', { tag, repo: this.repo, url });
+      
+      try {
+        const response = await axios.get(url, this.axiosConfig);
+        logger.info('Release found', { tag, repo: this.repo });
+        return { ...response.data, _tag: tag };
+      } catch (error) {
+        if (error.response?.status === 404) {
+          logger.warn('Release not found', { tag, repo: this.repo, url });
+          continue;
+        }
+        logger.error('Failed to fetch release', {
+          tag,
+          repo: this.repo,
+          url,
+          error: error.message,
+        });
+        throw error;
       }
-      logger.error('Failed to fetch release', {
-        tag,
-        repo: this.repo,
-        url,
-        error: error.message,
-      });
-      throw error;
     }
+    
+    logger.warn('No release found for any tag variant', { 
+      standardTag, 
+      tmpTag, 
+      repo: this.repo 
+    });
+    return null;
   }
 
   /**
@@ -148,8 +167,8 @@ class GitHubReleaseDownloader {
       throw new Error(`No release found for date: ${date}`);
     }
 
-    const tag = this.formatReleaseTag(date);
-    const baseName = tag; // v2025.11.08-planes-readsb-prod-0
+    const tag = release._tag || this.formatReleaseTag(date, false);
+    const baseName = tag;
     
     // Log available assets for debugging
     logger.info('Release assets', { 
