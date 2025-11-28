@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import TraceReader from '../processing/TraceReader.js';
 import FlightAnalyzer from './FlightAnalyzer.js';
+import SimplifiedTraceData from './SimplifiedTraceData.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -12,6 +13,70 @@ class AirportDayAnalyzer {
   constructor(config = {}) {
     this.traceReader = new TraceReader(config);
     this.flightAnalyzer = new FlightAnalyzer(config);
+    this.traceData = new SimplifiedTraceData(config);
+  }
+
+  /**
+   * Simplify a trace to minimal format for visualization
+   * @param {Array} trace - Full trace array from readsb format
+   * @param {object} metadata - Aircraft metadata
+   * @returns {object} Simplified trace data or null if invalid
+   */
+  simplifyTrace(trace, metadata = {}) {
+    if (!trace || !Array.isArray(trace) || trace.length === 0) {
+      return null;
+    }
+
+    const points = [];
+    let minAlt = Infinity;
+    let maxAlt = -Infinity;
+    let startTime = null;
+    let endTime = null;
+
+    for (const point of trace) {
+      if (!Array.isArray(point) || point.length < 4) continue;
+
+      const timestamp = point[0];
+      const lat = point[1];
+      const lon = point[2];
+      const alt = point[3];
+      const track = point[5] || null;
+
+      if (lat === null || lon === null || alt === null) continue;
+
+      const altNum = typeof alt === 'number' ? alt : 0;
+      if (altNum < minAlt) minAlt = altNum;
+      if (altNum > maxAlt) maxAlt = altNum;
+
+      if (startTime === null) startTime = timestamp;
+      endTime = timestamp;
+
+      points.push([
+        lat,
+        lon,
+        altNum,
+        timestamp,
+        track !== null && track !== undefined ? Math.round(track) : null,
+      ]);
+    }
+
+    if (points.length === 0) {
+      return null;
+    }
+
+    return {
+      points,
+      metadata: {
+        registration: metadata.registration || null,
+        aircraftType: metadata.aircraftType || null,
+        description: metadata.description || null,
+        minAlt: minAlt === Infinity ? 0 : minAlt,
+        maxAlt: maxAlt === -Infinity ? 0 : maxAlt,
+        startTime,
+        endTime,
+        pointCount: points.length,
+      },
+    };
   }
 
   /**
@@ -41,6 +106,8 @@ class AirportDayAnalyzer {
 
     const flights = [];
     let processedCount = 0;
+    let tracesSaved = 0;
+    const savedIcaos = new Set();
     const progressInterval = 50;
 
     for await (const { icao, trace, registration, aircraftType, description } of this.traceReader.streamAllTraces(extractDir)) {
@@ -52,6 +119,7 @@ class AirportDayAnalyzer {
           date,
           processed: processedCount,
           flightsFound: flights.length,
+          tracesSaved,
         });
       }
 
@@ -64,10 +132,46 @@ class AirportDayAnalyzer {
         { registration, aircraftType, description }
       );
 
+      // Track classifications for this ICAO
+      const classifications = [];
+
       // Add all events to flights array
       for (const event of events) {
         if (event) {
           flights.push(event);
+          if (event.classification === 'arrival' || event.classification === 'departure') {
+            classifications.push(event.classification);
+          }
+        }
+      }
+
+      // Save simplified trace for arrivals and departures (once per ICAO)
+      if (classifications.length > 0 && !savedIcaos.has(icao)) {
+        try {
+          const simplifiedTrace = this.simplifyTrace(trace, {
+            registration,
+            aircraftType,
+            description,
+          });
+
+          if (simplifiedTrace) {
+            await this.traceData.save(airport, date, icao, {
+              icao,
+              date,
+              airport,
+              classifications,
+              ...simplifiedTrace,
+            });
+            savedIcaos.add(icao);
+            tracesSaved++;
+          }
+        } catch (error) {
+          logger.warn('Failed to save simplified trace', {
+            airport,
+            date,
+            icao,
+            error: error.message,
+          });
         }
       }
     }
@@ -77,6 +181,7 @@ class AirportDayAnalyzer {
       date,
       processed: processedCount,
       flightsFound: flights.length,
+      tracesSaved,
     });
 
     // Step 4: Create summary statistics
@@ -86,6 +191,7 @@ class AirportDayAnalyzer {
       airport,
       date,
       totalFlights: flights.length,
+      tracesSaved,
       summary,
     });
 
@@ -104,6 +210,7 @@ class AirportDayAnalyzer {
       airportElevation_ft: airportConfig.elevation_ft || 0,
       flights,
       summary,
+      tracesSaved,
     };
   }
 

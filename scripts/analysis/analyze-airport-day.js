@@ -163,6 +163,9 @@ async function main() {
     console.log(`Departures: ${results.summary.departures}`);
     console.log(`Missed Approaches: ${results.summary.missedApproaches || 0}`);
     console.log(`Other: ${results.summary.other}`);
+    if (results.tracesSaved !== undefined) {
+      console.log(`Simplified traces saved: ${results.tracesSaved}`);
+    }
     console.log('='.repeat(60) + '\n');
 
     // Show sample arrival with milestones

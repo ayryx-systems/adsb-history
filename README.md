@@ -140,6 +140,7 @@ AWS_PROFILE=your-profile-name ./scripts/identification/run-on-ec2.sh --date 2025
 Extract traces for identified aircraft into per-airport tar files. This creates much smaller files (~50-200MB) that contain only the traces for aircraft that were on the ground at a specific airport, making downstream processing much more efficient.
 
 **Input**:
+
 - Ground aircraft list from Phase 2 (`s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json`)
 - Raw ADSB data from Phase 1 (`s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`)
 
@@ -181,9 +182,46 @@ Analyze flights to create detailed summaries with distance milestones.
 
 **Input**: Extracted traces from Phase 2.5 (`s3://ayryx-adsb-history/extracted/AIRPORT/YYYY/MM/DD/AIRPORT-YYYY-MM-DD.tar`)
 
-**Output**: `s3://ayryx-adsb-history/flight-summaries/AIRPORT/YYYY/MM/DD.json` (detailed flight data with milestones, classifications, touchdown/takeoff points)
+**Output**:
+
+- `s3://ayryx-adsb-history/flight-summaries/AIRPORT/YYYY/MM/DD.json` (detailed flight data with milestones, classifications, touchdown/takeoff points)
+- **Local cache**: `./cache/traces/AIRPORT/YYYY/MM/DD/ICAO.json` (simplified traces for visualization)
 
 **Important**: Extracted traces **must exist** before running this phase. Run `extract-all-airports.js` first. The script will fail if extracted traces are not found.
+
+**Simplified Traces**: As a side-effect of flight analysis, simplified trace files are automatically created for all arrivals and departures. These contain minimal position data optimized for map visualization. Traces are saved to `./cache/traces/AIRPORT/YYYY/MM/DD/ICAO.json` and can be loaded on-demand by the viewer when users click on scatter plot dots.
+
+**Simplified Trace Format:**
+
+```json
+{
+  "icao": "a1b2c3",
+  "date": "2025-01-09",
+  "airport": "KORD",
+  "classifications": ["arrival"],
+  "points": [
+    [41.9786, -87.9048, 35000, 1704758400, 90],
+    ...
+  ],
+  "metadata": {
+    "registration": "N123AB",
+    "aircraftType": "B738",
+    "description": "Boeing 737-800",
+    "minAlt": 0,
+    "maxAlt": 35000,
+    "startTime": 1704758400,
+    "endTime": 1704762000,
+    "pointCount": 1500
+  }
+}
+```
+
+Each point in the `points` array is `[lat, lon, alt, timestamp, track]`:
+
+- `lat`, `lon`: Latitude/longitude in degrees (float)
+- `alt`: Altitude in feet (int)
+- `timestamp`: Unix epoch seconds (int)
+- `track`: Heading in degrees 0-360 (int, null if unavailable)
 
 #### Local
 
@@ -270,7 +308,8 @@ Run analysis phases (2, 3a, and 3b) for a date range in one command. This script
 2. Phase 3a: Analyze flights (create flight summaries) - **requires extracted traces to exist**
 3. Phase 3b: Generate L1 statistics
 
-**Prerequisites**: 
+**Prerequisites**:
+
 - Raw ADSB data from Phase 1 (must be ingested first)
 - Extracted traces from Phase 2.5 (run `extract-all-airports.js` first)
 
@@ -367,10 +406,18 @@ This directory contains processed, usable files that should be kept:
   - Source: CSV files from S3 or `temp/weather/`
 
 - **ADSB processed files**: `cache/AIRPORT/YYYY/MM/`
+
   - Flight summaries: `DD.json`
   - L1 statistics: `l1-stats-DD.json`
   - Ground aircraft lists: `DD.json`
   - Created by processing pipeline, also synced to S3
+
+- **Simplified traces**: `cache/traces/AIRPORT/YYYY/MM/DD/ICAO.json`
+  - Minimal trace data for map visualization
+  - Created automatically during Phase 3a (flight analysis)
+  - Contains position points: `[lat, lon, alt, timestamp, track]`
+  - Only created for arrivals and departures (not overflights)
+  - Used by viewer to display flight paths on scatter plot click
 
 ### `./temp/` - Temporary Working Files (Can Delete)
 
@@ -425,6 +472,7 @@ The script automatically creates two files with standard names:
 - **HTML visualization**: `trace_<icao>_<date>.html` - Interactive map visualization
 
 Example: For ICAO `a1b2c3` on date `2025-01-06`, the script creates:
+
 - `trace_a1b2c3_2025-01-06.txt`
 - `trace_a1b2c3_2025-01-06.html`
 
