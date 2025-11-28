@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Arrival Time Analysis - Flight Planning</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         * {
             margin: 0;
@@ -126,6 +128,87 @@
             width: 20px;
             height: 20px;
             border-radius: 3px;
+        }
+        .trace-modal {
+            display: none;
+            position: fixed;
+            z-index: 10000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+        }
+        .trace-modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .trace-modal-content {
+            background-color: white;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 1200px;
+            height: 90%;
+            max-height: 800px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .trace-modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .trace-modal-header h3 {
+            margin: 0;
+            color: #333;
+        }
+        .trace-modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .trace-modal-close:hover {
+            color: #000;
+        }
+        .trace-modal-body {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+        #traceMap {
+            width: 100%;
+            height: 100%;
+        }
+        .trace-loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #666;
+        }
+        .trace-error {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #c62828;
+            background: #ffebee;
+            padding: 20px;
+            border-radius: 4px;
         }
     </style>
 </head>
@@ -284,6 +367,20 @@
                 <div class="chart-wrapper">
                     <canvas id="pressureChart"></canvas>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="traceModal" class="trace-modal">
+        <div class="trace-modal-content">
+            <div class="trace-modal-header">
+                <h3 id="traceModalTitle">Flight Trace</h3>
+                <button class="trace-modal-close" onclick="closeTraceModal()">&times;</button>
+            </div>
+            <div class="trace-modal-body">
+                <div id="traceLoading" class="trace-loading" style="display: none;">Loading trace...</div>
+                <div id="traceError" class="trace-error" style="display: none;"></div>
+                <div id="traceMap"></div>
             </div>
         </div>
     </div>
@@ -1257,39 +1354,12 @@
                             if (dataset.category) {
                                 const arrival = categoryData[dataset.category][dataIndex];
                                 if (arrival) {
-                                    const d = arrival.touchdownTime;
-                                    const year = d.getUTCFullYear();
-                                    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-                                    const day = String(d.getUTCDate()).padStart(2, '0');
-                                    const hours = String(d.getUTCHours()).padStart(2, '0');
-                                    const minutes = String(d.getUTCMinutes()).padStart(2, '0');
-                                    const seconds = String(d.getUTCSeconds()).padStart(2, '0');
-                                    const utcTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
-                                    const durationHours = Math.floor(arrival.durationMinutes / 60);
-                                    const durationMins = Math.round(arrival.durationMinutes % 60);
-                                    alert(
-                                        `Touchdown Time: ${utcTime}\n` +
-                                        `Duration from 50nm: ${durationHours}h ${durationMins}m (${arrival.durationMinutes.toFixed(1)} minutes)\n` +
-                                        `Aircraft Type: ${arrival.type}\n` +
-                                        `ICAO: ${arrival.icao}`
-                                    );
+                                    showTraceMap(arrival.icao, arrival.type, arrival.touchdownTime);
                                 }
                             } else if (dataset.goAroundInfo) {
                                 const goAround = dataset.goAroundInfo[dataIndex];
                                 if (goAround) {
-                                    const d = goAround.entryTime;
-                                    const year = d.getUTCFullYear();
-                                    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-                                    const day = String(d.getUTCDate()).padStart(2, '0');
-                                    const hours = String(d.getUTCHours()).padStart(2, '0');
-                                    const minutes = String(d.getUTCMinutes()).padStart(2, '0');
-                                    const seconds = String(d.getUTCSeconds()).padStart(2, '0');
-                                    const entryTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
-                                    alert(
-                                        `Go-Around Entry Time: ${entryTime}\n` +
-                                        `Aircraft Type: ${goAround.type}\n` +
-                                        `ICAO: ${goAround.icao}`
-                                    );
+                                    showTraceMap(goAround.icao, goAround.type, goAround.entryTime);
                                 }
                             }
                         }
@@ -1878,6 +1948,192 @@
         document.getElementById('aircraftTypeSelect').addEventListener('change', () => {
             if (currentData) {
                 renderCharts(currentData);
+            }
+        });
+
+        let traceMap = null;
+        let traceMapLayer = null;
+
+        function getTracePath(icao) {
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            const month = document.getElementById('monthSelect').value;
+            const day = document.getElementById('daySelect').value;
+            return `cache/traces/${airport}/${year}/${month}/${day}/${icao}.json`;
+        }
+
+        function closeTraceModal() {
+            const modal = document.getElementById('traceModal');
+            modal.classList.remove('active');
+            if (traceMap) {
+                traceMap.remove();
+                traceMap = null;
+                traceMapLayer = null;
+            }
+        }
+
+        function showTraceMap(icao, aircraftType, timestamp) {
+            const modal = document.getElementById('traceModal');
+            const loading = document.getElementById('traceLoading');
+            const error = document.getElementById('traceError');
+            const mapContainer = document.getElementById('traceMap');
+            
+            modal.classList.add('active');
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            mapContainer.innerHTML = '';
+            
+            const date = new Date(timestamp);
+            const dateStr = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+            document.getElementById('traceModalTitle').textContent = `Flight Trace: ${icao} (${aircraftType}) - ${dateStr}`;
+            
+            const tracePath = getTracePath(icao);
+            
+            fetch(tracePath)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Trace not found: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(traceData => {
+                    loading.style.display = 'none';
+                    renderTraceMap(traceData);
+                })
+                .catch(err => {
+                    loading.style.display = 'none';
+                    error.style.display = 'block';
+                    error.textContent = `Failed to load trace: ${err.message}`;
+                });
+        }
+
+        function renderTraceMap(traceData) {
+            if (!traceData.points || traceData.points.length === 0) {
+                document.getElementById('traceError').style.display = 'block';
+                document.getElementById('traceError').textContent = 'No trace points available';
+                return;
+            }
+
+            const points = traceData.points;
+            const latlngs = points.map(p => [p[0], p[1]]);
+            
+            traceMap = L.map('traceMap');
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(traceMap);
+            
+            const bounds = L.latLngBounds(latlngs);
+            
+            const minAlt = traceData.metadata.minAlt || 0;
+            const maxAlt = traceData.metadata.maxAlt || 40000;
+            
+            function getAltitudeColor(alt) {
+                if (minAlt === maxAlt) return '#0066cc';
+                const ratio = (alt - minAlt) / (maxAlt - minAlt);
+                const r = Math.round(ratio * 255);
+                const b = Math.round((1 - ratio) * 255);
+                return `rgb(${r}, 0, ${b})`;
+            }
+            
+            const segments = [];
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i + 1];
+                const color = getAltitudeColor(p1[2]);
+                segments.push({
+                    latlngs: [[p1[0], p1[1]], [p2[0], p2[1]]],
+                    color: color,
+                    alt: p1[2],
+                    track: p1[4]
+                });
+            }
+            
+            traceMapLayer = L.layerGroup();
+            
+            const arrowInterval = Math.max(1, Math.floor(segments.length / 50));
+            
+            segments.forEach((segment, index) => {
+                const polyline = L.polyline(segment.latlngs, {
+                    color: segment.color,
+                    weight: 3,
+                    opacity: 0.7
+                });
+                
+                if (index % arrowInterval === 0 && segment.track !== null && segment.track !== undefined) {
+                    const midpoint = [
+                        (segment.latlngs[0][0] + segment.latlngs[1][0]) / 2,
+                        (segment.latlngs[0][1] + segment.latlngs[1][1]) / 2
+                    ];
+                    
+                    const arrowSize = 16;
+                    const svg = `
+                        <svg width="${arrowSize}" height="${arrowSize}" viewBox="0 0 16 16">
+                            <path d="M 8 2 L 12 8 L 10 8 L 10 14 L 6 14 L 6 8 L 4 8 Z" 
+                                  fill="${segment.color}" 
+                                  stroke="white" 
+                                  stroke-width="1.5" 
+                                  stroke-linejoin="round"
+                                  transform="rotate(${segment.track} 8 8)"/>
+                        </svg>
+                    `;
+                    
+                    const arrow = L.marker(midpoint, {
+                        icon: L.divIcon({
+                            className: 'direction-arrow',
+                            html: svg,
+                            iconSize: [arrowSize, arrowSize],
+                            iconAnchor: [arrowSize/2, arrowSize/2]
+                        })
+                    });
+                    traceMapLayer.addLayer(arrow);
+                }
+                
+                polyline.bindPopup(`
+                    <strong>Segment ${index + 1}</strong><br>
+                    Altitude: ${Math.round(segment.alt).toLocaleString()} ft<br>
+                    Track: ${segment.track !== null ? segment.track + '°' : 'N/A'}
+                `);
+                
+                traceMapLayer.addLayer(polyline);
+            });
+            
+            traceMapLayer.addTo(traceMap);
+            
+            const startPoint = points[0];
+            const endPoint = points[points.length - 1];
+            
+            const startMarker = L.marker([startPoint[0], startPoint[1]], {
+                icon: L.divIcon({
+                    className: 'start-marker',
+                    html: '<div style="background: #00ff00; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 0 2px #00ff00;"></div>',
+                    iconSize: [12, 12],
+                    iconAnchor: [6, 6]
+                })
+            }).addTo(traceMap);
+            startMarker.bindPopup(`<strong>Start</strong><br>Altitude: ${Math.round(startPoint[2]).toLocaleString()} ft`);
+            
+            const endMarker = L.marker([endPoint[0], endPoint[1]], {
+                icon: L.divIcon({
+                    className: 'end-marker',
+                    html: '<div style="background: #ff0000; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 0 2px #ff0000;"></div>',
+                    iconSize: [12, 12],
+                    iconAnchor: [6, 6]
+                })
+            }).addTo(traceMap);
+            endMarker.bindPopup(`<strong>End</strong><br>Altitude: ${Math.round(endPoint[2]).toLocaleString()} ft`);
+            
+            traceMap.fitBounds(bounds, { padding: [50, 50] });
+            
+            setTimeout(() => {
+                traceMap.invalidateSize();
+            }, 100);
+        }
+
+        document.getElementById('traceModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeTraceModal();
             }
         });
 
