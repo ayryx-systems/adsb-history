@@ -59,6 +59,16 @@ class GitHubReleaseDownloader {
    * @returns {object|null} Release data or null if not found
    */
   async getReleaseByDate(date) {
+    const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
+    
+    // Workaround: 2024-12-31 is mistakenly placed in the 2025 repository
+    // Use the 2025 repository for this specific date
+    let repoToUse = this.repo;
+    if (dateStr === '2024-12-31') {
+      repoToUse = 'adsblol/globe_history_2025';
+      logger.info('Using 2025 repository for misplaced 2024-12-31 release', { date: dateStr, repo: repoToUse });
+    }
+    
     const standardTag = this.formatReleaseTag(date, false);
     const tmpTag = this.formatReleaseTag(date, true);
     
@@ -66,9 +76,9 @@ class GitHubReleaseDownloader {
     
     // Try to fetch both releases
     for (const tag of [standardTag, tmpTag]) {
-      const url = `https://api.github.com/repos/${this.repo}/releases/tags/${tag}`;
+      const url = `https://api.github.com/repos/${repoToUse}/releases/tags/${tag}`;
       
-      logger.info('Fetching release info', { tag, repo: this.repo, url });
+      logger.info('Fetching release info', { tag, repo: repoToUse, url });
       
       try {
         const response = await axios.get(url, this.axiosConfig);
@@ -80,7 +90,7 @@ class GitHubReleaseDownloader {
         
         logger.info('Release found', { 
           tag, 
-          repo: this.repo,
+          repo: repoToUse,
           assetCount: releaseData.assets.length,
           totalSize: `${(totalSize / 1024 / 1024 / 1024).toFixed(2)} GB`
         });
@@ -88,12 +98,12 @@ class GitHubReleaseDownloader {
         releases.push(releaseData);
       } catch (error) {
         if (error.response?.status === 404) {
-          logger.warn('Release not found', { tag, repo: this.repo, url });
+          logger.warn('Release not found', { tag, repo: repoToUse, url });
           continue;
         }
         logger.error('Failed to fetch release', {
           tag,
-          repo: this.repo,
+          repo: repoToUse,
           url,
           error: error.message,
         });
@@ -106,7 +116,7 @@ class GitHubReleaseDownloader {
       logger.warn('No release found for any tag variant', { 
         standardTag, 
         tmpTag, 
-        repo: this.repo 
+        repo: repoToUse 
       });
       return null;
     }
