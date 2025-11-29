@@ -1,4 +1,4 @@
-import { S3Client, ListObjectsV2Command, CopyObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, ListObjectsV2Command, CopyObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import pLimit from 'p-limit';
 import logger from '../src/utils/logger.js';
 
@@ -32,8 +32,40 @@ async function listAllObjects(prefix) {
   return objects;
 }
 
+async function objectExists(key) {
+  try {
+    await s3Client.send(new HeadObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+    }));
+    return true;
+  } catch (error) {
+    if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 async function renameObject(oldKey, newKey) {
   try {
+    const destinationExists = await objectExists(newKey);
+    if (destinationExists) {
+      logger.warn('Destination file already exists, skipping rename', {
+        oldKey,
+        newKey,
+      });
+      logger.info('Deleting source file with "tmp" suffix', { key: oldKey });
+      
+      await s3Client.send(new DeleteObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: oldKey,
+      }));
+      
+      logger.info('Deleted source file (destination already existed)', { oldKey, newKey });
+      return true;
+    }
+    
     logger.info('Copying object', { from: oldKey, to: newKey });
     
     await s3Client.send(new CopyObjectCommand({
