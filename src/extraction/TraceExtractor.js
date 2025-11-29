@@ -16,6 +16,12 @@ class TraceExtractor {
     }
   }
 
+  getNextDate(date) {
+    const d = new Date(date + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().split('T')[0];
+  }
+
   async extractTracesForAirport(airport, date) {
     logger.info('Starting trace extraction', { airport, date });
 
@@ -37,16 +43,39 @@ class TraceExtractor {
     logger.info('Step 1: Loading ground aircraft list', { airport, date });
     const aircraftIds = await this.groundAircraftData.load(airport, date);
     
-    if (!aircraftIds || aircraftIds.length === 0) {
+    const nextDate = this.getNextDate(date);
+    let nextDayAircraftIds = [];
+    if (nextDate) {
+      try {
+        nextDayAircraftIds = await this.groundAircraftData.load(airport, nextDate) || [];
+        logger.info('Loaded next day ground aircraft list', {
+          airport,
+          nextDate,
+          count: nextDayAircraftIds.length,
+        });
+      } catch (error) {
+        logger.warn('Could not load next day ground aircraft (may not exist yet)', {
+          airport,
+          nextDate,
+          error: error.message,
+        });
+      }
+    }
+    
+    const allAircraftIds = [...new Set([...(aircraftIds || []), ...nextDayAircraftIds])];
+    
+    logger.info('Merged ground aircraft lists', {
+      airport,
+      date,
+      currentDayCount: (aircraftIds || []).length,
+      nextDayCount: nextDayAircraftIds.length,
+      totalCount: allAircraftIds.length,
+    });
+    
+    if (allAircraftIds.length === 0) {
       logger.warn('No ground aircraft found, nothing to extract', { airport, date });
       return null;
     }
-
-    logger.info('Loaded ground aircraft list', {
-      airport,
-      date,
-      count: aircraftIds.length,
-    });
 
     logger.info('Step 2: Downloading raw tar from S3', { date });
     const rawTarPath = await this.traceReader.downloadTarFromS3(date);
@@ -57,7 +86,7 @@ class TraceExtractor {
     logger.info('Step 4: Creating extracted tar with filtered traces', {
       airport,
       date,
-      aircraftCount: aircraftIds.length,
+      aircraftCount: allAircraftIds.length,
     });
 
     const tracesDir = path.join(rawExtractDir, 'traces');
@@ -74,7 +103,7 @@ class TraceExtractor {
     let extractedCount = 0;
     const icaosBySubdir = new Map();
     
-    for (const icao of aircraftIds) {
+    for (const icao of allAircraftIds) {
       const hexSubdir = icao.toLowerCase().slice(-2);
       if (!icaosBySubdir.has(hexSubdir)) {
         icaosBySubdir.set(hexSubdir, []);
@@ -110,7 +139,7 @@ class TraceExtractor {
       airport,
       date,
       extractedCount,
-      expectedCount: aircraftIds.length,
+      expectedCount: allAircraftIds.length,
     });
 
     logger.info('Step 5: Creating tar archive', { airport, date });
