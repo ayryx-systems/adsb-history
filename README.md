@@ -144,7 +144,7 @@ Extract traces for identified aircraft into per-airport tar files. This creates 
 - Ground aircraft list from Phase 2 (`s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json`)
 - Raw ADSB data from Phase 1 (`s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`)
 
-**Output**: `s3://ayryx-adsb-history/extracted/AIRPORT/YYYY/MM/DD/AIRPORT-YYYY-MM-DD.tar` (tar file containing only traces for identified aircraft)
+**Output**: `s3://ayryx-adsb-history/extracted/AIRPORT/YYYY/MM/AIRPORT-YYYY-MM-DD.tar` (tar file containing only traces for identified aircraft)
 
 **Important**: This phase **must be completed** before Phase 3a. Downstream scripts will fail if extracted traces don't exist. Run extraction once for all dates and airports, then never download raw tar files again.
 
@@ -180,7 +180,7 @@ node scripts/extraction/extract-airport-traces.js --airport KORD --start-date 20
 
 Analyze flights to create detailed summaries with distance milestones.
 
-**Input**: Extracted traces from Phase 2.5 (`s3://ayryx-adsb-history/extracted/AIRPORT/YYYY/MM/DD/AIRPORT-YYYY-MM-DD.tar`)
+**Input**: Extracted traces from Phase 2.5 (`s3://ayryx-adsb-history/extracted/AIRPORT/YYYY/MM/AIRPORT-YYYY-MM-DD.tar`)
 
 **Output**:
 

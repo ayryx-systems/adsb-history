@@ -23,7 +23,7 @@ class ExtractedTraceData {
 
   getS3Key(airport, date) {
     const [year, month, day] = date.split('-');
-    return `extracted/${airport}/${year}/${month}/${day}/${airport}-${year}-${month}-${day}.tar`;
+    return `extracted/${airport}/${year}/${month}/${airport}-${year}-${month}-${day}.tar`;
   }
 
   async save(airport, date, tarPath) {
