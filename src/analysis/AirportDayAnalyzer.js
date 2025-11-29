@@ -80,6 +80,44 @@ class AirportDayAnalyzer {
   }
 
   /**
+   * Get previous date string
+   * @param {string} date - Date in YYYY-MM-DD format
+   * @returns {string|null} Previous date or null if invalid
+   */
+  getPreviousDate(date) {
+    try {
+      const d = new Date(date + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() - 1);
+      return d.toISOString().split('T')[0];
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Merge two traces chronologically
+   * @param {Array} trace1 - First trace array
+   * @param {Array} trace2 - Second trace array
+   * @returns {Array} Merged trace sorted by timestamp
+   */
+  mergeTraces(trace1, trace2) {
+    if (!trace1 || !Array.isArray(trace1) || trace1.length === 0) {
+      return trace2 || [];
+    }
+    if (!trace2 || !Array.isArray(trace2) || trace2.length === 0) {
+      return trace1 || [];
+    }
+
+    const merged = [...trace1, ...trace2];
+    merged.sort((a, b) => {
+      const ts1 = Array.isArray(a) ? a[0] : 0;
+      const ts2 = Array.isArray(b) ? b[0] : 0;
+      return ts1 - ts2;
+    });
+    return merged;
+  }
+
+  /**
    * Analyze all flights for an airport on a specific date
    * @param {string} airport - Airport ICAO code
    * @param {string} date - Date in YYYY-MM-DD format
@@ -97,6 +135,28 @@ class AirportDayAnalyzer {
         `Extracted traces not found for ${airport} on ${date}. ` +
         `Please run extraction first: node scripts/extraction/extract-all-airports.js --start-date ${date} --end-date ${date}`
       );
+    }
+
+    const previousDate = this.getPreviousDate(date);
+    let previousExtractDir = null;
+    if (previousDate) {
+      try {
+        previousExtractDir = await this.traceReader.downloadExtractedTraces(airport, previousDate);
+        if (previousExtractDir) {
+          logger.info('Downloaded previous day traces for milestone lookup', {
+            airport,
+            date,
+            previousDate,
+          });
+        }
+      } catch (error) {
+        logger.warn('Could not load previous day traces (may not exist)', {
+          airport,
+          date,
+          previousDate,
+          error: error.message,
+        });
+      }
     }
 
     logger.info('Step 2: Analyzing flights', {
@@ -124,13 +184,99 @@ class AirportDayAnalyzer {
       }
 
       // Analyze this flight (may return multiple events)
-      const events = this.flightAnalyzer.analyzeFlight(
+      let events = this.flightAnalyzer.analyzeFlight(
         icao,
         trace,
         airportConfig,
         date,
         { registration, aircraftType, description }
       );
+
+      // Check if any arrivals are missing milestones and look in previous day if available
+      if (previousExtractDir) {
+        const earlyDayThreshold = 2 * 60 * 60; // 2 hours after midnight UTC
+        const dateObj = new Date(date + 'T00:00:00Z');
+        const dayStartTimestamp = Math.floor(dateObj.getTime() / 1000);
+
+        for (const event of events) {
+          if (event && event.classification === 'arrival' && event.touchdown) {
+            const touchdownTime = event.touchdown.timestamp;
+            const timeSinceMidnight = touchdownTime - dayStartTimestamp;
+            
+            // Check if arrival is early in the day and missing milestones
+            const missingMilestones = !event.milestones.timeFrom100nm || 
+                                     !event.milestones.timeFrom50nm || 
+                                     !event.milestones.timeFrom20nm;
+            
+            if (timeSinceMidnight < earlyDayThreshold && missingMilestones) {
+              logger.info('Arrival missing milestones, checking previous day', {
+                airport,
+                date,
+                icao,
+                touchdownTime: new Date(touchdownTime * 1000).toISOString(),
+                missingMilestones: {
+                  timeFrom100nm: !event.milestones.timeFrom100nm,
+                  timeFrom50nm: !event.milestones.timeFrom50nm,
+                  timeFrom20nm: !event.milestones.timeFrom20nm,
+                },
+              });
+
+              // Look up trace in previous day
+              const previousTrace = await this.traceReader.getTraceByICAO(previousExtractDir, icao);
+              
+              if (previousTrace && previousTrace.trace && Array.isArray(previousTrace.trace)) {
+                // Merge traces chronologically
+                const mergedTrace = this.mergeTraces(previousTrace.trace, trace);
+                
+                // Re-analyze with merged trace
+                const mergedEvents = this.flightAnalyzer.analyzeFlight(
+                  icao,
+                  mergedTrace,
+                  airportConfig,
+                  date,
+                  { 
+                    registration: previousTrace.registration || registration,
+                    aircraftType: previousTrace.aircraftType || aircraftType,
+                    description: previousTrace.description || description,
+                  }
+                );
+
+                // Find the arrival event in merged results
+                const mergedArrival = mergedEvents.find(e => 
+                  e && 
+                  e.classification === 'arrival' && 
+                  e.touchdown &&
+                  Math.abs(e.touchdown.timestamp - touchdownTime) < 300 // Within 5 minutes
+                );
+
+                if (mergedArrival && mergedArrival.milestones) {
+                  // Check if merged trace has better milestone data
+                  const hasBetterMilestones = 
+                    (!event.milestones.timeFrom100nm && mergedArrival.milestones.timeFrom100nm) ||
+                    (!event.milestones.timeFrom50nm && mergedArrival.milestones.timeFrom50nm) ||
+                    (!event.milestones.timeFrom20nm && mergedArrival.milestones.timeFrom20nm);
+
+                  if (hasBetterMilestones) {
+                    logger.info('Found better milestones from previous day', {
+                      airport,
+                      date,
+                      icao,
+                      originalMilestones: Object.keys(event.milestones).length,
+                      mergedMilestones: Object.keys(mergedArrival.milestones).length,
+                    });
+
+                    // Replace the event with the merged one
+                    const eventIndex = events.indexOf(event);
+                    if (eventIndex >= 0) {
+                      events[eventIndex] = mergedArrival;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
 
       // Track classifications for this ICAO
       const classifications = [];
@@ -202,6 +348,16 @@ class AirportDayAnalyzer {
     if (fs.existsSync(extractedExtractDir)) {
       fs.rmSync(extractedExtractDir, { recursive: true, force: true });
       logger.info('Cleaned up extracted traces directory', { airport, date, path: extractedExtractDir });
+    }
+
+    // Clean up previous day's extracted traces directory if we used it
+    if (previousExtractDir && previousDate) {
+      const previousExtractedTarPath = path.join(this.traceReader.tempDir, 'extracted', airport, previousDate, `${airport}-${previousDate}.tar`);
+      const previousExtractedExtractDir = path.join(path.dirname(previousExtractedTarPath), 'extracted');
+      if (fs.existsSync(previousExtractedExtractDir)) {
+        fs.rmSync(previousExtractedExtractDir, { recursive: true, force: true });
+        logger.info('Cleaned up previous day extracted traces directory', { airport, previousDate, path: previousExtractedExtractDir });
+      }
     }
 
     return {

@@ -352,6 +352,46 @@ class TraceReader {
   }
 
   /**
+   * Get a specific trace by ICAO from an extraction directory
+   * @param {string} extractDir - Directory containing extracted traces
+   * @param {string} icao - ICAO code to look up
+   * @returns {object|null} Parsed trace data or null if not found
+   */
+  async getTraceByICAO(extractDir, icao) {
+    const tracesDir = path.join(extractDir, 'traces');
+    
+    if (!fs.existsSync(tracesDir)) {
+      return null;
+    }
+
+    const icaoLower = icao.toLowerCase();
+    const hexSubdir = icaoLower.slice(-2);
+    const filename = `trace_full_${icaoLower}.json`;
+    const filePath = path.join(tracesDir, hexSubdir, filename);
+    
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+
+    return await this.readTraceFile(filePath);
+  }
+
+  /**
+   * Get previous date string
+   * @param {string} date - Date in YYYY-MM-DD format
+   * @returns {string|null} Previous date or null if invalid
+   */
+  getPreviousDate(date) {
+    try {
+      const d = new Date(date + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() - 1);
+      return d.toISOString().split('T')[0];
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
    * Clean up extracted data for a date (keeps tar file for reuse)
    */
   cleanup(date) {
