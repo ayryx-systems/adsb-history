@@ -95,12 +95,14 @@ class AirportDayAnalyzer {
   }
 
   /**
-   * Merge two traces chronologically
-   * @param {Array} trace1 - First trace array
-   * @param {Array} trace2 - Second trace array
-   * @returns {Array} Merged trace sorted by timestamp
+   * Merge two traces chronologically, normalizing timestamps
+   * @param {Array} trace1 - First trace array (from previous day)
+   * @param {Array} trace2 - Second trace array (from current day)
+   * @param {string} previousDate - Previous date in YYYY-MM-DD format
+   * @param {string} currentDate - Current date in YYYY-MM-DD format
+   * @returns {Array} Merged trace sorted by timestamp with normalized timestamps
    */
-  mergeTraces(trace1, trace2) {
+  mergeTraces(trace1, trace2, previousDate, currentDate) {
     if (!trace1 || !Array.isArray(trace1) || trace1.length === 0) {
       return trace2 || [];
     }
@@ -108,13 +110,144 @@ class AirportDayAnalyzer {
       return trace1 || [];
     }
 
-    const merged = [...trace1, ...trace2];
+    // Calculate base timestamps for normalization
+    const previousBaseTimestamp = previousDate ? Math.floor(new Date(previousDate + 'T00:00:00Z').getTime() / 1000) : null;
+    const currentBaseTimestamp = currentDate ? Math.floor(new Date(currentDate + 'T00:00:00Z').getTime() / 1000) : null;
+
+    // Normalize timestamps: if timestamp is relative (< 86400 * 2), add base timestamp
+    const normalizeTrace = (trace, baseTimestamp) => {
+      if (!baseTimestamp) return trace;
+      return trace.map(pos => {
+        if (!Array.isArray(pos) || pos.length < 6) return pos;
+        const timestamp = pos[0];
+        // If timestamp is relative (seconds since midnight), normalize it
+        if (timestamp >= 0 && timestamp < 86400 * 2) {
+          const normalized = [...pos];
+          normalized[0] = baseTimestamp + timestamp;
+          return normalized;
+        }
+        return pos; // Already absolute
+      });
+    };
+
+    const normalizedTrace1 = normalizeTrace(trace1, previousBaseTimestamp);
+    const normalizedTrace2 = normalizeTrace(trace2, currentBaseTimestamp);
+
+    const merged = [...normalizedTrace1, ...normalizedTrace2];
     merged.sort((a, b) => {
       const ts1 = Array.isArray(a) ? a[0] : 0;
       const ts2 = Array.isArray(b) ? b[0] : 0;
       return ts1 - ts2;
     });
     return merged;
+  }
+
+  /**
+   * Recalculate milestones from merged trace using original touchdown as reference
+   * @param {Array} mergedTrace - Merged trace array
+   * @param {object} originalTouchdown - Original touchdown position with timestamp, lat, lon
+   * @param {object} airportConfig - Airport configuration
+   * @returns {object} Milestone times object
+   */
+  recalculateMilestonesFromMergedTrace(mergedTrace, originalTouchdown, airportConfig) {
+    // Import parsePosition and calculateDistance from FlightAnalyzer's scope
+    // For now, we'll use the flightAnalyzer to parse positions
+    const airportLat = airportConfig.coordinates.lat;
+    const airportLon = airportConfig.coordinates.lon;
+
+    // Parse positions from merged trace (timestamps should already be normalized to absolute)
+    const positions = mergedTrace
+      .map(pos => {
+        if (!Array.isArray(pos) || pos.length < 6) return null;
+        let timestamp = pos[0];
+        // If timestamp is still relative (shouldn't happen after mergeTraces normalization, but check anyway)
+        if (timestamp >= 0 && timestamp < 86400 * 2) {
+          // This shouldn't happen if mergeTraces worked correctly, but handle it
+          logger.warn('Found relative timestamp in merged trace, this should not happen', { timestamp });
+          return null; // Skip relative timestamps that weren't normalized
+        }
+        const lat = pos[1];
+        const lon = pos[2];
+        let alt_baro = pos[3];
+        if (alt_baro === "ground" || alt_baro === null) {
+          alt_baro = 0;
+        } else if (typeof alt_baro === 'string') {
+          alt_baro = parseFloat(alt_baro);
+          if (isNaN(alt_baro)) alt_baro = null;
+        }
+        if (lat === null || lon === null || alt_baro === null) return null;
+        return { timestamp, lat, lon, alt_baro };
+      })
+      .filter(pos => pos !== null);
+
+    if (positions.length < 5) {
+      return {};
+    }
+
+    // Calculate distance from airport for each position
+    const positionsWithDistance = positions.map(pos => {
+      // Calculate distance using haversine formula
+      const R = 3440.065; // Earth radius in nautical miles
+      const dLat = (pos.lat - airportLat) * Math.PI / 180;
+      const dLon = (pos.lon - airportLon) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(airportLat * Math.PI / 180) * Math.cos(pos.lat * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const distance = R * c;
+      
+      return { ...pos, distance };
+    });
+
+    // Sort by timestamp
+    positionsWithDistance.sort((a, b) => a.timestamp - b.timestamp);
+
+    // Find the touchdown position in merged trace (match by timestamp within 60 seconds and proximity)
+    const touchdownTolerance = 60; // seconds
+    const touchdownPos = positionsWithDistance.find(p => 
+      Math.abs(p.timestamp - originalTouchdown.timestamp) < touchdownTolerance &&
+      Math.abs(p.lat - originalTouchdown.lat) < 0.01 &&
+      Math.abs(p.lon - originalTouchdown.lon) < 0.01
+    );
+
+    if (!touchdownPos) {
+      return {};
+    }
+
+    // Find touchdown index
+    const touchdownIndex = positionsWithDistance.findIndex(p => 
+      p.timestamp === touchdownPos.timestamp &&
+      p.lat === touchdownPos.lat &&
+      p.lon === touchdownPos.lon
+    );
+
+    if (touchdownIndex < 0) {
+      return {};
+    }
+
+    // Calculate milestones working backwards from touchdown
+    const milestones = [100, 50, 20];
+    const milestoneTimes = {};
+
+    for (const milestone of milestones) {
+      let milestonePos = null;
+      for (let i = touchdownIndex - 1; i >= 0; i--) {
+        const pos = positionsWithDistance[i];
+        if (pos.distance >= milestone) {
+          milestonePos = pos;
+          break;
+        }
+      }
+      
+      if (milestonePos) {
+        const timeToTouchdown = originalTouchdown.timestamp - milestonePos.timestamp;
+        if (timeToTouchdown > 0 && timeToTouchdown < 24 * 60 * 60) { // Reasonable range: 0 to 24 hours
+          milestoneTimes[`timeFrom${milestone}nm`] = timeToTouchdown;
+        }
+      }
+    }
+
+    return milestoneTimes;
   }
 
   /**
@@ -225,51 +358,63 @@ class AirportDayAnalyzer {
               const previousTrace = await this.traceReader.getTraceByICAO(previousExtractDir, icao);
               
               if (previousTrace && previousTrace.trace && Array.isArray(previousTrace.trace)) {
-                // Merge traces chronologically
-                const mergedTrace = this.mergeTraces(previousTrace.trace, trace);
+                // Merge traces chronologically with timestamp normalization
+                const mergedTrace = this.mergeTraces(previousTrace.trace, trace, previousDate, date);
                 
-                // Re-analyze with merged trace
-                const mergedEvents = this.flightAnalyzer.analyzeFlight(
-                  icao,
+                // Recalculate milestones from merged trace using original touchdown as reference
+                const recalculatedMilestones = this.recalculateMilestonesFromMergedTrace(
                   mergedTrace,
-                  airportConfig,
-                  date,
-                  { 
-                    registration: previousTrace.registration || registration,
-                    aircraftType: previousTrace.aircraftType || aircraftType,
-                    description: previousTrace.description || description,
-                  }
+                  event.touchdown,
+                  airportConfig
                 );
 
-                // Find the arrival event in merged results
-                const mergedArrival = mergedEvents.find(e => 
-                  e && 
-                  e.classification === 'arrival' && 
-                  e.touchdown &&
-                  Math.abs(e.touchdown.timestamp - touchdownTime) < 300 // Within 5 minutes
-                );
+                // Check if we got better milestone data
+                const hasBetterMilestones = 
+                  (!event.milestones.timeFrom100nm && recalculatedMilestones.timeFrom100nm) ||
+                  (!event.milestones.timeFrom50nm && recalculatedMilestones.timeFrom50nm) ||
+                  (!event.milestones.timeFrom20nm && recalculatedMilestones.timeFrom20nm);
 
-                if (mergedArrival && mergedArrival.milestones) {
-                  // Check if merged trace has better milestone data
-                  const hasBetterMilestones = 
-                    (!event.milestones.timeFrom100nm && mergedArrival.milestones.timeFrom100nm) ||
-                    (!event.milestones.timeFrom50nm && mergedArrival.milestones.timeFrom50nm) ||
-                    (!event.milestones.timeFrom20nm && mergedArrival.milestones.timeFrom20nm);
+                if (hasBetterMilestones) {
+                  // Validate milestone values are reasonable
+                  const milestonesValid = 
+                    (!recalculatedMilestones.timeFrom100nm || recalculatedMilestones.timeFrom100nm > 0) &&
+                    (!recalculatedMilestones.timeFrom50nm || recalculatedMilestones.timeFrom50nm > 0) &&
+                    (!recalculatedMilestones.timeFrom20nm || recalculatedMilestones.timeFrom20nm > 0) &&
+                    (!recalculatedMilestones.timeFrom100nm || !recalculatedMilestones.timeFrom50nm || 
+                     recalculatedMilestones.timeFrom100nm > recalculatedMilestones.timeFrom50nm) &&
+                    (!recalculatedMilestones.timeFrom50nm || !recalculatedMilestones.timeFrom20nm || 
+                     recalculatedMilestones.timeFrom50nm > recalculatedMilestones.timeFrom20nm);
 
-                  if (hasBetterMilestones) {
+                  if (milestonesValid) {
                     logger.info('Found better milestones from previous day', {
                       airport,
                       date,
                       icao,
                       originalMilestones: Object.keys(event.milestones).length,
-                      mergedMilestones: Object.keys(mergedArrival.milestones).length,
+                      recalculatedMilestones: Object.keys(recalculatedMilestones).length,
+                      milestones: recalculatedMilestones,
                     });
 
-                    // Replace the event with the merged one
+                    // Update the event with recalculated milestones
+                    const improvedEvent = {
+                      ...event,
+                      milestones: {
+                        ...event.milestones,
+                        ...recalculatedMilestones, // Override with recalculated milestones
+                      },
+                    };
+                    
                     const eventIndex = events.indexOf(event);
                     if (eventIndex >= 0) {
-                      events[eventIndex] = mergedArrival;
+                      events[eventIndex] = improvedEvent;
                     }
+                  } else {
+                    logger.warn('Recalculated milestones failed validation, skipping', {
+                      airport,
+                      date,
+                      icao,
+                      milestones: recalculatedMilestones,
+                    });
                   }
                 }
               }
