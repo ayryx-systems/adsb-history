@@ -54,7 +54,7 @@ class GitHubReleaseDownloader {
 
   /**
    * Get release information by date
-   * Tries standard format first, then falls back to "tmp" suffix variant
+   * Checks both standard and "tmp" suffix variants, preferring the one with larger total asset size
    * @param {Date|string} date - Date to fetch
    * @returns {object|null} Release data or null if not found
    */
@@ -62,18 +62,30 @@ class GitHubReleaseDownloader {
     const standardTag = this.formatReleaseTag(date, false);
     const tmpTag = this.formatReleaseTag(date, true);
     
-    // Try standard format first
-    const tags = [standardTag, tmpTag];
+    const releases = [];
     
-    for (const tag of tags) {
+    // Try to fetch both releases
+    for (const tag of [standardTag, tmpTag]) {
       const url = `https://api.github.com/repos/${this.repo}/releases/tags/${tag}`;
       
       logger.info('Fetching release info', { tag, repo: this.repo, url });
       
       try {
         const response = await axios.get(url, this.axiosConfig);
-        logger.info('Release found', { tag, repo: this.repo });
-        return { ...response.data, _tag: tag };
+        const releaseData = { ...response.data, _tag: tag };
+        
+        // Calculate total asset size
+        const totalSize = releaseData.assets.reduce((sum, asset) => sum + asset.size, 0);
+        releaseData._totalSize = totalSize;
+        
+        logger.info('Release found', { 
+          tag, 
+          repo: this.repo,
+          assetCount: releaseData.assets.length,
+          totalSize: `${(totalSize / 1024 / 1024 / 1024).toFixed(2)} GB`
+        });
+        
+        releases.push(releaseData);
       } catch (error) {
         if (error.response?.status === 404) {
           logger.warn('Release not found', { tag, repo: this.repo, url });
@@ -89,12 +101,41 @@ class GitHubReleaseDownloader {
       }
     }
     
-    logger.warn('No release found for any tag variant', { 
-      standardTag, 
-      tmpTag, 
-      repo: this.repo 
+    // If no releases found
+    if (releases.length === 0) {
+      logger.warn('No release found for any tag variant', { 
+        standardTag, 
+        tmpTag, 
+        repo: this.repo 
+      });
+      return null;
+    }
+    
+    // If both exist, prefer the one with larger total size
+    if (releases.length === 2) {
+      const [standard, tmp] = releases;
+      const larger = standard._totalSize > tmp._totalSize ? standard : tmp;
+      const smaller = larger === standard ? tmp : standard;
+      
+      logger.info('Both release variants found, selecting larger', {
+        standardTag: standard._tag,
+        standardSize: `${(standard._totalSize / 1024 / 1024 / 1024).toFixed(2)} GB`,
+        tmpTag: tmp._tag,
+        tmpSize: `${(tmp._totalSize / 1024 / 1024 / 1024).toFixed(2)} GB`,
+        selected: larger._tag,
+        selectedSize: `${(larger._totalSize / 1024 / 1024 / 1024).toFixed(2)} GB`,
+      });
+      
+      return larger;
+    }
+    
+    // Only one release found
+    logger.info('Single release variant found', {
+      tag: releases[0]._tag,
+      totalSize: `${(releases[0]._totalSize / 1024 / 1024 / 1024).toFixed(2)} GB`
     });
-    return null;
+    
+    return releases[0];
   }
 
   /**
