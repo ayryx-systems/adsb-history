@@ -22,7 +22,16 @@ class S3Uploader {
    * @returns {object} Upload result
    */
   async uploadTarFile(tarPath, date) {
-    const filename = path.basename(tarPath);
+    const originalFilename = path.basename(tarPath);
+    const filename = originalFilename.replace(/tmp(?=\.tar$)/, '');
+    
+    if (originalFilename !== filename) {
+      logger.info('Normalizing filename by removing "tmp" suffix', {
+        original: originalFilename,
+        normalized: filename,
+      });
+    }
+    
     const s3Key = this.s3Manager.getRawDataKey(date, filename);
 
     // Check if already uploaded
