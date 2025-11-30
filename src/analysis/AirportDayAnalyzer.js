@@ -325,6 +325,62 @@ class AirportDayAnalyzer {
         { registration, aircraftType, description }
       );
 
+      // Check previous day's trace for arrivals that land early on current day
+      // This handles cases where the approach happened on previous day but landing is on current day
+      // Always check, not just when events.length === 0, to catch arrivals that might not be detected
+      // in the current day's short trace
+      if (previousExtractDir) {
+        const earlyDayThreshold = 2 * 60 * 60; // 2 hours after midnight UTC
+        const dateObj = new Date(date + 'T00:00:00Z');
+        const dayStartTimestamp = Math.floor(dateObj.getTime() / 1000);
+        
+        // Check if we already have an arrival that lands early on current day
+        const hasEarlyArrival = events.some(event => 
+          event && event.classification === 'arrival' && event.touchdown &&
+          event.touchdown.timestamp >= dayStartTimestamp &&
+          event.touchdown.timestamp < dayStartTimestamp + earlyDayThreshold
+        );
+        
+        // If we don't have an early arrival, check previous day's trace
+        if (!hasEarlyArrival) {
+          // Look up trace in previous day
+          const previousTrace = await this.traceReader.getTraceByICAO(previousExtractDir, icao);
+          
+          if (previousTrace && previousTrace.trace && Array.isArray(previousTrace.trace)) {
+            // Merge traces chronologically with timestamp normalization
+            const mergedTrace = this.mergeTraces(previousTrace.trace, trace, previousDate, date);
+            
+            // Re-analyze merged trace to find arrivals that land on current day
+            const mergedEvents = this.flightAnalyzer.analyzeFlight(
+              icao,
+              mergedTrace,
+              airportConfig,
+              null, // Pass null to preserve absolute timestamps
+              { registration, aircraftType, description }
+            );
+            
+            // Filter merged events to only include arrivals that land early on current day
+            for (const event of mergedEvents) {
+              if (event && event.classification === 'arrival' && event.touchdown) {
+                const touchdownTime = event.touchdown.timestamp;
+                const timeSinceMidnight = touchdownTime - dayStartTimestamp;
+                
+                if (timeSinceMidnight >= 0 && timeSinceMidnight < earlyDayThreshold) {
+                  // This arrival lands early on current day, include it
+                  events.push(event);
+                  logger.info('Found arrival from previous day trace that lands on current day', {
+                    airport,
+                    date,
+                    icao,
+                    touchdownTime: new Date(touchdownTime * 1000).toISOString(),
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
       // Check if any arrivals are missing milestones and look in previous day if available
       if (previousExtractDir) {
         const earlyDayThreshold = 2 * 60 * 60; // 2 hours after midnight UTC
@@ -429,6 +485,24 @@ class AirportDayAnalyzer {
       // Add all events to flights array
       for (const event of events) {
         if (event) {
+          // Filter arrivals/departures to only include those that occur on the target date
+          if (event.classification === 'arrival' && event.touchdown) {
+            const touchdownDate = new Date(event.touchdown.timestamp * 1000);
+            const eventDateStr = touchdownDate.toISOString().split('T')[0];
+            if (eventDateStr !== date) {
+              // This arrival lands on a different day, skip it
+              continue;
+            }
+          }
+          if (event.classification === 'departure' && event.takeoff) {
+            const takeoffDate = new Date(event.takeoff.timestamp * 1000);
+            const eventDateStr = takeoffDate.toISOString().split('T')[0];
+            if (eventDateStr !== date) {
+              // This departure occurs on a different day, skip it
+              continue;
+            }
+          }
+          
           flights.push(event);
           if (event.classification === 'arrival' || event.classification === 'departure') {
             classifications.push(event.classification);
