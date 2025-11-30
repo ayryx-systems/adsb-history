@@ -2203,6 +2203,13 @@
         let traceMap = null;
         let traceMapLayer = null;
 
+        const airportCoordinates = {
+            KORD: [41.9786, -87.9048],
+            KLGA: [40.777242, -73.872606],
+            KLAX: [33.9425, -118.4081],
+            KSFO: [37.6213, -122.3790]
+        };
+
         function getTracePath(icao) {
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
@@ -2396,7 +2403,13 @@
             }).addTo(traceMap);
             endMarker.bindPopup(`<strong>End</strong><br>Time: ${endTimestamp}<br>Altitude: ${Math.round(endPoint[2]).toLocaleString()} ft`);
             
-            traceMap.fitBounds(bounds, { padding: [50, 50] });
+            const airport = document.getElementById('airportSelect').value;
+            const airportCoords = airportCoordinates[airport];
+            if (airportCoords) {
+                traceMap.setView(airportCoords, 10);
+            } else {
+                traceMap.fitBounds(bounds, { padding: [50, 50] });
+            }
             
             setTimeout(() => {
                 traceMap.invalidateSize();
