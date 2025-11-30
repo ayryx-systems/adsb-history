@@ -234,6 +234,9 @@ async function processDateForAirport(airport, date, extractor, dataStore, ground
     if (tarPath) {
       safelyRemoveLocalFile(tarPath, airport.icao, date);
     }
+    if (global.gc) {
+      global.gc();
+    }
   }
 }
 
@@ -335,6 +338,10 @@ async function main() {
           });
           console.log(`✗ Error: ${error.message}`);
           results.push({ date, airport: airport.icao, error: error.message });
+        }
+
+        if (taskNum % 10 === 0 && global.gc) {
+          global.gc();
         }
       }
     }

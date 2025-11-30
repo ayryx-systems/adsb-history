@@ -237,6 +237,10 @@ async function main() {
         console.log(`  ✗ ${date}: Error - ${error.message}`);
         results.push({ date, error: error.message });
       }
+
+      if ((i + 1) % 10 === 0 && global.gc) {
+        global.gc();
+      }
     }
 
     const duration = Date.now() - startTime;

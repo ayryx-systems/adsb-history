@@ -396,7 +396,7 @@ echo "=========================================="
 echo "Starting extraction: $START_DATE to $END_DATE"
 echo "=========================================="
 
-node scripts/extraction/extract-all-airports.js --start-date "$START_DATE" --end-date "$END_DATE" $AIRPORTS_ARG $FORCE_ARG
+node --expose-gc --max-old-space-size=4096 scripts/extraction/extract-all-airports.js --start-date "$START_DATE" --end-date "$END_DATE" $AIRPORTS_ARG $FORCE_ARG
 
 EXIT_CODE=\$?
 
