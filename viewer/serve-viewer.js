@@ -16,7 +16,7 @@ const mimeTypes = {
 };
 
 const server = http.createServer((req, res) => {
-  let filePath = req.url === '/' ? '/l1-stats-viewer.html' : req.url;
+  let filePath = req.url === '/' ? '/stats-viewer.html' : req.url;
   
   if (filePath.startsWith('/cache/')) {
     filePath = path.join(__dirname, '..', filePath);

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arrival Time Analysis - Flight Planning</title>
+    <title>Airport Statistics Viewer - Flight Planning</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -328,7 +328,7 @@
 <body>
     <div class="header-bar">
         <div class="header-content">
-            <h1>Arrival Time Analysis - Flight Planning</h1>
+            <h1>Airport Statistics Viewer - Flight Planning</h1>
             <div class="controls">
                 <div class="control-group">
                 <label>Airport</label>
@@ -421,6 +421,13 @@
             </div>
 
             <div class="chart-container">
+                <h3>Aircraft on Approach (within 50nm landing in next 2 hours)</h3>
+                <div class="chart-wrapper">
+                    <canvas id="congestionChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-container">
                 <h3>Time from 50nm by Time Slot</h3>
                 <div class="chart-wrapper">
                     <canvas id="time50nmChart"></canvas>
@@ -497,13 +504,6 @@
                 <h3>Altimeter Pressure by Time Slot</h3>
                 <div class="chart-wrapper">
                     <canvas id="pressureChart"></canvas>
-                </div>
-            </div>
-
-            <div class="chart-container">
-                <h3>Congestion (Aircraft within 50nm landing in next 2 hours)</h3>
-                <div class="chart-wrapper">
-                    <canvas id="congestionChart"></canvas>
                 </div>
             </div>
         </div>
@@ -1066,12 +1066,13 @@
             const selectedCategories = getSelectedCategories();
             const selectedTypes = getAircraftTypesForCategories(selectedCategories);
             renderArrivalCountChart(data, selectedTypes);
-            renderTime50nmChart(data, selectedTypes);
-            renderArrivalsScatterChart(data, selectedTypes);
             
             if (currentCongestionData) {
                 renderCongestionChart(data, currentCongestionData);
             }
+            
+            renderTime50nmChart(data, selectedTypes);
+            renderArrivalsScatterChart(data, selectedTypes);
             
             if (currentWeatherData) {
                 renderVisibilityChart(data, currentWeatherData);
@@ -2126,7 +2127,7 @@
                 data: {
                     labels: slots,
                     datasets: [{
-                        label: 'Aircraft Count',
+                        label: 'Aircraft on Approach',
                         data: congestion,
                         borderColor: 'rgba(255, 99, 132, 1)',
                         backgroundColor: 'rgba(255, 99, 132, 0.2)',
@@ -2157,7 +2158,7 @@
                             callbacks: {
                                 label: function(context) {
                                     if (context.parsed.y !== null) {
-                                        return `Aircraft: ${context.parsed.y}`;
+                                        return `Aircraft on Approach: ${context.parsed.y}`;
                                     }
                                     return '';
                                 }

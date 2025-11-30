@@ -3,9 +3,10 @@
 /**
  * Run complete analysis pipeline for date range
  * 
- * Runs the analysis pipeline (Phase 3a and 3b) for each day in the specified date range:
+ * Runs the analysis pipeline (Phase 3a, 3b, and 3c) for each day in the specified date range:
  * 1. Phase 3a: Analyze flights (analyze-airport-day.js) - creates flight summaries
  * 2. Phase 3b: Generate L1 statistics (generate-l1-stats.js)
+ * 3. Phase 3c: Generate congestion statistics (generate-congestion-stats.js)
  * 
  * **Important**: Extracted traces must already exist (run extract-all-airports.js first).
  * This script will fail if extracted traces are not found - it does NOT download raw tar files.
@@ -160,6 +161,17 @@ async function processDay(airport, date, force) {
 
     await runCommand('node', [statsScript, ...statsArgs]);
     logger.info('L1 stats generation complete', { airport, date });
+
+    // Step 3: Generate congestion statistics (Phase 3c)
+    logger.info('Step 3: Generating congestion statistics', { airport, date });
+    const congestionScript = path.join(__dirname, 'generate-congestion-stats.js');
+    const congestionArgs = ['--airport', airport, '--date', date];
+    if (force) {
+      congestionArgs.push('--force');
+    }
+
+    await runCommand('node', [congestionScript, ...congestionArgs]);
+    logger.info('Congestion stats generation complete', { airport, date });
 
     return { success: true, date };
   } catch (error) {
