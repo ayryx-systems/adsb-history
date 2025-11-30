@@ -1089,7 +1089,7 @@
             
             const counts = slots.map(slot => {
                 if (selectedTypes.length === 0) {
-                    return timeSlots[slot].count;
+                    return timeSlots[slot].count || 0;
                 }
                 const filtered = filterTimeSlotData(timeSlots[slot], selectedTypes);
                 return filtered ? filtered.count : 0;

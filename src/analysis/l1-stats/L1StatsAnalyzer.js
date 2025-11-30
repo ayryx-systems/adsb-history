@@ -102,6 +102,20 @@ class L1StatsAnalyzer {
   }
 
   /**
+   * Generate all 15-minute time slots for a day (00:00 through 23:45)
+   * @returns {Array<string>} Array of time slot keys
+   */
+  getAllTimeSlots() {
+    const slots = [];
+    for (let hour = 0; hour < 24; hour++) {
+      for (let minute = 0; minute < 60; minute += 15) {
+        slots.push(this.getTimeSlot(hour, minute));
+      }
+    }
+    return slots;
+  }
+
+  /**
    * Analyze arrival flights and generate L1 statistics
    * @param {Array} flights - Array of flight objects from summary data
    * @param {string} airport - Airport ICAO code
@@ -119,14 +133,69 @@ class L1StatsAnalyzer {
     const goArounds = flights.filter(f => f.classification === 'go_around');
     logger.info('Filtered go-arounds', { goArounds: goArounds.length });
 
+    // Track go-arounds by time slot (use entry time for go-arounds)
+    const goAroundsByTimeSlot = {};
+    for (const goAround of goArounds) {
+      if (!goAround.goAround || !goAround.goAround.entryTime) {
+        continue;
+      }
+
+      const entryDate = new Date(goAround.goAround.entryTime * 1000);
+      const hour = entryDate.getUTCHours();
+      const minute = entryDate.getUTCMinutes();
+      const timeSlot = this.getTimeSlot(hour, minute);
+
+      if (!goAroundsByTimeSlot[timeSlot]) {
+        goAroundsByTimeSlot[timeSlot] = [];
+      }
+
+      goAroundsByTimeSlot[timeSlot].push({
+        icao: goAround.icao,
+        type: goAround.type || 'UNKNOWN',
+        entryTime: entryDate.toISOString(),
+        duration: goAround.goAround.duration,
+        entryAltitudeAGL_ft: goAround.goAround.entryAltitudeAGL_ft,
+        maxAltitudeAGL_ft: goAround.goAround.maxAltitudeAGL_ft,
+      });
+    }
+
+    // Initialize all time slots even if no arrivals
+    const allTimeSlots = this.getAllTimeSlots();
+    const emptyTimeSlotData = {};
+    for (const slot of allTimeSlots) {
+      emptyTimeSlotData[slot] = {
+        count: 0,
+        aircraft: [],
+        goArounds: goAroundsByTimeSlot[slot] || [],
+        goAroundCount: (goAroundsByTimeSlot[slot] || []).length,
+      };
+    }
+
     if (arrivals.length === 0) {
       return {
         airport,
         date,
         generatedAt: new Date().toISOString(),
         totalArrivals: 0,
+        totalGoArounds: goArounds.length,
         byAircraftType: {},
-        overall: null,
+        overall: {
+          count: 0,
+          goAroundCount: goArounds.length,
+          milestones: {
+            timeFrom100nm: null,
+            timeFrom50nm: null,
+            timeFrom20nm: null,
+          },
+          byTouchdownTimeOfDay: {
+            '00-06': { count: 0, milestones: { timeFrom100nm: null, timeFrom50nm: null, timeFrom20nm: null } },
+            '06-12': { count: 0, milestones: { timeFrom100nm: null, timeFrom50nm: null, timeFrom20nm: null } },
+            '12-16': { count: 0, milestones: { timeFrom100nm: null, timeFrom50nm: null, timeFrom20nm: null } },
+            '16-00': { count: 0, milestones: { timeFrom100nm: null, timeFrom50nm: null, timeFrom20nm: null } },
+          },
+          byTouchdownTimeSlot: emptyTimeSlotData,
+          byTouchdownTimeSlotMedians: {},
+        },
       };
     }
 
@@ -200,33 +269,6 @@ class L1StatsAnalyzer {
 
     // Group by 15-minute time slots
     const byTimeSlot = {};
-
-    // Track go-arounds by time slot (use entry time for go-arounds)
-    const goAroundsByTimeSlot = {};
-
-    for (const goAround of goArounds) {
-      if (!goAround.goAround || !goAround.goAround.entryTime) {
-        continue;
-      }
-
-      const entryDate = new Date(goAround.goAround.entryTime * 1000);
-      const hour = entryDate.getUTCHours();
-      const minute = entryDate.getUTCMinutes();
-      const timeSlot = this.getTimeSlot(hour, minute);
-
-      if (!goAroundsByTimeSlot[timeSlot]) {
-        goAroundsByTimeSlot[timeSlot] = [];
-      }
-
-      goAroundsByTimeSlot[timeSlot].push({
-        icao: goAround.icao,
-        type: goAround.type || 'UNKNOWN',
-        entryTime: entryDate.toISOString(),
-        duration: goAround.goAround.duration,
-        entryAltitudeAGL_ft: goAround.goAround.entryAltitudeAGL_ft,
-        maxAltitudeAGL_ft: goAround.goAround.maxAltitudeAGL_ft,
-      });
-    }
 
     for (const arrival of arrivals) {
       if (!arrival.touchdown || !arrival.touchdown.timestamp) {
@@ -311,12 +353,27 @@ class L1StatsAnalyzer {
       };
     }
 
+    // Initialize all 15-minute time slots for the day (even if no arrivals)
+    for (const slot of allTimeSlots) {
+      if (!byTimeSlot[slot]) {
+        byTimeSlot[slot] = {
+          timeFrom100nm: [],
+          timeFrom50nm: [],
+          timeFrom20nm: [],
+          aircraft: [],
+          goArounds: goAroundsByTimeSlot[slot] || [],
+        };
+      }
+    }
+
     // Calculate median for each 15-minute time slot and include aircraft information
     const timeSlotData = {};
     const timeSlotMedians = {};
     const milestoneKeys = ['timeFrom100nm', 'timeFrom50nm', 'timeFrom20nm'];
     
-    for (const [slot, slotData] of Object.entries(byTimeSlot)) {
+    // Process all time slots (including empty ones)
+    for (const slot of allTimeSlots) {
+      const slotData = byTimeSlot[slot];
       timeSlotData[slot] = {
         count: slotData.aircraft.length,
         aircraft: slotData.aircraft,
@@ -336,14 +393,9 @@ class L1StatsAnalyzer {
       }
     }
 
-    // Sort time slots chronologically
-    const sortedTimeSlots = Object.keys(timeSlotData).sort();
-    const sortedTimeSlotData = {};
-    const sortedTimeSlotMedians = {};
-    for (const slot of sortedTimeSlots) {
-      sortedTimeSlotData[slot] = timeSlotData[slot];
-      sortedTimeSlotMedians[slot] = timeSlotMedians[slot];
-    }
+    // Time slots are already sorted chronologically since we iterate through allTimeSlots
+    const sortedTimeSlotData = timeSlotData;
+    const sortedTimeSlotMedians = timeSlotMedians;
 
     const overall = {
       count: arrivals.length,
