@@ -695,13 +695,10 @@
         }
 
         function getCongestionPath(date) {
-            // date is in YYYY-MM-DD format (local date)
-            // Congestion data is stored per UTC day, so we need to figure out which UTC dates to load
-            // For now, load the UTC date that matches the local date (may need refinement)
+            // date is in YYYY-MM-DD format (UTC date)
+            // Extract year, month, day from the date string
+            const [year, month, day] = date.split('-');
             const airport = document.getElementById('airportSelect').value;
-            const year = document.getElementById('yearSelect').value;
-            const month = String(document.getElementById('monthSelect').value).padStart(2, '0');
-            const day = String(document.getElementById('daySelect').value).padStart(2, '0');
             return `cache/${airport}/${year}/${month}/congestion-${day}.json`;
         }
 
@@ -830,45 +827,100 @@
             const offset = offsets[timezone] || { winter: -6, summer: -5 };
             const offsetHours = season === 'summer' ? offset.summer : offset.winter;
 
-            // Convert UTC congestion slots to local time slots
+            // Initialize all local time slots (00:00 to 23:45)
             const localCongestion = {};
+            for (let hour = 0; hour < 24; hour++) {
+                for (let minute = 0; minute < 60; minute += 15) {
+                    const slot = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                    localCongestion[slot] = {
+                        congestion: null,
+                        entries: null,
+                    };
+                }
+            }
+
+            // Convert UTC congestion slots to local time slots
+            // We need to check both the current UTC day and next UTC day
+            const [localYear, localMonth, localDay] = localDate.split('-').map(Number);
             
+            // Try current UTC day
+            const currentUtcDate = localDate;
             for (const [utcSlot, slotData] of Object.entries(congestionData.byTimeSlot)) {
-                // Parse UTC slot (e.g., "00:00")
                 const [utcHour, utcMinute] = utcSlot.split(':').map(Number);
                 
-                // Convert UTC time to local time
-                const utcDate = new Date(localDate + 'T' + utcSlot + ':00Z');
-                const localDateObj = new Date(utcDate.getTime() + offsetHours * 3600 * 1000);
+                // Try as current UTC day
+                const utcDate1 = new Date(currentUtcDate + 'T' + utcSlot + ':00Z');
+                const localDateObj1 = new Date(utcDate1.getTime() + offsetHours * 3600 * 1000);
+                const slotLocalDate1 = localDateObj1.toISOString().split('T')[0];
                 
-                // Check if this UTC slot belongs to the local date
-                const slotLocalDate = localDateObj.toISOString().split('T')[0];
-                if (slotLocalDate !== localDate) {
-                    continue; // Skip slots that don't belong to this local date
+                if (slotLocalDate1 === localDate) {
+                    const localHour = localDateObj1.getUTCHours();
+                    const localMinute = localDateObj1.getUTCMinutes();
+                    const slotMinute = Math.floor(localMinute / 15) * 15;
+                    const localSlot = `${String(localHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
+                    
+                    if (localCongestion[localSlot]) {
+                        if (localCongestion[localSlot].congestion === null) {
+                            localCongestion[localSlot].congestion = slotData.congestion || 0;
+                        } else {
+                            localCongestion[localSlot].congestion = Math.max(
+                                localCongestion[localSlot].congestion,
+                                slotData.congestion || 0
+                            );
+                        }
+                        
+                        if (localCongestion[localSlot].entries === null) {
+                            localCongestion[localSlot].entries = slotData.entries || 0;
+                        } else {
+                            localCongestion[localSlot].entries = Math.max(
+                                localCongestion[localSlot].entries,
+                                slotData.entries || 0
+                            );
+                        }
+                    }
                 }
+            }
+            
+            // Also try next UTC day (for late evening local hours)
+            const nextUtcDateObj = new Date(currentUtcDate + 'T00:00:00Z');
+            nextUtcDateObj.setUTCDate(nextUtcDateObj.getUTCDate() + 1);
+            const nextUtcDate = nextUtcDateObj.toISOString().split('T')[0];
+            
+            // Note: congestionData might already include next day's data if loadCongestionData merged it
+            // But we'll process it again to be safe
+            for (const [utcSlot, slotData] of Object.entries(congestionData.byTimeSlot)) {
+                const [utcHour, utcMinute] = utcSlot.split(':').map(Number);
                 
-                // Get local time slot
-                const localHour = localDateObj.getUTCHours();
-                const localMinute = localDateObj.getUTCMinutes();
-                const slotMinute = Math.floor(localMinute / 15) * 15;
-                const localSlot = `${String(localHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
+                // Try as next UTC day
+                const utcDate2 = new Date(nextUtcDate + 'T' + utcSlot + ':00Z');
+                const localDateObj2 = new Date(utcDate2.getTime() + offsetHours * 3600 * 1000);
+                const slotLocalDate2 = localDateObj2.toISOString().split('T')[0];
                 
-                // If multiple UTC slots map to same local slot, take the maximum
-                if (!localCongestion[localSlot]) {
-                    localCongestion[localSlot] = {
-                        congestion: slotData.congestion || 0,
-                        entries: slotData.entries || 0,
-                    };
-                } else {
-                    // Take max for congestion, sum for entries (or max, depending on logic)
-                    localCongestion[localSlot].congestion = Math.max(
-                        localCongestion[localSlot].congestion,
-                        slotData.congestion || 0
-                    );
-                    localCongestion[localSlot].entries = Math.max(
-                        localCongestion[localSlot].entries,
-                        slotData.entries || 0
-                    );
+                if (slotLocalDate2 === localDate) {
+                    const localHour = localDateObj2.getUTCHours();
+                    const localMinute = localDateObj2.getUTCMinutes();
+                    const slotMinute = Math.floor(localMinute / 15) * 15;
+                    const localSlot = `${String(localHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
+                    
+                    if (localCongestion[localSlot]) {
+                        if (localCongestion[localSlot].congestion === null) {
+                            localCongestion[localSlot].congestion = slotData.congestion || 0;
+                        } else {
+                            localCongestion[localSlot].congestion = Math.max(
+                                localCongestion[localSlot].congestion,
+                                slotData.congestion || 0
+                            );
+                        }
+                        
+                        if (localCongestion[localSlot].entries === null) {
+                            localCongestion[localSlot].entries = slotData.entries || 0;
+                        } else {
+                            localCongestion[localSlot].entries = Math.max(
+                                localCongestion[localSlot].entries,
+                                slotData.entries || 0
+                            );
+                        }
+                    }
                 }
             }
             
@@ -1044,18 +1096,63 @@
 
         async function loadCongestionData(localDate) {
             // Congestion data is stored per UTC day
-            // For a local date, we might need to load multiple UTC days
-            // For now, try loading the UTC date that matches the local date
-            // This is a simplification - ideally we'd load all relevant UTC days
+            // For a local date, we need to load multiple UTC days
+            // A local day can span 2 UTC days (e.g., local 18:00-23:45 = UTC 00:00-05:45 next day)
             try {
-                const congestionPath = getCongestionPath(localDate);
-                const response = await fetch(congestionPath);
-                if (!response.ok) {
-                    console.warn(`Failed to load congestion data: ${response.status}`);
-                    return null;
+                // Load current UTC day
+                const [year, month, day] = localDate.split('-');
+                const currentUtcDate = localDate;
+                const currentPath = getCongestionPath(currentUtcDate);
+                
+                // Also load next UTC day (for evening local hours)
+                const nextDate = new Date(localDate + 'T00:00:00Z');
+                nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+                const nextUtcDate = nextDate.toISOString().split('T')[0];
+                const nextPath = getCongestionPath(nextUtcDate);
+                
+                // Try to load both days
+                const congestionData = { byTimeSlot: {} };
+                
+                try {
+                    const currentResponse = await fetch(currentPath);
+                    if (currentResponse.ok) {
+                        const currentData = await currentResponse.json();
+                        if (currentData.byTimeSlot) {
+                            Object.assign(congestionData.byTimeSlot, currentData.byTimeSlot);
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`Failed to load current UTC day congestion data: ${error.message}`);
                 }
-                const congestionData = await response.json();
-                return congestionData;
+                
+                try {
+                    const nextResponse = await fetch(nextPath);
+                    if (nextResponse.ok) {
+                        const nextData = await nextResponse.json();
+                        if (nextData.byTimeSlot) {
+                            // Merge next day's data
+                            for (const [slot, data] of Object.entries(nextData.byTimeSlot)) {
+                                if (!congestionData.byTimeSlot[slot]) {
+                                    congestionData.byTimeSlot[slot] = data;
+                                } else {
+                                    // If slot exists in both, take max (or sum, depending on logic)
+                                    congestionData.byTimeSlot[slot].congestion = Math.max(
+                                        congestionData.byTimeSlot[slot].congestion || 0,
+                                        data.congestion || 0
+                                    );
+                                    congestionData.byTimeSlot[slot].entries = Math.max(
+                                        congestionData.byTimeSlot[slot].entries || 0,
+                                        data.entries || 0
+                                    );
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`Failed to load next UTC day congestion data: ${error.message}`);
+                }
+                
+                return Object.keys(congestionData.byTimeSlot).length > 0 ? congestionData : null;
             } catch (error) {
                 console.warn(`Error loading congestion data: ${error.message}`);
                 return null;
@@ -1366,7 +1463,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     }
@@ -1554,7 +1652,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     }
@@ -2062,7 +2161,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     },
@@ -2168,7 +2268,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     }
@@ -2210,7 +2311,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     }
@@ -2252,7 +2354,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     }
@@ -2308,7 +2411,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     }
@@ -2348,7 +2452,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     }
@@ -2389,7 +2494,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     }
@@ -2430,7 +2536,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     }
@@ -2504,7 +2611,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     },
@@ -2590,7 +2698,8 @@
                         x: {
                             ticks: {
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 45,
+                                maxTicksLimit: 96
                             }
                         }
                     },

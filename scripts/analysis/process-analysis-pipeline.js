@@ -35,6 +35,7 @@ function parseArgs() {
     startDate: '2025-01-01',
     endDate: '2025-01-31',
     force: false,
+    skipBaseline: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -51,6 +52,8 @@ function parseArgs() {
       i++;
     } else if (arg === '--force') {
       options.force = true;
+    } else if (arg === '--skip-baseline') {
+      options.skipBaseline = true;
     } else if (arg === '--help' || arg === '-h') {
       console.log(`
 Run analysis pipeline (Phase 3a, 3b, 3c, 3d, and 3e) for date range
@@ -66,6 +69,7 @@ Options:
   --start-date DATE     Start date (default: 2025-01-01)
   --end-date DATE       End date (default: 2025-01-31)
   --force               Reprocess even if data exists
+  --skip-baseline       Skip yearly baseline generation (faster for incremental updates)
   --help, -h            Show this help message
 
 Examples:
@@ -273,7 +277,7 @@ async function main() {
   };
 
   // Step 5: Generate yearly baseline (Phase 3e) - run once after all days are processed
-  if (results.successful > 0) {
+  if (results.successful > 0 && !options.skipBaseline) {
     const [year] = options.startDate.split('-');
     logger.info('Step 5: Generating yearly baseline', {
       airport: options.airport,
@@ -300,6 +304,8 @@ async function main() {
       });
       // Don't fail the entire pipeline if baseline generation fails
     }
+  } else if (options.skipBaseline) {
+    logger.info('Skipping yearly baseline generation (--skip-baseline flag set)');
   }
 
   // Summary
