@@ -3,10 +3,12 @@
 /**
  * Run complete analysis pipeline for date range
  * 
- * Runs the analysis pipeline (Phase 3a, 3b, and 3c) for each day in the specified date range:
+ * Runs the analysis pipeline (Phase 3a, 3b, 3c, 3d, and 3e) for each day in the specified date range:
  * 1. Phase 3a: Analyze flights (analyze-airport-day.js) - creates flight summaries
  * 2. Phase 3b: Generate L1 statistics (generate-l1-stats.js)
  * 3. Phase 3c: Generate congestion statistics (generate-congestion-stats.js)
+ * 4. Phase 3d: Generate L2 statistics (generate-l2-stats.js) - time-of-day volumes
+ * 5. Phase 3e: Generate yearly baseline (generate-yearly-baseline.js) - aggregates all days for the year
  * 
  * **Important**: Extracted traces must already exist (run extract-all-airports.js first).
  * This script will fail if extracted traces are not found - it does NOT download raw tar files.
@@ -51,7 +53,7 @@ function parseArgs() {
       options.force = true;
     } else if (arg === '--help' || arg === '-h') {
       console.log(`
-Run analysis pipeline (Phase 3a and 3b) for date range
+Run analysis pipeline (Phase 3a, 3b, 3c, 3d, and 3e) for date range
 
 **Prerequisites**: Extracted traces must exist (run extract-all-airports.js first).
 This script will fail if extracted traces are not found - it does NOT download raw tar files.
@@ -173,6 +175,17 @@ async function processDay(airport, date, force) {
     await runCommand('node', [congestionScript, ...congestionArgs]);
     logger.info('Congestion stats generation complete', { airport, date });
 
+    // Step 4: Generate L2 statistics (Phase 3d)
+    logger.info('Step 4: Generating L2 statistics', { airport, date });
+    const l2StatsScript = path.join(__dirname, 'generate-l2-stats.js');
+    const l2StatsArgs = ['--airport', airport, '--date', date];
+    if (force) {
+      l2StatsArgs.push('--force');
+    }
+
+    await runCommand('node', [l2StatsScript, ...l2StatsArgs]);
+    logger.info('L2 stats generation complete', { airport, date });
+
     return { success: true, date };
   } catch (error) {
     logger.error('Failed to process day', {
@@ -233,6 +246,36 @@ async function main() {
     // Add a small delay between days to avoid overwhelming the system
     if (i < dates.length - 1) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+
+  // Step 5: Generate yearly baseline (Phase 3e) - run once after all days are processed
+  if (results.successful > 0) {
+    const [year] = options.startDate.split('-');
+    logger.info('Step 5: Generating yearly baseline', {
+      airport: options.airport,
+      year,
+    });
+    
+    try {
+      const baselineScript = path.join(__dirname, 'generate-yearly-baseline.js');
+      const baselineArgs = ['--airport', options.airport, '--year', year];
+      if (options.force) {
+        baselineArgs.push('--force');
+      }
+
+      await runCommand('node', [baselineScript, ...baselineArgs]);
+      logger.info('Yearly baseline generation complete', {
+        airport: options.airport,
+        year,
+      });
+    } catch (error) {
+      logger.warn('Yearly baseline generation failed (non-fatal)', {
+        airport: options.airport,
+        year,
+        error: error.message,
+      });
+      // Don't fail the entire pipeline if baseline generation fails
     }
   }
 

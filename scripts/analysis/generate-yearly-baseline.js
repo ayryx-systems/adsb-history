@@ -18,6 +18,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import L1StatsData from '../../src/analysis/l1-stats/L1StatsData.js';
 import CongestionData from '../../src/analysis/congestion/CongestionData.js';
+import L2StatsData from '../../src/analysis/l2-stats/L2StatsData.js';
 import logger from '../../src/utils/logger.js';
 import { getSeason, getDSTDates } from '../../src/utils/dst.js';
 
@@ -87,6 +88,7 @@ async function generateBaseline(airport, year, force) {
 
   const l1StatsData = new L1StatsData();
   const congestionData = new CongestionData();
+  const l2StatsData = new L2StatsData();
   const dates = getDaysInYear(year);
   
   const dstDates = getDSTDates(airport, year);
@@ -100,6 +102,16 @@ async function generateBaseline(airport, year, force) {
 
   const summerTimeSlotData = {};
   const winterTimeSlotData = {};
+  const summerL2Data = {
+    morning: [],
+    afternoon: [],
+    evening: [],
+  };
+  const winterL2Data = {
+    morning: [],
+    afternoon: [],
+    evening: [],
+  };
   let processedDays = 0;
   let skippedDays = 0;
   let summerDays = 0;
@@ -181,6 +193,28 @@ async function generateBaseline(airport, year, force) {
         });
       }
 
+      try {
+        const l2Stats = await l2StatsData.load(airport, date);
+        if (l2Stats && l2Stats.volumes) {
+          const l2Data = season === 'summer' ? summerL2Data : winterL2Data;
+          if (l2Stats.volumes.morning !== undefined) {
+            l2Data.morning.push(l2Stats.volumes.morning);
+          }
+          if (l2Stats.volumes.afternoon !== undefined) {
+            l2Data.afternoon.push(l2Stats.volumes.afternoon);
+          }
+          if (l2Stats.volumes.evening !== undefined) {
+            l2Data.evening.push(l2Stats.volumes.evening);
+          }
+        }
+      } catch (error) {
+        logger.warn('Failed to load L2 stats data for date', {
+          airport,
+          date,
+          error: error.message,
+        });
+      }
+
       processedDays++;
       if (season === 'summer') {
         summerDays++;
@@ -226,9 +260,11 @@ async function generateBaseline(airport, year, force) {
     dstEnd: dstDates.end.toISOString().split('T')[0],
     summer: {
       byTimeSlot: {},
+      l2Volumes: {},
     },
     winter: {
       byTimeSlot: {},
+      l2Volumes: {},
     },
   };
 
@@ -275,6 +311,26 @@ async function generateBaseline(airport, year, force) {
 
   baseline.summer.byTimeSlot = aggregateSeason(summerTimeSlotData, 'summer');
   baseline.winter.byTimeSlot = aggregateSeason(winterTimeSlotData, 'winter');
+
+  function aggregateL2Volumes(l2Data) {
+    return {
+      morning: l2Data.morning.length > 0
+        ? Math.round((l2Data.morning.reduce((a, b) => a + b, 0) / l2Data.morning.length) * 100) / 100
+        : null,
+      afternoon: l2Data.afternoon.length > 0
+        ? Math.round((l2Data.afternoon.reduce((a, b) => a + b, 0) / l2Data.afternoon.length) * 100) / 100
+        : null,
+      evening: l2Data.evening.length > 0
+        ? Math.round((l2Data.evening.reduce((a, b) => a + b, 0) / l2Data.evening.length) * 100) / 100
+        : null,
+      sampleSize: {
+        days: Math.max(l2Data.morning.length, l2Data.afternoon.length, l2Data.evening.length),
+      },
+    };
+  }
+
+  baseline.summer.l2Volumes = aggregateL2Volumes(summerL2Data);
+  baseline.winter.l2Volumes = aggregateL2Volumes(winterL2Data);
 
   const baselineDir = path.dirname(baselinePath);
   if (!fs.existsSync(baselineDir)) {

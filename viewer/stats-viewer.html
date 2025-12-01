@@ -421,6 +421,13 @@
             </div>
 
             <div class="chart-container">
+                <h3>Time-of-Day Volumes (Local Time)</h3>
+                <div class="chart-wrapper">
+                    <canvas id="l2VolumesChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-container">
                 <h3>Aircraft on Approach (within 50nm landing in next 2 hours)</h3>
                 <div class="chart-wrapper">
                     <canvas id="congestionChart"></canvas>
@@ -569,6 +576,7 @@
         let currentWeatherData = null;
         let currentBaselineData = null;
         let currentCongestionData = null;
+        let currentL2StatsData = null;
 
         function getDaysInMonth(year, month) {
             return new Date(year, month, 0).getDate();
@@ -681,17 +689,25 @@
         function getDataPath() {
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
-            const month = document.getElementById('monthSelect').value;
-            const day = document.getElementById('daySelect').value;
+            const month = String(document.getElementById('monthSelect').value).padStart(2, '0');
+            const day = String(document.getElementById('daySelect').value).padStart(2, '0');
             return `cache/${airport}/${year}/${month}/l1-stats-${day}.json`;
         }
 
         function getCongestionPath() {
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
-            const month = document.getElementById('monthSelect').value;
-            const day = document.getElementById('daySelect').value;
+            const month = String(document.getElementById('monthSelect').value).padStart(2, '0');
+            const day = String(document.getElementById('daySelect').value).padStart(2, '0');
             return `cache/${airport}/${year}/${month}/congestion-${day}.json`;
+        }
+
+        function getL2StatsPath() {
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            const month = String(document.getElementById('monthSelect').value).padStart(2, '0');
+            const day = String(document.getElementById('daySelect').value).padStart(2, '0');
+            return `cache/${airport}/${year}/${month}/l2-stats-${day}.json`;
         }
 
         function getMetarPath() {
@@ -766,14 +782,23 @@
             const season = getSeason(dateStr, airport, year);
             const seasonData = baselineData[season];
             
-            if (!seasonData || !seasonData.byTimeSlot) {
+            if (!seasonData) {
                 return null;
             }
             
-            return {
-                byTimeSlot: seasonData.byTimeSlot,
+            const result = {
                 season: season,
             };
+            
+            if (seasonData.byTimeSlot) {
+                result.byTimeSlot = seasonData.byTimeSlot;
+            }
+            
+            if (seasonData.l2Volumes) {
+                result.l2Volumes = seasonData.l2Volumes;
+            }
+            
+            return result;
         }
 
         async function loadBaselineData() {
@@ -957,6 +982,24 @@
             }
         }
 
+        async function loadL2StatsData() {
+            try {
+                const l2StatsPath = getL2StatsPath();
+                console.log('Loading L2 stats from:', l2StatsPath);
+                const response = await fetch(l2StatsPath);
+                if (!response.ok) {
+                    console.warn(`Failed to load L2 stats data: ${response.status} ${response.statusText}`);
+                    return null;
+                }
+                const l2StatsData = await response.json();
+                console.log('L2 stats loaded:', l2StatsData);
+                return l2StatsData;
+            } catch (error) {
+                console.warn(`Error loading L2 stats data: ${error.message}`, error);
+                return null;
+            }
+        }
+
         async function loadData() {
             const path = getDataPath();
             const errorDiv = document.getElementById('errorMessage');
@@ -981,6 +1024,7 @@
                 currentWeatherData = await loadWeatherData(dateStr);
                 currentBaselineData = await loadBaselineData();
                 currentCongestionData = await loadCongestionData();
+                currentL2StatsData = await loadL2StatsData();
                 
                 loadingDiv.style.display = 'none';
                 displayInfo(data);
@@ -1000,11 +1044,23 @@
             
             const grid = document.getElementById('infoGrid');
             const goAroundCount = data.totalGoArounds || (data.overall && data.overall.goAroundCount) || 0;
+            
+            let l2StatsHtml = '';
+            if (currentL2StatsData && currentL2StatsData.volumes) {
+                const volumes = currentL2StatsData.volumes;
+                l2StatsHtml = `
+                    <div class="info-item"><strong>Morning (06:00-12:00):</strong> ${volumes.morning.toLocaleString()}</div>
+                    <div class="info-item"><strong>Afternoon (12:00-18:00):</strong> ${volumes.afternoon.toLocaleString()}</div>
+                    <div class="info-item"><strong>Evening (18:00-24:00):</strong> ${volumes.evening.toLocaleString()}</div>
+                `;
+            }
+            
             grid.innerHTML = `
                 <div class="info-item"><strong>Total Arrivals:</strong> ${data.totalArrivals.toLocaleString()}</div>
                 <div class="info-item"><strong>Go-Arounds:</strong> ${goAroundCount.toLocaleString()}</div>
                 <div class="info-item"><strong>Aircraft Types:</strong> ${Object.keys(data.byAircraftType).length}</div>
                 <div class="info-item"><strong>Generated:</strong> ${new Date(data.generatedAt).toLocaleString()}</div>
+                ${l2StatsHtml}
             `;
         }
 
@@ -1140,10 +1196,15 @@
             destroyChart('pressure');
             destroyChart('congestion');
             destroyChart('entries');
+            destroyChart('l2Volumes');
 
             const selectedCategories = getSelectedCategories();
             const selectedTypes = getAircraftTypesForCategories(selectedCategories);
             renderArrivalCountChart(data, selectedTypes);
+            
+            if (currentL2StatsData) {
+                renderL2VolumesChart(currentL2StatsData);
+            }
             
             if (currentCongestionData) {
                 renderCongestionChart(data, currentCongestionData);
@@ -1228,6 +1289,80 @@
                                 maxRotation: 45,
                                 minRotation: 45
                             }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderL2VolumesChart(l2StatsData) {
+            if (!l2StatsData || !l2StatsData.volumes) {
+                return;
+            }
+
+            const labels = ['Morning (06:00-12:00)', 'Afternoon (12:00-18:00)', 'Evening (18:00-24:00)'];
+            const volumes = [
+                l2StatsData.volumes.morning || 0,
+                l2StatsData.volumes.afternoon || 0,
+                l2StatsData.volumes.evening || 0,
+            ];
+
+            const datasets = [{
+                label: 'Today',
+                data: volumes,
+                backgroundColor: [
+                    'rgba(54, 162, 235, 0.6)',
+                    'rgba(75, 192, 192, 0.6)',
+                    'rgba(153, 102, 255, 0.6)',
+                ],
+                borderColor: [
+                    'rgba(54, 162, 235, 1)',
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(153, 102, 255, 1)',
+                ],
+                borderWidth: 1
+            }];
+
+            const dateStr = l2StatsData.localDate || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            const seasonalBaseline = getSeasonalBaseline(currentBaselineData, dateStr, airport, year);
+            
+            if (seasonalBaseline && seasonalBaseline.l2Volumes) {
+                const baselineVolumes = [
+                    seasonalBaseline.l2Volumes.morning,
+                    seasonalBaseline.l2Volumes.afternoon,
+                    seasonalBaseline.l2Volumes.evening,
+                ];
+
+                const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
+                datasets.push({
+                    label: seasonLabel,
+                    data: baselineVolumes,
+                    type: 'line',
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    pointRadius: 4,
+                    fill: false,
+                    tension: 0.1
+                });
+            }
+
+            charts['l2Volumes'] = new Chart(document.getElementById('l2VolumesChart'), {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { precision: 0 }
                         }
                     }
                 }

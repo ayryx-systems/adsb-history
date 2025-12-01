@@ -155,6 +155,10 @@ class CongestionAnalyzer {
     }
 
     // First pass: Count aircraft entering 50nm in each time slot
+    // For each time slot, count entries that occur during that slot's 15-minute window
+    // For late slots, also include entries from next day that occur within the lookahead period
+    const dayEndTimestamp = dayStartTimestamp + 24 * 60 * 60;
+    
     for (const arrival of arrivals) {
       const touchdownTime = arrival.touchdown.timestamp;
 
@@ -170,16 +174,22 @@ class CongestionAnalyzer {
         timeAt50nm = touchdownTime - (18 * 60);
       }
 
-      // Find which time slot this entry falls into
-      // Only count entries that occur during the current day
-      if (timeAt50nm >= dayStartTimestamp && timeAt50nm < dayStartTimestamp + 24 * 60 * 60) {
-        const entryDate = new Date(timeAt50nm * 1000);
-        const entryHour = entryDate.getUTCHours();
-        const entryMinute = entryDate.getUTCMinutes();
-        const entrySlot = getTimeSlot(entryHour, entryMinute);
+      if (timeAt50nm >= touchdownTime) {
+        continue; // Invalid: entry after touchdown
+      }
 
-        if (timeSlots[entrySlot]) {
-          timeSlots[entrySlot].entries++;
+      // Count entries in the slot where they occur
+      // Entries are counted based on when they occur, not when they land
+      // This ensures entries at the end of the day (e.g., 23:50) are counted even if they land on the next day
+      for (const [slot, slotData] of Object.entries(timeSlots)) {
+        const slotTimestamp = slotData.timestamp;
+        const slotEnd = slotTimestamp + 15 * 60; // 15-minute window
+        
+        // Count entry if it occurs during this slot's time window
+        // This handles both current day entries and entries that occur late in the day but land on next day
+        if (timeAt50nm >= slotTimestamp && timeAt50nm < slotEnd) {
+          slotData.entries++;
+          break; // Entry can only belong to one slot
         }
       }
     }
