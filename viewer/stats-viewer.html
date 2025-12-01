@@ -348,8 +348,8 @@
             <div class="control-group">
                 <label>Month</label>
                 <select id="monthSelect">
-                    <option value="01">January</option>
-                    <option value="02" selected>February</option>
+                    <option value="01" selected>January</option>
+                    <option value="02">February</option>
                     <option value="03">March</option>
                     <option value="04">April</option>
                     <option value="05">May</option>
@@ -681,6 +681,8 @@
                 option.textContent = textContent;
                 if (dayStr === currentDay || (day === 1 && !currentDay)) {
                     option.selected = true;
+                } else if (month === 1 && day === 1 && !currentDay) {
+                    option.selected = true;
                 }
                 daySelect.appendChild(option);
             }
@@ -799,6 +801,53 @@
             }
             
             return result;
+        }
+
+        function convertLocalSlotToUTC(localSlot, localDate, airport, year) {
+            // Convert local time slot to UTC time slot
+            const [localHour, localMinute] = localSlot.split(':').map(Number);
+            
+            // Get UTC offset
+            const season = getSeason(localDate, airport, year);
+            const offsets = {
+                'America/Los_Angeles': { winter: -8, summer: -7 },
+                'America/Denver': { winter: -7, summer: -6 },
+                'America/Chicago': { winter: -6, summer: -5 },
+                'America/New_York': { winter: -5, summer: -4 },
+            };
+            
+            const airportConfig = {
+                KORD: 'America/Chicago',
+                KLGA: 'America/New_York',
+                KJFK: 'America/New_York',
+                KLAX: 'America/Los_Angeles',
+                KSFO: 'America/Los_Angeles',
+            };
+            
+            const timezone = airportConfig[airport] || 'America/Chicago';
+            const offset = offsets[timezone] || { winter: -6, summer: -5 };
+            const offsetHours = season === 'summer' ? offset.summer : offset.winter;
+            
+            // Create a date object for the local time
+            const [yearStr, monthStr, dayStr] = localDate.split('-');
+            const localDateObj = new Date(Date.UTC(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr), localHour, localMinute));
+            
+            // Subtract offset to get UTC time
+            const utcTimestamp = localDateObj.getTime() - offsetHours * 3600 * 1000;
+            const utcDateObj = new Date(utcTimestamp);
+            
+            const utcHour = utcDateObj.getUTCHours();
+            const utcMinute = utcDateObj.getUTCMinutes();
+            const slotMinute = Math.floor(utcMinute / 15) * 15;
+            
+            return `${String(utcHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
+        }
+
+        function formatDualTimeLabels(slots, localDate, airport, year) {
+            return slots.map(slot => {
+                const utcSlot = convertLocalSlotToUTC(slot, localDate, airport, year);
+                return `${slot} (${utcSlot} UTC)`;
+            });
         }
 
         function convertCongestionToLocalTime(congestionData, localDate, airport, year) {
@@ -1168,50 +1217,15 @@
                 const airport = document.getElementById('airportSelect').value;
                 const year = document.getElementById('yearSelect').value;
                 
-                // METAR data is stored per UTC day
-                // For a local date, we need to load multiple UTC days
-                // A local day can span 2 UTC days (e.g., local 18:00-23:45 = UTC 00:00-05:45 next day)
-                const currentMetarPath = getMetarPath();
+                // METAR data is stored in a single file per year
+                const metarPath = getMetarPath();
                 
-                // Also load next UTC day (for evening local hours)
-                const nextDate = new Date(targetDate + 'T00:00:00Z');
-                nextDate.setUTCDate(nextDate.getUTCDate() + 1);
-                const [nextYear, nextMonth, nextDay] = nextDate.toISOString().split('T')[0].split('-');
-                const nextMetarPath = `cache/${airport}/${nextYear}/${nextMonth}/metar-${nextDay}.json`;
-                
-                // Try to load both days and merge records
-                let allRecords = [];
-                
-                try {
-                    const currentResponse = await fetch(currentMetarPath);
-                    if (currentResponse.ok) {
-                        const currentData = await currentResponse.json();
-                        if (currentData.records) {
-                            allRecords = allRecords.concat(currentData.records);
-                        }
-                    }
-                } catch (error) {
-                    console.warn(`Failed to load current UTC day METAR data: ${error.message}`);
-                }
-                
-                try {
-                    const nextResponse = await fetch(nextMetarPath);
-                    if (nextResponse.ok) {
-                        const nextData = await nextResponse.json();
-                        if (nextData.records) {
-                            allRecords = allRecords.concat(nextData.records);
-                        }
-                    }
-                } catch (error) {
-                    console.warn(`Failed to load next UTC day METAR data: ${error.message}`);
-                }
-                
-                if (allRecords.length === 0) {
+                const response = await fetch(metarPath);
+                if (!response.ok) {
+                    console.warn(`Failed to load METAR data: ${response.status}`);
                     return null;
                 }
-                
-                // Process merged records
-                const metarData = { records: allRecords };
+                const metarData = await response.json();
                 return processWeatherData(metarData, targetDate, airport, year);
             } catch (error) {
                 console.warn(`Error loading weather data: ${error.message}`);
@@ -1334,6 +1348,8 @@
                 infoSection.style.display = 'block';
             } catch (error) {
                 loadingDiv.style.display = 'none';
+                console.error('Error loading data:', error);
+                console.error('Error stack:', error.stack);
                 errorDiv.textContent = `Error loading data: ${error.message}`;
                 errorDiv.style.display = 'block';
             }
@@ -1571,10 +1587,12 @@
                 });
             }
 
+            const dualLabels = formatDualTimeLabels(slots, dateStr, airport, year);
+            
             charts['arrivalCount'] = new Chart(document.getElementById('arrivalCountChart'), {
                 type: 'bar',
                 data: {
-                    labels: slots,
+                    labels: dualLabels,
                     datasets: datasets
                 },
                 options: {
@@ -1760,10 +1778,11 @@
                 });
             }
 
+            const dualLabels100nm = formatDualTimeLabels(slots, dateStr, airport, year);
             charts['time100nm'] = new Chart(document.getElementById('time100nmChart'), {
                 type: 'line',
                 data: {
-                    labels: slots,
+                    labels: dualLabels100nm,
                     datasets: datasets
                 },
                 options: {
@@ -1787,6 +1806,10 @@
         }
 
         function renderArrivalsScatterChart(data, selectedTypes) {
+            const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            
             const timeSlots = data.overall.byTouchdownTimeSlot;
             const allArrivals = [];
             
@@ -1867,9 +1890,6 @@
                 }
             });
             
-            const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
-            const airport = document.getElementById('airportSelect').value;
-            const year = document.getElementById('yearSelect').value;
             const seasonalBaseline = getSeasonalBaseline(currentBaselineData, dateStr, airport, year);
             
             if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
@@ -1956,6 +1976,11 @@
                 });
             }
             
+            // Capture variables for callback closure
+            const callbackDateStr = dateStr;
+            const callbackAirport = airport;
+            const callbackYear = year;
+            
             const chart = new Chart(document.getElementById('arrivalsScatterChart'), {
                 type: 'scatter',
                 data: {
@@ -1970,7 +1995,7 @@
                             max: 24,
                             title: {
                                 display: true,
-                                text: 'Touchdown Time (UTC hours)'
+                                text: 'Touchdown Time (Local / UTC)'
                             },
                             ticks: {
                                 callback: function(value) {
@@ -1979,7 +2004,12 @@
                                     }
                                     const hours = Math.floor(value);
                                     const minutes = Math.floor((value - hours) * 60);
-                                    return String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+                                    const localTime = String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+                                    
+                                    // Convert local time to UTC for display
+                                    const utcSlot = convertLocalSlotToUTC(localTime, callbackDateStr, callbackAirport, callbackYear);
+                                    
+                                    return `${localTime} (${utcSlot})`;
                                 }
                             }
                         },
@@ -2143,6 +2173,10 @@
         }
 
         function renderTime50nmChart(data, selectedTypes) {
+            const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            
             const timeSlots = data.overall.byTouchdownTimeSlot;
             const slots = Object.keys(timeSlots).sort();
             
@@ -2206,9 +2240,6 @@
                 borderWidth: 1
             }];
 
-            const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
-            const airport = document.getElementById('airportSelect').value;
-            const year = document.getElementById('yearSelect').value;
             const seasonalBaseline = getSeasonalBaseline(currentBaselineData, dateStr, airport, year);
             
             if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
@@ -2269,10 +2300,11 @@
                 });
             }
 
+            const dualLabels50nm = formatDualTimeLabels(slots, dateStr, airport, year);
             charts['time50nm'] = new Chart(document.getElementById('time50nmChart'), {
                 type: 'line',
                 data: {
-                    labels: slots,
+                    labels: dualLabels50nm,
                     datasets: datasets
                 },
                 options: {
@@ -2376,10 +2408,15 @@
                 });
             });
 
+            const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            const dualLabels = formatDualTimeLabels(slots, dateStr, airport, year);
+            
             charts['aircraftTypeTime'] = new Chart(document.getElementById('aircraftTypeTimeChart'), {
                 type: 'line',
                 data: {
-                    labels: slots,
+                    labels: dualLabels,
                     datasets: datasets
                 },
                 options: {
@@ -2403,6 +2440,10 @@
         }
 
         function renderVisibilityChart(data, weatherData) {
+            const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            
             const timeSlots = data.overall.byTouchdownTimeSlot;
             const slots = Object.keys(timeSlots).sort();
             
@@ -2410,11 +2451,12 @@
                 const weather = weatherData[slot];
                 return weather && weather.visibility !== null ? weather.visibility : null;
             });
+            const dualLabels = formatDualTimeLabels(slots, dateStr, airport, year);
 
             charts['visibility'] = new Chart(document.getElementById('visibilityChart'), {
                 type: 'line',
                 data: {
-                    labels: slots,
+                    labels: dualLabels,
                     datasets: [{
                         label: 'Visibility (statute miles)',
                         data: visibility,
@@ -2446,6 +2488,10 @@
         }
 
         function renderCeilingChart(data, weatherData) {
+            const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            
             const timeSlots = data.overall.byTouchdownTimeSlot;
             const slots = Object.keys(timeSlots).sort();
             
@@ -2454,10 +2500,11 @@
                 return weather && weather.cloudCeiling !== null ? weather.cloudCeiling / 100 : null;
             });
 
+            const dualLabelsCeiling = formatDualTimeLabels(slots, dateStr, airport, year);
             charts['ceiling'] = new Chart(document.getElementById('ceilingChart'), {
                 type: 'line',
                 data: {
-                    labels: slots,
+                    labels: dualLabelsCeiling,
                     datasets: [{
                         label: 'Cloud Ceiling (hundreds of feet)',
                         data: ceiling,
@@ -2489,6 +2536,10 @@
         }
 
         function renderWindSpeedChart(data, weatherData) {
+            const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            
             const timeSlots = data.overall.byTouchdownTimeSlot;
             const slots = Object.keys(timeSlots).sort();
             
@@ -2502,10 +2553,11 @@
                 return weather && weather.windGust !== null ? weather.windGust : null;
             });
 
+            const dualLabelsWind = formatDualTimeLabels(slots, dateStr, airport, year);
             charts['windSpeed'] = new Chart(document.getElementById('windSpeedChart'), {
                 type: 'line',
                 data: {
-                    labels: slots,
+                    labels: dualLabelsWind,
                     datasets: [{
                         label: 'Wind Speed (knots)',
                         data: windSpeed,
@@ -2546,6 +2598,10 @@
         }
 
         function renderPrecipitationChart(data, weatherData) {
+            const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            
             const timeSlots = data.overall.byTouchdownTimeSlot;
             const slots = Object.keys(timeSlots).sort();
             
@@ -2553,11 +2609,12 @@
                 const weather = weatherData[slot];
                 return weather && weather.precipitation !== null ? weather.precipitation : 0;
             });
+            const dualLabels = formatDualTimeLabels(slots, dateStr, airport, year);
 
             charts['precipitation'] = new Chart(document.getElementById('precipitationChart'), {
                 type: 'bar',
                 data: {
-                    labels: slots,
+                    labels: dualLabels,
                     datasets: [{
                         label: 'Precipitation (inches/hour)',
                         data: precipitation,
@@ -2587,6 +2644,10 @@
         }
 
         function renderTemperatureChart(data, weatherData) {
+            const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            
             const timeSlots = data.overall.byTouchdownTimeSlot;
             const slots = Object.keys(timeSlots).sort();
             
@@ -2595,10 +2656,11 @@
                 return weather && weather.temperature !== null ? weather.temperature : null;
             });
 
+            const dualLabelsTemp = formatDualTimeLabels(slots, dateStr, airport, year);
             charts['temperature'] = new Chart(document.getElementById('temperatureChart'), {
                 type: 'line',
                 data: {
-                    labels: slots,
+                    labels: dualLabelsTemp,
                     datasets: [{
                         label: 'Temperature (°F)',
                         data: temperature,
@@ -2629,6 +2691,10 @@
         }
 
         function renderPressureChart(data, weatherData) {
+            const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            
             const timeSlots = data.overall.byTouchdownTimeSlot;
             const slots = Object.keys(timeSlots).sort();
             
@@ -2637,10 +2703,11 @@
                 return weather && weather.pressure !== null ? weather.pressure : null;
             });
 
+            const dualLabelsPressure = formatDualTimeLabels(slots, dateStr, airport, year);
             charts['pressure'] = new Chart(document.getElementById('pressureChart'), {
                 type: 'line',
                 data: {
-                    labels: slots,
+                    labels: dualLabelsPressure,
                     datasets: [{
                         label: 'Altimeter Pressure (inHg)',
                         data: pressure,
@@ -2718,10 +2785,11 @@
                 });
             }
 
+            const dualLabelsCongestion = formatDualTimeLabels(slots, dateStr, airport, year);
             charts['congestion'] = new Chart(document.getElementById('congestionChart'), {
                 type: 'line',
                 data: {
-                    labels: slots,
+                    labels: dualLabelsCongestion,
                     datasets: datasets
                 },
                 options: {
@@ -2805,10 +2873,11 @@
                 });
             }
 
+            const dualLabelsEntries = formatDualTimeLabels(slots, dateStr, airport, year);
             charts['entries'] = new Chart(document.getElementById('entriesChart'), {
                 type: 'line',
                 data: {
-                    labels: slots,
+                    labels: dualLabelsEntries,
                     datasets: datasets
                 },
                 options: {
