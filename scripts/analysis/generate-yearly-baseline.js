@@ -19,6 +19,7 @@ import { fileURLToPath } from 'url';
 import L1StatsData from '../../src/analysis/l1-stats/L1StatsData.js';
 import CongestionData from '../../src/analysis/congestion/CongestionData.js';
 import logger from '../../src/utils/logger.js';
+import { getSeason, getDSTDates } from '../../src/utils/dst.js';
 
 dotenv.config();
 
@@ -88,18 +89,27 @@ async function generateBaseline(airport, year, force) {
   const congestionData = new CongestionData();
   const dates = getDaysInYear(year);
   
-  logger.info('Generating yearly baseline', {
+  const dstDates = getDSTDates(airport, year);
+  logger.info('Generating seasonal baseline', {
     airport,
     year,
     totalDays: dates.length,
+    dstStart: dstDates.start.toISOString().split('T')[0],
+    dstEnd: dstDates.end.toISOString().split('T')[0],
   });
 
-  const timeSlotData = {};
+  const summerTimeSlotData = {};
+  const winterTimeSlotData = {};
   let processedDays = 0;
   let skippedDays = 0;
+  let summerDays = 0;
+  let winterDays = 0;
 
   for (const date of dates) {
     try {
+      const season = getSeason(date, airport, year);
+      const timeSlotData = season === 'summer' ? summerTimeSlotData : winterTimeSlotData;
+      
       const data = await l1StatsData.load(airport, date);
       
       if (!data || !data.overall || !data.overall.byTouchdownTimeSlot) {
@@ -172,11 +182,18 @@ async function generateBaseline(airport, year, force) {
       }
 
       processedDays++;
+      if (season === 'summer') {
+        summerDays++;
+      } else {
+        winterDays++;
+      }
       
       if (processedDays % 30 === 0) {
         logger.info('Progress', {
           processed: processedDays,
           skipped: skippedDays,
+          summerDays,
+          winterDays,
           total: dates.length,
         });
       }
@@ -193,6 +210,8 @@ async function generateBaseline(airport, year, force) {
   logger.info('Aggregating baseline data', {
     processedDays,
     skippedDays,
+    summerDays,
+    winterDays,
   });
 
   const baseline = {
@@ -201,45 +220,61 @@ async function generateBaseline(airport, year, force) {
     generatedAt: new Date().toISOString(),
     processedDays,
     skippedDays,
-    byTimeSlot: {},
+    summerDays,
+    winterDays,
+    dstStart: dstDates.start.toISOString().split('T')[0],
+    dstEnd: dstDates.end.toISOString().split('T')[0],
+    summer: {
+      byTimeSlot: {},
+    },
+    winter: {
+      byTimeSlot: {},
+    },
   };
 
-  for (const [slot, data] of Object.entries(timeSlotData)) {
-    const avgCount = data.counts.length > 0
-      ? data.counts.reduce((a, b) => a + b, 0) / data.counts.length
-      : 0;
+  function aggregateSeason(seasonData, seasonName) {
+    const result = {};
+    for (const [slot, data] of Object.entries(seasonData)) {
+      const avgCount = data.counts.length > 0
+        ? data.counts.reduce((a, b) => a + b, 0) / data.counts.length
+        : 0;
 
-    const median50nm = data.times50nm.length > 0
-      ? calculateMedian(data.times50nm)
-      : null;
+      const median50nm = data.times50nm.length > 0
+        ? calculateMedian(data.times50nm)
+        : null;
 
-    const median100nm = data.times100nm.length > 0
-      ? calculateMedian(data.times100nm)
-      : null;
+      const median100nm = data.times100nm.length > 0
+        ? calculateMedian(data.times100nm)
+        : null;
 
-    const avgCongestion = data.congestion.length > 0
-      ? data.congestion.reduce((a, b) => a + b, 0) / data.congestion.length
-      : null;
+      const avgCongestion = data.congestion.length > 0
+        ? data.congestion.reduce((a, b) => a + b, 0) / data.congestion.length
+        : null;
 
-    const avgEntries = data.entries.length > 0
-      ? data.entries.reduce((a, b) => a + b, 0) / data.entries.length
-      : null;
+      const avgEntries = data.entries.length > 0
+        ? data.entries.reduce((a, b) => a + b, 0) / data.entries.length
+        : null;
 
-    baseline.byTimeSlot[slot] = {
-      averageCount: Math.round(avgCount * 100) / 100,
-      medianTimeFrom50nm: median50nm ? Math.round(median50nm * 100) / 100 : null,
-      medianTimeFrom100nm: median100nm ? Math.round(median100nm * 100) / 100 : null,
-      averageCongestion: avgCongestion !== null ? Math.round(avgCongestion * 100) / 100 : null,
-      averageEntries: avgEntries !== null ? Math.round(avgEntries * 100) / 100 : null,
-      sampleSize: {
-        days: data.counts.length,
-        arrivals50nm: data.times50nm.length,
-        arrivals100nm: data.times100nm.length,
-        congestion: data.congestion.length,
-        entries: data.entries.length,
-      },
-    };
+      result[slot] = {
+        averageCount: Math.round(avgCount * 100) / 100,
+        medianTimeFrom50nm: median50nm ? Math.round(median50nm * 100) / 100 : null,
+        medianTimeFrom100nm: median100nm ? Math.round(median100nm * 100) / 100 : null,
+        averageCongestion: avgCongestion !== null ? Math.round(avgCongestion * 100) / 100 : null,
+        averageEntries: avgEntries !== null ? Math.round(avgEntries * 100) / 100 : null,
+        sampleSize: {
+          days: data.counts.length,
+          arrivals50nm: data.times50nm.length,
+          arrivals100nm: data.times100nm.length,
+          congestion: data.congestion.length,
+          entries: data.entries.length,
+        },
+      };
+    }
+    return result;
   }
+
+  baseline.summer.byTimeSlot = aggregateSeason(summerTimeSlotData, 'summer');
+  baseline.winter.byTimeSlot = aggregateSeason(winterTimeSlotData, 'winter');
 
   const baselineDir = path.dirname(baselinePath);
   if (!fs.existsSync(baselineDir)) {
@@ -248,19 +283,23 @@ async function generateBaseline(airport, year, force) {
 
   fs.writeFileSync(baselinePath, JSON.stringify(baseline, null, 2));
   
-  logger.info('Yearly baseline generated', {
+  logger.info('Seasonal baseline generated', {
     airport,
     year,
     path: baselinePath,
-    timeSlots: Object.keys(baseline.byTimeSlot).length,
+    summerTimeSlots: Object.keys(baseline.summer.byTimeSlot).length,
+    winterTimeSlots: Object.keys(baseline.winter.byTimeSlot).length,
   });
 
   console.log(`\n${'='.repeat(60)}`);
-  console.log(`Yearly Baseline for ${airport} in ${year}`);
+  console.log(`Seasonal Baseline for ${airport} in ${year}`);
   console.log('='.repeat(60));
-  console.log(`Processed Days: ${processedDays}`);
+  console.log(`Processed Days: ${processedDays} (Summer: ${summerDays}, Winter: ${winterDays})`);
   console.log(`Skipped Days: ${skippedDays}`);
-  console.log(`Time Slots: ${Object.keys(baseline.byTimeSlot).length}`);
+  console.log(`DST Start: ${baseline.dstStart}`);
+  console.log(`DST End: ${baseline.dstEnd}`);
+  console.log(`Summer Time Slots: ${Object.keys(baseline.summer.byTimeSlot).length}`);
+  console.log(`Winter Time Slots: ${Object.keys(baseline.winter.byTimeSlot).length}`);
   console.log(`Saved to: ${baselinePath}`);
   console.log('='.repeat(60) + '\n');
 }

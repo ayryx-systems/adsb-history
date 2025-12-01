@@ -706,6 +706,76 @@
             return `cache/${airport}/${year}/yearly-baseline.json`;
         }
 
+        function getSecondSundayInMarch(year) {
+            const date = new Date(year, 2, 1);
+            const dayOfWeek = date.getDay();
+            const daysToAdd = dayOfWeek === 0 ? 7 : 14 - dayOfWeek;
+            date.setDate(1 + daysToAdd);
+            return date;
+        }
+
+        function getFirstSundayInNovember(year) {
+            const date = new Date(year, 10, 1);
+            const dayOfWeek = date.getDay();
+            const daysToAdd = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+            date.setDate(1 + daysToAdd);
+            return date;
+        }
+
+        const dstConfig = {
+            KORD: {
+                2025: {
+                    start: '2025-03-09',
+                    end: '2025-11-02',
+                },
+            },
+        };
+
+        function getDSTStart(airport, year) {
+            const config = dstConfig[airport]?.[year];
+            if (config?.start) {
+                return new Date(config.start + 'T00:00:00Z');
+            }
+            return getSecondSundayInMarch(year);
+        }
+
+        function getDSTEnd(airport, year) {
+            const config = dstConfig[airport]?.[year];
+            if (config?.end) {
+                return new Date(config.end + 'T00:00:00Z');
+            }
+            return getFirstSundayInNovember(year);
+        }
+
+        function getSeason(dateStr, airport, year) {
+            const dateObj = new Date(dateStr + 'T00:00:00Z');
+            const yearNum = typeof year === 'string' ? parseInt(year, 10) : year;
+            
+            const dstStart = getDSTStart(airport, yearNum);
+            const dstEnd = getDSTEnd(airport, yearNum);
+            
+            if (dateObj >= dstStart && dateObj < dstEnd) {
+                return 'summer';
+            }
+            return 'winter';
+        }
+
+        function getSeasonalBaseline(baselineData, dateStr, airport, year) {
+            if (!baselineData) return null;
+            
+            const season = getSeason(dateStr, airport, year);
+            const seasonData = baselineData[season];
+            
+            if (!seasonData || !seasonData.byTimeSlot) {
+                return null;
+            }
+            
+            return {
+                byTimeSlot: seasonData.byTimeSlot,
+                season: season,
+            };
+        }
+
         async function loadBaselineData() {
             try {
                 const baselinePath = getBaselinePath();
@@ -1113,14 +1183,20 @@
                 borderWidth: 1
             }];
 
-            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+            const dateStr = data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            const seasonalBaseline = getSeasonalBaseline(currentBaselineData, dateStr, airport, year);
+            
+            if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
                 const baselineCounts = slots.map(slot => {
-                    const baseline = currentBaselineData.byTimeSlot[slot];
+                    const baseline = seasonalBaseline.byTimeSlot[slot];
                     return baseline ? baseline.averageCount : null;
                 });
 
+                const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
                 datasets.push({
-                    label: 'Yearly Average',
+                    label: seasonLabel,
                     data: baselineCounts,
                     type: 'line',
                     borderColor: 'rgba(255, 99, 132, 1)',
@@ -1222,14 +1298,20 @@
                 borderWidth: 1
             }];
 
-            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+            const dateStr = data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            const seasonalBaseline = getSeasonalBaseline(currentBaselineData, dateStr, airport, year);
+            
+            if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
                 const baselineMedians = slots.map(slot => {
-                    const baseline = currentBaselineData.byTimeSlot[slot];
+                    const baseline = seasonalBaseline.byTimeSlot[slot];
                     return baseline && baseline.medianTimeFrom100nm ? baseline.medianTimeFrom100nm / 60 : null;
                 });
 
+                const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
                 datasets.push({
-                    label: 'Yearly Average',
+                    label: seasonLabel,
                     data: baselineMedians,
                     borderColor: 'rgba(255, 99, 132, 1)',
                     backgroundColor: 'rgba(255, 99, 132, 0.1)',
@@ -1342,12 +1424,17 @@
                 }
             });
             
-            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+            const dateStr = data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            const seasonalBaseline = getSeasonalBaseline(currentBaselineData, dateStr, airport, year);
+            
+            if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
                 const baselineLineData = [];
-                const slots = Object.keys(currentBaselineData.byTimeSlot).sort();
+                const baselineSlots = Object.keys(seasonalBaseline.byTimeSlot).sort();
                 
-                slots.forEach(slot => {
-                    const baseline = currentBaselineData.byTimeSlot[slot];
+                baselineSlots.forEach(slot => {
+                    const baseline = seasonalBaseline.byTimeSlot[slot];
                     if (baseline && baseline.medianTimeFrom50nm) {
                         const [hours, minutes] = slot.split(':').map(Number);
                         const hourDecimal = hours + minutes / 60;
@@ -1361,8 +1448,9 @@
                 });
                 
                 if (baselineLineData.length > 0) {
+                    const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
                     datasets.push({
-                        label: 'Yearly Average',
+                        label: seasonLabel,
                         data: baselineLineData,
                         type: 'line',
                         borderColor: 'rgba(0, 0, 0, 1)',
@@ -1478,10 +1566,10 @@
                                             const seconds = String(d.getUTCSeconds()).padStart(2, '0');
                                             return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
                                         }
-                                    } else if (dataset.type === 'line' && dataset.label === 'Yearly Average') {
+                                    } else if (dataset.type === 'line' && (dataset.label === 'Summer Average' || dataset.label === 'Winter Average')) {
                                         const point = dataset.data[dataIndex];
                                         if (point && point.slot) {
-                                            return `Time Slot: ${point.slot} UTC (Yearly Average)`;
+                                            return `Time Slot: ${point.slot} UTC (${dataset.label})`;
                                         }
                                     } else if (dataset.goAroundInfo) {
                                         const goAround = dataset.goAroundInfo[dataIndex];
@@ -1514,12 +1602,12 @@
                                                 `ICAO: ${arrival.icao}`
                                             ];
                                         }
-                                    } else if (dataset.type === 'line' && dataset.label === 'Yearly Average') {
+                                    } else if (dataset.type === 'line' && (dataset.label === 'Summer Average' || dataset.label === 'Winter Average')) {
                                         const point = dataset.data[dataIndex];
                                         if (point) {
                                             const hours = Math.floor(point.y / 60);
                                             const minutes = Math.round(point.y % 60);
-                                            return `Yearly Average: ${hours}h ${minutes}m (${point.y.toFixed(1)} min)`;
+                                            return `${dataset.label}: ${hours}h ${minutes}m (${point.y.toFixed(1)} min)`;
                                         }
                                     } else if (dataset.goAroundInfo) {
                                         const goAround = dataset.goAroundInfo[dataIndex];
@@ -1673,14 +1761,20 @@
                 borderWidth: 1
             }];
 
-            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+            const dateStr = data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            const seasonalBaseline = getSeasonalBaseline(currentBaselineData, dateStr, airport, year);
+            
+            if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
                 const baselineMedians = slots.map(slot => {
-                    const baseline = currentBaselineData.byTimeSlot[slot];
+                    const baseline = seasonalBaseline.byTimeSlot[slot];
                     return baseline && baseline.medianTimeFrom50nm ? baseline.medianTimeFrom50nm / 60 : null;
                 });
 
+                const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
                 datasets.push({
-                    label: 'Yearly Average',
+                    label: seasonLabel,
                     data: baselineMedians,
                     borderColor: 'rgba(255, 99, 132, 1)',
                     backgroundColor: 'rgba(255, 99, 132, 0.1)',
@@ -2142,14 +2236,20 @@
                 fill: true
             }];
 
-            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+            const dateStr = data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            const seasonalBaseline = getSeasonalBaseline(currentBaselineData, dateStr, airport, year);
+            
+            if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
                 const baselineCongestion = slots.map(slot => {
-                    const baseline = currentBaselineData.byTimeSlot[slot];
+                    const baseline = seasonalBaseline.byTimeSlot[slot];
                     return baseline && baseline.averageCongestion !== null ? baseline.averageCongestion : null;
                 });
 
+                const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
                 datasets.push({
-                    label: 'Yearly Average',
+                    label: seasonLabel,
                     data: baselineCongestion,
                     borderColor: 'rgba(0, 0, 0, 1)',
                     backgroundColor: 'rgba(0, 0, 0, 0.1)',
@@ -2219,14 +2319,20 @@
                 fill: true
             }];
 
-            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+            const dateStr = data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
+            const airport = document.getElementById('airportSelect').value;
+            const year = document.getElementById('yearSelect').value;
+            const seasonalBaseline = getSeasonalBaseline(currentBaselineData, dateStr, airport, year);
+            
+            if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
                 const baselineEntries = slots.map(slot => {
-                    const baseline = currentBaselineData.byTimeSlot[slot];
+                    const baseline = seasonalBaseline.byTimeSlot[slot];
                     return baseline && baseline.averageEntries !== null ? baseline.averageEntries : null;
                 });
 
+                const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
                 datasets.push({
-                    label: 'Yearly Average',
+                    label: seasonLabel,
                     data: baselineEntries,
                     borderColor: 'rgba(0, 0, 0, 1)',
                     backgroundColor: 'rgba(0, 0, 0, 0.1)',
