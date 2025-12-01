@@ -945,11 +945,39 @@
             }
         }
 
-        function getTimeSlotFromTimestamp(timestamp) {
+        function getTimeSlotFromTimestamp(timestamp, localDate, airport, year) {
             if (!timestamp) return null;
-            const date = new Date(timestamp);
-            const hours = String(date.getHours()).padStart(2, '0');
-            const minutes = String(Math.floor(date.getMinutes() / 15) * 15).padStart(2, '0');
+            // METAR timestamps are in UTC, convert to local time slot
+            const utcDate = new Date(timestamp);
+            if (isNaN(utcDate.getTime())) return null;
+            
+            // Get UTC offset for this date
+            const season = getSeason(localDate, airport, year);
+            const offsets = {
+                'America/Los_Angeles': { winter: -8, summer: -7 },
+                'America/Denver': { winter: -7, summer: -6 },
+                'America/Chicago': { winter: -6, summer: -5 },
+                'America/New_York': { winter: -5, summer: -4 },
+            };
+            
+            const airportConfig = {
+                KORD: 'America/Chicago',
+                KLGA: 'America/New_York',
+                KJFK: 'America/New_York',
+                KLAX: 'America/Los_Angeles',
+                KSFO: 'America/Los_Angeles',
+            };
+            
+            const timezone = airportConfig[airport] || 'America/Chicago';
+            const offset = offsets[timezone] || { winter: -6, summer: -5 };
+            const offsetHours = season === 'summer' ? offset.summer : offset.winter;
+            
+            // Convert UTC to local time
+            const localTimestamp = utcDate.getTime() + offsetHours * 3600 * 1000;
+            const localDateObj = new Date(localTimestamp);
+            
+            const hours = String(localDateObj.getUTCHours()).padStart(2, '0');
+            const minutes = String(Math.floor(localDateObj.getUTCMinutes() / 15) * 15).padStart(2, '0');
             return `${hours}:${minutes}`;
         }
 
@@ -972,11 +1000,32 @@
             return lowestCeiling;
         }
 
-        function processWeatherData(metarData, targetDate) {
+        function processWeatherData(metarData, targetDate, airport, year) {
             if (!metarData || !metarData.records) return {};
             
             const targetDateStr = targetDate.split('T')[0];
             const weatherBySlot = {};
+            
+            // Get UTC offset for timezone conversion
+            const season = getSeason(targetDateStr, airport, year);
+            const offsets = {
+                'America/Los_Angeles': { winter: -8, summer: -7 },
+                'America/Denver': { winter: -7, summer: -6 },
+                'America/Chicago': { winter: -6, summer: -5 },
+                'America/New_York': { winter: -5, summer: -4 },
+            };
+            
+            const airportConfig = {
+                KORD: 'America/Chicago',
+                KLGA: 'America/New_York',
+                KJFK: 'America/New_York',
+                KLAX: 'America/Los_Angeles',
+                KSFO: 'America/Los_Angeles',
+            };
+            
+            const timezone = airportConfig[airport] || 'America/Chicago';
+            const offset = offsets[timezone] || { winter: -6, summer: -5 };
+            const offsetHours = season === 'summer' ? offset.summer : offset.winter;
             
             for (const record of metarData.records) {
                 if (!record.valid) continue;
@@ -995,11 +1044,28 @@
                 
                 if (isNaN(recordDate.getTime())) continue;
                 
-                const recordDateStr = recordDate.toISOString().split('T')[0];
+                // METAR timestamps are in UTC
+                // Convert to local time to check if it belongs to the target local date
+                const utcTimestamp = recordDate.getTime();
+                const localTimestamp = utcTimestamp + offsetHours * 3600 * 1000;
+                const localDateObj = new Date(localTimestamp);
+                const recordLocalDateStr = localDateObj.toISOString().split('T')[0];
                 
-                if (recordDateStr !== targetDateStr) continue;
+                // Check if this METAR record belongs to the target local date
+                // Need to check both current and next UTC day (for evening local hours)
+                const recordUtcDateStr = recordDate.toISOString().split('T')[0];
+                const [targetYear, targetMonth, targetDay] = targetDateStr.split('-').map(Number);
+                const targetUtcDate = new Date(Date.UTC(targetYear, targetMonth - 1, targetDay));
+                const nextUtcDate = new Date(targetUtcDate);
+                nextUtcDate.setUTCDate(nextUtcDate.getUTCDate() + 1);
+                const nextUtcDateStr = nextUtcDate.toISOString().split('T')[0];
                 
-                const slot = getTimeSlotFromTimestamp(record.valid);
+                // Include if it matches the local date (checking both UTC days that could contribute)
+                if (recordLocalDateStr !== targetDateStr) {
+                    continue;
+                }
+                
+                const slot = getTimeSlotFromTimestamp(record.valid, targetDateStr, airport, year);
                 if (!slot) continue;
                 
                 if (!weatherBySlot[slot]) {
@@ -1053,26 +1119,45 @@
                 }
             }
             
+            // Initialize all 96 local time slots (00:00 to 23:45) to ensure all slots are present
             const processed = {};
-            for (const [slot, data] of Object.entries(weatherBySlot)) {
-                processed[slot] = {
-                    visibility: data.visibility.length > 0 ? 
-                        data.visibility.reduce((a, b) => a + b, 0) / data.visibility.length : null,
-                    windSpeed: data.windSpeed.length > 0 ?
-                        data.windSpeed.reduce((a, b) => a + b, 0) / data.windSpeed.length : null,
-                    windGust: data.windGust.length > 0 ?
-                        Math.max(...data.windGust) : null,
-                    windDir: data.windDir.length > 0 ?
-                        data.windDir.reduce((a, b) => a + b, 0) / data.windDir.length : null,
-                    precipitation: data.precipitation.length > 0 ?
-                        data.precipitation.reduce((a, b) => a + b, 0) : 0,
-                    cloudCeiling: data.cloudCeiling.length > 0 ?
-                        Math.min(...data.cloudCeiling) : null,
-                    temperature: data.temperature.length > 0 ?
-                        data.temperature.reduce((a, b) => a + b, 0) / data.temperature.length : null,
-                    pressure: data.pressure.length > 0 ?
-                        data.pressure.reduce((a, b) => a + b, 0) / data.pressure.length : null
-                };
+            for (let hour = 0; hour < 24; hour++) {
+                for (let minute = 0; minute < 60; minute += 15) {
+                    const slot = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                    const data = weatherBySlot[slot];
+                    if (data) {
+                        processed[slot] = {
+                            visibility: data.visibility.length > 0 ? 
+                                data.visibility.reduce((a, b) => a + b, 0) / data.visibility.length : null,
+                            windSpeed: data.windSpeed.length > 0 ?
+                                data.windSpeed.reduce((a, b) => a + b, 0) / data.windSpeed.length : null,
+                            windGust: data.windGust.length > 0 ?
+                                Math.max(...data.windGust) : null,
+                            windDir: data.windDir.length > 0 ?
+                                data.windDir.reduce((a, b) => a + b, 0) / data.windDir.length : null,
+                            precipitation: data.precipitation.length > 0 ?
+                                data.precipitation.reduce((a, b) => a + b, 0) : 0,
+                            cloudCeiling: data.cloudCeiling.length > 0 ?
+                                Math.min(...data.cloudCeiling) : null,
+                            temperature: data.temperature.length > 0 ?
+                                data.temperature.reduce((a, b) => a + b, 0) / data.temperature.length : null,
+                            pressure: data.pressure.length > 0 ?
+                                data.pressure.reduce((a, b) => a + b, 0) / data.pressure.length : null
+                        };
+                    } else {
+                        // Initialize empty slot with null values
+                        processed[slot] = {
+                            visibility: null,
+                            windSpeed: null,
+                            windGust: null,
+                            windDir: null,
+                            precipitation: 0,
+                            cloudCeiling: null,
+                            temperature: null,
+                            pressure: null
+                        };
+                    }
+                }
             }
             
             return processed;
@@ -1080,14 +1165,54 @@
 
         async function loadWeatherData(targetDate) {
             try {
-                const metarPath = getMetarPath();
-                const response = await fetch(metarPath);
-                if (!response.ok) {
-                    console.warn(`Failed to load METAR data: ${response.status}`);
+                const airport = document.getElementById('airportSelect').value;
+                const year = document.getElementById('yearSelect').value;
+                
+                // METAR data is stored per UTC day
+                // For a local date, we need to load multiple UTC days
+                // A local day can span 2 UTC days (e.g., local 18:00-23:45 = UTC 00:00-05:45 next day)
+                const currentMetarPath = getMetarPath();
+                
+                // Also load next UTC day (for evening local hours)
+                const nextDate = new Date(targetDate + 'T00:00:00Z');
+                nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+                const [nextYear, nextMonth, nextDay] = nextDate.toISOString().split('T')[0].split('-');
+                const nextMetarPath = `cache/${airport}/${nextYear}/${nextMonth}/metar-${nextDay}.json`;
+                
+                // Try to load both days and merge records
+                let allRecords = [];
+                
+                try {
+                    const currentResponse = await fetch(currentMetarPath);
+                    if (currentResponse.ok) {
+                        const currentData = await currentResponse.json();
+                        if (currentData.records) {
+                            allRecords = allRecords.concat(currentData.records);
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`Failed to load current UTC day METAR data: ${error.message}`);
+                }
+                
+                try {
+                    const nextResponse = await fetch(nextMetarPath);
+                    if (nextResponse.ok) {
+                        const nextData = await nextResponse.json();
+                        if (nextData.records) {
+                            allRecords = allRecords.concat(nextData.records);
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`Failed to load next UTC day METAR data: ${error.message}`);
+                }
+                
+                if (allRecords.length === 0) {
                     return null;
                 }
-                const metarData = await response.json();
-                return processWeatherData(metarData, targetDate);
+                
+                // Process merged records
+                const metarData = { records: allRecords };
+                return processWeatherData(metarData, targetDate, airport, year);
             } catch (error) {
                 console.warn(`Error loading weather data: ${error.message}`);
                 return null;
