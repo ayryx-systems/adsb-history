@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * Generate yearly baseline data from daily L1 statistics
+ * Generate yearly baseline data from daily L2 statistics (local time)
  * 
- * Aggregates daily L1 stats files to create baseline comparisons:
- * - Average arrival counts per time slot across the year
- * - Average time from 50nm per time slot (median across all days)
- * - Average time from 100nm per time slot (median across all days)
+ * Aggregates daily L2 stats files (which are in local time) to create baseline comparisons:
+ * - Average arrival counts per local time slot across the year
+ * - Average time from 50nm per local time slot (median across all days)
+ * - Average time from 100nm per local time slot (median across all days)
+ * - Average time-of-day volumes (morning/afternoon/evening)
  * 
  * Usage:
  *   node scripts/analysis/generate-yearly-baseline.js --airport KORD --year 2025
@@ -16,8 +17,6 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import L1StatsData from '../../src/analysis/l1-stats/L1StatsData.js';
-import CongestionData from '../../src/analysis/congestion/CongestionData.js';
 import L2StatsData from '../../src/analysis/l2-stats/L2StatsData.js';
 import logger from '../../src/utils/logger.js';
 import { getSeason, getDSTDates } from '../../src/utils/dst.js';
@@ -86,13 +85,11 @@ async function generateBaseline(airport, year, force) {
     return;
   }
 
-  const l1StatsData = new L1StatsData();
-  const congestionData = new CongestionData();
   const l2StatsData = new L2StatsData();
   const dates = getDaysInYear(year);
   
   const dstDates = getDSTDates(airport, year);
-  logger.info('Generating seasonal baseline', {
+  logger.info('Generating seasonal baseline from L2 stats (local time)', {
     airport,
     year,
     totalDays: dates.length,
@@ -102,12 +99,12 @@ async function generateBaseline(airport, year, force) {
 
   const summerTimeSlotData = {};
   const winterTimeSlotData = {};
-  const summerL2Data = {
+  const summerL2Volumes = {
     morning: [],
     afternoon: [],
     evening: [],
   };
-  const winterL2Data = {
+  const winterL2Volumes = {
     morning: [],
     afternoon: [],
     evening: [],
@@ -121,15 +118,16 @@ async function generateBaseline(airport, year, force) {
     try {
       const season = getSeason(date, airport, year);
       const timeSlotData = season === 'summer' ? summerTimeSlotData : winterTimeSlotData;
+      const volumesData = season === 'summer' ? summerL2Volumes : winterL2Volumes;
       
-      const data = await l1StatsData.load(airport, date);
+      const l2Data = await l2StatsData.load(airport, date);
       
-      if (!data || !data.overall || !data.overall.byTouchdownTimeSlot) {
+      if (!l2Data || !l2Data.overall || !l2Data.overall.byTouchdownTimeSlot) {
         skippedDays++;
         continue;
       }
 
-      const bySlot = data.overall.byTouchdownTimeSlot;
+      const bySlot = l2Data.overall.byTouchdownTimeSlot;
       
       for (const [slot, slotData] of Object.entries(bySlot)) {
         if (!timeSlotData[slot]) {
@@ -137,8 +135,6 @@ async function generateBaseline(airport, year, force) {
             counts: [],
             times50nm: [],
             times100nm: [],
-            congestion: [],
-            entries: [],
           };
         }
 
@@ -163,56 +159,16 @@ async function generateBaseline(airport, year, force) {
         }
       }
 
-      try {
-        const congestion = await congestionData.load(airport, date);
-        if (congestion && congestion.byTimeSlot) {
-          for (const [slot, slotCongestion] of Object.entries(congestion.byTimeSlot)) {
-            if (!timeSlotData[slot]) {
-              timeSlotData[slot] = {
-                counts: [],
-                times50nm: [],
-                times100nm: [],
-                congestion: [],
-                entries: [],
-              };
-            }
-
-            if (slotCongestion.congestion !== undefined && slotCongestion.congestion !== null) {
-              timeSlotData[slot].congestion.push(slotCongestion.congestion);
-            }
-            if (slotCongestion.entries !== undefined && slotCongestion.entries !== null) {
-              timeSlotData[slot].entries.push(slotCongestion.entries);
-            }
-          }
+      if (l2Data.volumes) {
+        if (l2Data.volumes.morning !== undefined) {
+          volumesData.morning.push(l2Data.volumes.morning);
         }
-      } catch (error) {
-        logger.warn('Failed to load congestion data for date', {
-          airport,
-          date,
-          error: error.message,
-        });
-      }
-
-      try {
-        const l2Stats = await l2StatsData.load(airport, date);
-        if (l2Stats && l2Stats.volumes) {
-          const l2Data = season === 'summer' ? summerL2Data : winterL2Data;
-          if (l2Stats.volumes.morning !== undefined) {
-            l2Data.morning.push(l2Stats.volumes.morning);
-          }
-          if (l2Stats.volumes.afternoon !== undefined) {
-            l2Data.afternoon.push(l2Stats.volumes.afternoon);
-          }
-          if (l2Stats.volumes.evening !== undefined) {
-            l2Data.evening.push(l2Stats.volumes.evening);
-          }
+        if (l2Data.volumes.afternoon !== undefined) {
+          volumesData.afternoon.push(l2Data.volumes.afternoon);
         }
-      } catch (error) {
-        logger.warn('Failed to load L2 stats data for date', {
-          airport,
-          date,
-          error: error.message,
-        });
+        if (l2Data.volumes.evening !== undefined) {
+          volumesData.evening.push(l2Data.volumes.evening);
+        }
       }
 
       processedDays++;
@@ -283,26 +239,14 @@ async function generateBaseline(airport, year, force) {
         ? calculateMedian(data.times100nm)
         : null;
 
-      const avgCongestion = data.congestion.length > 0
-        ? data.congestion.reduce((a, b) => a + b, 0) / data.congestion.length
-        : null;
-
-      const avgEntries = data.entries.length > 0
-        ? data.entries.reduce((a, b) => a + b, 0) / data.entries.length
-        : null;
-
       result[slot] = {
         averageCount: Math.round(avgCount * 100) / 100,
         medianTimeFrom50nm: median50nm ? Math.round(median50nm * 100) / 100 : null,
         medianTimeFrom100nm: median100nm ? Math.round(median100nm * 100) / 100 : null,
-        averageCongestion: avgCongestion !== null ? Math.round(avgCongestion * 100) / 100 : null,
-        averageEntries: avgEntries !== null ? Math.round(avgEntries * 100) / 100 : null,
         sampleSize: {
           days: data.counts.length,
           arrivals50nm: data.times50nm.length,
           arrivals100nm: data.times100nm.length,
-          congestion: data.congestion.length,
-          entries: data.entries.length,
         },
       };
     }
@@ -312,25 +256,25 @@ async function generateBaseline(airport, year, force) {
   baseline.summer.byTimeSlot = aggregateSeason(summerTimeSlotData, 'summer');
   baseline.winter.byTimeSlot = aggregateSeason(winterTimeSlotData, 'winter');
 
-  function aggregateL2Volumes(l2Data) {
+  function aggregateL2Volumes(volumesData) {
     return {
-      morning: l2Data.morning.length > 0
-        ? Math.round((l2Data.morning.reduce((a, b) => a + b, 0) / l2Data.morning.length) * 100) / 100
+      morning: volumesData.morning.length > 0
+        ? Math.round((volumesData.morning.reduce((a, b) => a + b, 0) / volumesData.morning.length) * 100) / 100
         : null,
-      afternoon: l2Data.afternoon.length > 0
-        ? Math.round((l2Data.afternoon.reduce((a, b) => a + b, 0) / l2Data.afternoon.length) * 100) / 100
+      afternoon: volumesData.afternoon.length > 0
+        ? Math.round((volumesData.afternoon.reduce((a, b) => a + b, 0) / volumesData.afternoon.length) * 100) / 100
         : null,
-      evening: l2Data.evening.length > 0
-        ? Math.round((l2Data.evening.reduce((a, b) => a + b, 0) / l2Data.evening.length) * 100) / 100
+      evening: volumesData.evening.length > 0
+        ? Math.round((volumesData.evening.reduce((a, b) => a + b, 0) / volumesData.evening.length) * 100) / 100
         : null,
       sampleSize: {
-        days: Math.max(l2Data.morning.length, l2Data.afternoon.length, l2Data.evening.length),
+        days: Math.max(volumesData.morning.length, volumesData.afternoon.length, volumesData.evening.length),
       },
     };
   }
 
-  baseline.summer.l2Volumes = aggregateL2Volumes(summerL2Data);
-  baseline.winter.l2Volumes = aggregateL2Volumes(winterL2Data);
+  baseline.summer.l2Volumes = aggregateL2Volumes(summerL2Volumes);
+  baseline.winter.l2Volumes = aggregateL2Volumes(winterL2Volumes);
 
   const baselineDir = path.dirname(baselinePath);
   if (!fs.existsSync(baselineDir)) {

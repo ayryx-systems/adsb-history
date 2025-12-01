@@ -122,79 +122,55 @@ function runCommand(command, args, options = {}) {
   });
 }
 
-async function processDay(airport, date, force) {
-  logger.info('Processing day', { airport, date });
-
+async function checkExtractedTraces(airport, dates) {
   const extractedTraceData = new ExtractedTraceData();
-  const analyzeScript = path.join(__dirname, 'analyze-airport-day.js');
-  const statsScript = path.join(__dirname, 'generate-l1-stats.js');
+  const missing = [];
 
-  try {
-    // Check if extracted traces exist (required before analysis)
-    logger.info('Checking for extracted traces', { airport, date });
-    const extractedExists = await extractedTraceData.exists(airport, date);
-    
-    if (!extractedExists) {
-      const errorMsg = `Extracted traces not found for ${airport} on ${date}. ` +
-        `Please run extraction first: node scripts/extraction/extract-all-airports.js --start-date ${date} --end-date ${date} --airports ${airport}`;
-      logger.error('Extracted traces not found', { airport, date });
-      return { success: false, date, error: errorMsg };
+  for (const date of dates) {
+    const exists = await extractedTraceData.exists(airport, date);
+    if (!exists) {
+      missing.push(date);
     }
-
-    logger.info('Extracted traces found, proceeding with analysis', { airport, date });
-
-    // Step 1: Analyze flights (Phase 3a - creates flight summaries)
-    // Uses extracted traces (no raw tar download needed)
-    logger.info('Step 1: Analyzing flights', { airport, date });
-    const analyzeArgs = ['--airport', airport, '--date', date];
-    if (force) {
-      analyzeArgs.push('--force');
-    }
-
-    await runCommand('node', [analyzeScript, ...analyzeArgs]);
-    logger.info('Flight analysis complete', { airport, date });
-
-    // Step 2: Generate L1 statistics (Phase 3b)
-    logger.info('Step 2: Generating L1 statistics', { airport, date });
-    const statsArgs = ['--airport', airport, '--date', date];
-    if (force) {
-      statsArgs.push('--force');
-    }
-
-    await runCommand('node', [statsScript, ...statsArgs]);
-    logger.info('L1 stats generation complete', { airport, date });
-
-    // Step 3: Generate congestion statistics (Phase 3c)
-    logger.info('Step 3: Generating congestion statistics', { airport, date });
-    const congestionScript = path.join(__dirname, 'generate-congestion-stats.js');
-    const congestionArgs = ['--airport', airport, '--date', date];
-    if (force) {
-      congestionArgs.push('--force');
-    }
-
-    await runCommand('node', [congestionScript, ...congestionArgs]);
-    logger.info('Congestion stats generation complete', { airport, date });
-
-    // Step 4: Generate L2 statistics (Phase 3d)
-    logger.info('Step 4: Generating L2 statistics', { airport, date });
-    const l2StatsScript = path.join(__dirname, 'generate-l2-stats.js');
-    const l2StatsArgs = ['--airport', airport, '--date', date];
-    if (force) {
-      l2StatsArgs.push('--force');
-    }
-
-    await runCommand('node', [l2StatsScript, ...l2StatsArgs]);
-    logger.info('L2 stats generation complete', { airport, date });
-
-    return { success: true, date };
-  } catch (error) {
-    logger.error('Failed to process day', {
-      airport,
-      date,
-      error: error.message,
-    });
-    return { success: false, date, error: error.message };
   }
+
+  if (missing.length > 0) {
+    const errorMsg = `Extracted traces not found for ${airport} on ${missing.length} dates. ` +
+      `Please run extraction first: node scripts/extraction/extract-all-airports.js --start-date ${missing[0]} --end-date ${missing[missing.length - 1]} --airports ${airport}`;
+    logger.error('Extracted traces not found', { airport, missing });
+    throw new Error(errorMsg);
+  }
+}
+
+async function batchProcessPhase(airport, dates, phaseName, scriptName, force) {
+  logger.info(`Starting batch ${phaseName}`, { airport, dates: dates.length });
+  const script = path.join(__dirname, scriptName);
+  const results = { successful: 0, failed: 0, errors: [] };
+
+  for (let i = 0; i < dates.length; i++) {
+    const date = dates[i];
+    const dayNum = i + 1;
+
+    try {
+      const args = ['--airport', airport, '--date', date];
+      if (force) {
+        args.push('--force');
+      }
+
+      await runCommand('node', [script, ...args]);
+      results.successful++;
+      logger.info(`${phaseName} complete for ${date}`, { dayNum, total: dates.length });
+    } catch (error) {
+      results.failed++;
+      results.errors.push({ date, error: error.message });
+      logger.error(`${phaseName} failed for ${date}`, { error: error.message });
+    }
+
+    if (i < dates.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
+  return results;
 }
 
 async function main() {
@@ -212,42 +188,89 @@ async function main() {
   const dates = generateDateRange(options.startDate, options.endDate);
   logger.info('Date range generated', { nDates: dates.length, dates });
 
-  const results = {
-    total: dates.length,
-    successful: 0,
-    failed: 0,
-    skipped: 0,
-    errors: [],
-  };
-
   console.log(`\n${'='.repeat(60)}`);
   console.log(`Processing ${dates.length} days for ${options.airport}`);
   console.log(`Date range: ${options.startDate} to ${options.endDate}`);
   console.log('='.repeat(60) + '\n');
 
-  for (let i = 0; i < dates.length; i++) {
-    const date = dates[i];
-    const dayNum = i + 1;
+  // Check extracted traces exist for all dates
+  await checkExtractedTraces(options.airport, dates);
 
-    console.log(`\n[${dayNum}/${dates.length}] Processing ${date}...`);
-    console.log('─'.repeat(60));
+  // Phase 3a: Analyze flights (batch process all days)
+  console.log(`\n${'='.repeat(60)}`);
+  console.log('Phase 3a: Analyzing flights (batch)');
+  console.log('='.repeat(60));
+  const phase3aResults = await batchProcessPhase(
+    options.airport,
+    dates,
+    'Phase 3a: Analyze flights',
+    'analyze-airport-day.js',
+    options.force
+  );
 
-    const result = await processDay(options.airport, date, options.force);
-
-    if (result.success) {
-      results.successful++;
-      console.log(`✓ ${date} completed successfully`);
-    } else {
-      results.failed++;
-      results.errors.push({ date, error: result.error });
-      console.log(`✗ ${date} failed: ${result.error}`);
-    }
-
-    // Add a small delay between days to avoid overwhelming the system
-    if (i < dates.length - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+  if (phase3aResults.failed > 0) {
+    console.log(`\nPhase 3a completed with ${phase3aResults.failed} failures`);
+    console.log('Errors:');
+    for (const { date, error } of phase3aResults.errors) {
+      console.log(`  ${date}: ${error}`);
     }
   }
+
+  // Phase 3b: Generate L1 statistics (batch process all days)
+  console.log(`\n${'='.repeat(60)}`);
+  console.log('Phase 3b: Generating L1 statistics (batch)');
+  console.log('='.repeat(60));
+  const phase3bResults = await batchProcessPhase(
+    options.airport,
+    dates,
+    'Phase 3b: Generate L1 stats',
+    'generate-l1-stats.js',
+    options.force
+  );
+
+  if (phase3bResults.failed > 0) {
+    console.log(`\nPhase 3b completed with ${phase3bResults.failed} failures`);
+  }
+
+  // Phase 3c: Generate congestion statistics (batch process all days)
+  console.log(`\n${'='.repeat(60)}`);
+  console.log('Phase 3c: Generating congestion statistics (batch)');
+  console.log('='.repeat(60));
+  const phase3cResults = await batchProcessPhase(
+    options.airport,
+    dates,
+    'Phase 3c: Generate congestion stats',
+    'generate-congestion-stats.js',
+    options.force
+  );
+
+  if (phase3cResults.failed > 0) {
+    console.log(`\nPhase 3c completed with ${phase3cResults.failed} failures`);
+  }
+
+  // Phase 3d: Generate L2 statistics (batch process all days - uses local dates)
+  console.log(`\n${'='.repeat(60)}`);
+  console.log('Phase 3d: Generating L2 statistics (batch, local time)');
+  console.log('='.repeat(60));
+  const phase3dResults = await batchProcessPhase(
+    options.airport,
+    dates,
+    'Phase 3d: Generate L2 stats',
+    'generate-l2-stats.js',
+    options.force
+  );
+
+  if (phase3dResults.failed > 0) {
+    console.log(`\nPhase 3d completed with ${phase3dResults.failed} failures`);
+  }
+
+  const results = {
+    total: dates.length,
+    successful: phase3aResults.successful + phase3bResults.successful + phase3cResults.successful + phase3dResults.successful,
+    failed: phase3aResults.failed + phase3bResults.failed + phase3cResults.failed + phase3dResults.failed,
+    skipped: 0,
+    errors: [...phase3aResults.errors, ...phase3bResults.errors, ...phase3cResults.errors, ...phase3dResults.errors],
+  };
 
   // Step 5: Generate yearly baseline (Phase 3e) - run once after all days are processed
   if (results.successful > 0) {
