@@ -17,6 +17,122 @@ class AirportDayAnalyzer {
   }
 
   /**
+   * Calculate distance between two coordinates using Haversine formula
+   * @param {number} lat1 - Latitude 1
+   * @param {number} lon1 - Longitude 1
+   * @param {number} lat2 - Latitude 2
+   * @param {number} lon2 - Longitude 2
+   * @returns {number} Distance in nautical miles
+   */
+  calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 3440.065; // Earth radius in nautical miles
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  /**
+   * Extract arrival segment from trace using L1 milestone timestamps
+   * Uses timeFrom100nm milestone to determine start time (no geometry calculations)
+   * @param {Array} trace - Full trace array from readsb format
+   * @param {object} airportConfig - Airport configuration (unused, kept for compatibility)
+   * @param {number} touchdownTimestamp - Touchdown timestamp (Unix seconds)
+   * @param {number} timeFrom100nm - Seconds from 100nm milestone to touchdown (from L1 milestones)
+   * @param {object} metadata - Aircraft metadata
+   * @param {string} date - Date string for timestamp normalization
+   * @returns {object} Simplified trace data for arrival segment or null if invalid
+   */
+  extractArrivalSegment(trace, airportConfig, touchdownTimestamp, timeFrom100nm, metadata = {}, date = null) {
+    if (!trace || !Array.isArray(trace) || trace.length === 0) {
+      return null;
+    }
+
+    // Calculate start timestamp: when aircraft passed 100nm (using L1 milestone)
+    const startTimestamp = touchdownTimestamp - timeFrom100nm;
+
+    // Normalize timestamps: check if trace has relative timestamps and normalize if needed
+    let baseTimestamp = null;
+    if (date) {
+      const dateObj = new Date(date + 'T00:00:00Z');
+      baseTimestamp = Math.floor(dateObj.getTime() / 1000);
+    }
+    
+    // Check if trace timestamps are relative (small values < 2 days) and need normalization
+    const needsNormalization = trace.length > 0 && 
+      Array.isArray(trace[0]) && 
+      trace[0][0] < 86400 * 2 && 
+      baseTimestamp !== null;
+    
+    const normalizeTimestamp = (ts) => {
+      if (needsNormalization && ts < 86400 * 2) {
+        return baseTimestamp + ts;
+      }
+      return ts;
+    };
+
+    const points = [];
+    let minAlt = Infinity;
+    let maxAlt = -Infinity;
+    let startTime = null;
+    let endTime = null;
+
+    // Extract all points between startTimestamp (100nm) and touchdownTimestamp
+    for (const point of trace) {
+      if (!Array.isArray(point) || point.length < 4) continue;
+
+      const timestamp = normalizeTimestamp(point[0]);
+      const lat = point[1];
+      const lon = point[2];
+      const alt = point[3];
+      const track = point[5] || null;
+
+      if (lat === null || lon === null || alt === null) continue;
+
+      // Include points from 100nm milestone to touchdown (inclusive)
+      if (timestamp >= startTimestamp && timestamp <= touchdownTimestamp) {
+        const altNum = typeof alt === 'number' ? alt : 0;
+        if (altNum < minAlt) minAlt = altNum;
+        if (altNum > maxAlt) maxAlt = altNum;
+
+        if (startTime === null) startTime = timestamp;
+        endTime = timestamp;
+
+        points.push([
+          lat,
+          lon,
+          altNum,
+          timestamp,
+          track !== null && track !== undefined ? Math.round(track) : null,
+        ]);
+      }
+    }
+
+    // If no points found in the time range, return null
+    if (points.length === 0) {
+      return null;
+    }
+
+    return {
+      points,
+      metadata: {
+        registration: metadata.registration || null,
+        aircraftType: metadata.aircraftType || null,
+        description: metadata.description || null,
+        minAlt: minAlt === Infinity ? 0 : minAlt,
+        maxAlt: maxAlt === -Infinity ? 0 : maxAlt,
+        startTime: points[0][3],
+        endTime: points[points.length - 1][3],
+        pointCount: points.length,
+        touchdownTimestamp,
+      },
+    };
+  }
+
+  /**
    * Simplify a trace to minimal format for visualization
    * @param {Array} trace - Full trace array from readsb format
    * @param {object} metadata - Aircraft metadata
@@ -300,8 +416,9 @@ class AirportDayAnalyzer {
     const flights = [];
     let processedCount = 0;
     let tracesSaved = 0;
-    const savedIcaos = new Set();
+    const savedArrivals = new Set(); // Track saved arrivals by icao-touchdownTimestamp
     const progressInterval = 50;
+    const traceCache = new Map(); // Cache traces by ICAO to avoid re-reading
 
     for await (const { icao, trace, registration, aircraftType, description } of this.traceReader.streamAllTraces(extractDir)) {
       processedCount++;
@@ -316,6 +433,9 @@ class AirportDayAnalyzer {
         });
       }
 
+      // Cache the current day's trace
+      traceCache.set(icao, { trace, registration, aircraftType, description });
+
       // Analyze this flight (may return multiple events)
       let events = this.flightAnalyzer.analyzeFlight(
         icao,
@@ -329,6 +449,7 @@ class AirportDayAnalyzer {
       // This handles cases where the approach happened on previous day but landing is on current day
       // Always check, not just when events.length === 0, to catch arrivals that might not be detected
       // in the current day's short trace
+      let mergedTrace = null;
       if (previousExtractDir) {
         const earlyDayThreshold = 2 * 60 * 60; // 2 hours after midnight UTC
         const dateObj = new Date(date + 'T00:00:00Z');
@@ -348,7 +469,7 @@ class AirportDayAnalyzer {
           
           if (previousTrace && previousTrace.trace && Array.isArray(previousTrace.trace)) {
             // Merge traces chronologically with timestamp normalization
-            const mergedTrace = this.mergeTraces(previousTrace.trace, trace, previousDate, date);
+            mergedTrace = this.mergeTraces(previousTrace.trace, trace, previousDate, date);
             
             // Re-analyze merged trace to find arrivals that land on current day
             const mergedEvents = this.flightAnalyzer.analyzeFlight(
@@ -367,6 +488,8 @@ class AirportDayAnalyzer {
                 
                 if (timeSinceMidnight >= 0 && timeSinceMidnight < earlyDayThreshold) {
                   // This arrival lands early on current day, include it
+                  // Mark this event as using merged trace
+                  event._useMergedTrace = true;
                   events.push(event);
                   logger.info('Found arrival from previous day trace that lands on current day', {
                     airport,
@@ -482,7 +605,7 @@ class AirportDayAnalyzer {
       // Track classifications for this ICAO
       const classifications = [];
 
-      // Add all events to flights array
+      // Add all events to flights array and save arrival traces
       for (const event of events) {
         if (event) {
           // Filter arrivals/departures to only include those that occur on the target date
@@ -492,6 +615,77 @@ class AirportDayAnalyzer {
             if (eventDateStr !== date) {
               // This arrival lands on a different day, skip it
               continue;
+            }
+
+            // Save arrival trace segment (only arrivals, filtered to 100nm)
+            // Convert timestamp to integer (seconds) for consistent file naming
+            const touchdownTimestampInt = Math.floor(event.touchdown.timestamp);
+            const arrivalKey = `${icao}-${touchdownTimestampInt}`;
+            if (!savedArrivals.has(arrivalKey)) {
+              try {
+                // Determine which trace to use: merged trace if available, otherwise current day's trace
+                const traceToUse = event._useMergedTrace && mergedTrace ? mergedTrace : trace;
+                
+                // Extract arrival segment using L1 milestone timestamps
+                // Use timeFrom100nm milestone to determine start time (no geometry calculations)
+                const timeFrom100nm = event.milestones?.timeFrom100nm;
+                if (!timeFrom100nm || timeFrom100nm <= 0) {
+                  logger.debug('Arrival missing timeFrom100nm milestone, skipping trace extraction', {
+                    airport,
+                    date,
+                    icao,
+                    touchdownTimestamp: event.touchdown.timestamp,
+                  });
+                  continue;
+                }
+
+                const arrivalSegment = this.extractArrivalSegment(
+                  traceToUse,
+                  airportConfig,
+                  event.touchdown.timestamp,
+                  timeFrom100nm,
+                  { registration, aircraftType, description },
+                  date // Pass date for timestamp normalization
+                );
+
+                if (arrivalSegment) {
+                  await this.traceData.save(
+                    airport,
+                    date,
+                    icao,
+                    {
+                      icao,
+                      date,
+                      airport,
+                      classification: 'arrival',
+                      touchdownTimestamp: event.touchdown.timestamp,
+                      ...arrivalSegment,
+                    },
+                    touchdownTimestampInt
+                  );
+                  savedArrivals.add(arrivalKey);
+                  tracesSaved++;
+                } else {
+                  logger.debug('Arrival segment extraction returned null', {
+                    airport,
+                    date,
+                    icao,
+                    touchdownTimestamp: event.touchdown.timestamp,
+                    timeFrom100nm,
+                    traceLength: traceToUse?.length || 0,
+                    hasMergedTrace: !!mergedTrace,
+                  });
+                }
+              } catch (error) {
+                logger.warn('Failed to save arrival trace segment', {
+                  airport,
+                  date,
+                  icao,
+                  touchdownTimestamp: event.touchdown.timestamp,
+                  error: error.message,
+                  stack: error.stack,
+                });
+              }
             }
           }
           if (event.classification === 'departure' && event.takeoff) {
@@ -507,36 +701,6 @@ class AirportDayAnalyzer {
           if (event.classification === 'arrival' || event.classification === 'departure') {
             classifications.push(event.classification);
           }
-        }
-      }
-
-      // Save simplified trace for arrivals and departures (once per ICAO)
-      if (classifications.length > 0 && !savedIcaos.has(icao)) {
-        try {
-          const simplifiedTrace = this.simplifyTrace(trace, {
-            registration,
-            aircraftType,
-            description,
-          });
-
-          if (simplifiedTrace) {
-            await this.traceData.save(airport, date, icao, {
-              icao,
-              date,
-              airport,
-              classifications,
-              ...simplifiedTrace,
-            });
-            savedIcaos.add(icao);
-            tracesSaved++;
-          }
-        } catch (error) {
-          logger.warn('Failed to save simplified trace', {
-            airport,
-            date,
-            icao,
-            error: error.message,
-          });
         }
       }
     }

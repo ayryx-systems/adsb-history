@@ -2116,7 +2116,7 @@
                             } else if (dataset.goAroundInfo) {
                                 const goAround = dataset.goAroundInfo[dataIndex];
                                 if (goAround) {
-                                    showTraceMap(goAround.icao, goAround.type, goAround.entryTime);
+                                    showTraceMap(goAround.icao, goAround.type, goAround.entryTime, true);
                                 }
                             }
                         }
@@ -2955,12 +2955,31 @@
             KSFO: [37.6213, -122.3790]
         };
 
-        function getTracePath(icao) {
+        function getTracePath(icao, touchdownTimestamp, fallbackToOldFormat = false) {
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
             const month = document.getElementById('monthSelect').value;
             const day = document.getElementById('daySelect').value;
-            return `cache/traces/${airport}/${year}/${month}/${day}/${icao}.json`;
+            
+            // Handle fallback to old format (without touchdown timestamp)
+            if (fallbackToOldFormat) {
+                return `cache/traces/${airport}/${year}/${month}/${day}/${icao}.json`;
+            }
+            
+            // Convert Date object or timestamp to Unix timestamp (seconds)
+            let timestamp;
+            if (touchdownTimestamp instanceof Date) {
+                timestamp = Math.floor(touchdownTimestamp.getTime() / 1000);
+            } else if (typeof touchdownTimestamp === 'number') {
+                // Already a timestamp - assume seconds if < year 2100, milliseconds otherwise
+                timestamp = touchdownTimestamp > 4102444800 ? Math.floor(touchdownTimestamp / 1000) : touchdownTimestamp;
+            } else {
+                // Try to parse as Date string
+                const date = new Date(touchdownTimestamp);
+                timestamp = Math.floor(date.getTime() / 1000);
+            }
+            
+            return `cache/traces/${airport}/${year}/${month}/${day}/${icao}-${timestamp}.json`;
         }
 
         function closeTraceModal() {
@@ -2973,7 +2992,7 @@
             }
         }
 
-        function showTraceMap(icao, aircraftType, timestamp) {
+        function showTraceMap(icao, aircraftType, timestamp, isGoAround = false) {
             const modal = document.getElementById('traceModal');
             const loading = document.getElementById('traceLoading');
             const error = document.getElementById('traceError');
@@ -2984,15 +3003,64 @@
             error.style.display = 'none';
             mapContainer.innerHTML = '';
             
-            const date = new Date(timestamp);
+            const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
             const dateStr = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
-            document.getElementById('traceModalTitle').textContent = `Flight Trace: ${icao} (${aircraftType}) - ${dateStr}`;
             
-            const tracePath = getTracePath(icao);
+            if (isGoAround) {
+                document.getElementById('traceModalTitle').textContent = `Go-Around Trace: ${icao} (${aircraftType}) - ${dateStr}`;
+            } else {
+                document.getElementById('traceModalTitle').textContent = `Flight Trace: ${icao} (${aircraftType}) - ${dateStr}`;
+            }
+            
+            // Try new format first (with touchdown timestamp as integer)
+            const tracePath = getTracePath(icao, timestamp);
             
             fetch(tracePath)
                 .then(response => {
                     if (!response.ok) {
+                        // Try fallback: search for files with this ICAO and find closest timestamp match
+                        if (!isGoAround) {
+                            const airport = document.getElementById('airportSelect').value;
+                            const year = document.getElementById('yearSelect').value;
+                            const month = document.getElementById('monthSelect').value;
+                            const day = document.getElementById('daySelect').value;
+                            
+                            // Get target timestamp in seconds (for matching)
+                            let targetTimestampSeconds;
+                            if (timestamp instanceof Date) {
+                                targetTimestampSeconds = timestamp.getTime() / 1000;
+                            } else if (typeof timestamp === 'number') {
+                                targetTimestampSeconds = timestamp > 4102444800 ? timestamp / 1000 : timestamp;
+                            } else {
+                                targetTimestampSeconds = new Date(timestamp).getTime() / 1000;
+                            }
+                            
+                            // Try decimal format (for existing files created before the fix)
+                            const decimalPath = `cache/traces/${airport}/${year}/${month}/${day}/${icao}-${targetTimestampSeconds}.json`;
+                            
+                            return fetch(decimalPath).then(decimalResponse => {
+                                if (!decimalResponse.ok) {
+                                    // Try fallback to old format (without touchdown timestamp)
+                                    const fallbackPath = getTracePath(icao, timestamp, true);
+                                    return fetch(fallbackPath).then(fallbackResponse => {
+                                        if (!fallbackResponse.ok) {
+                                            throw new Error(`Trace not found: ${response.status}`);
+                                        }
+                                        return fallbackResponse.json();
+                                    });
+                                }
+                                return decimalResponse.json();
+                            }).catch(() => {
+                                // If decimal format fails, try old format
+                                const fallbackPath = getTracePath(icao, timestamp, true);
+                                return fetch(fallbackPath).then(fallbackResponse => {
+                                    if (!fallbackResponse.ok) {
+                                        throw new Error(`Trace not found: ${response.status}`);
+                                    }
+                                    return fallbackResponse.json();
+                                });
+                            });
+                        }
                         throw new Error(`Trace not found: ${response.status}`);
                     }
                     return response.json();
@@ -3004,7 +3072,11 @@
                 .catch(err => {
                     loading.style.display = 'none';
                     error.style.display = 'block';
-                    error.textContent = `Failed to load trace: ${err.message}`;
+                    if (isGoAround) {
+                        error.textContent = `Go-arounds do not have trace files. Try clicking on an arrival instead.`;
+                    } else {
+                        error.textContent = `Failed to load trace: ${err.message}`;
+                    }
                 });
         }
 
