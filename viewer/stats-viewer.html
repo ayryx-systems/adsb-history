@@ -428,6 +428,13 @@
             </div>
 
             <div class="chart-container">
+                <h3>Aircraft Entering 50nm Zone (Demand)</h3>
+                <div class="chart-wrapper">
+                    <canvas id="entriesChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-container">
                 <h3>Time from 50nm by Time Slot</h3>
                 <div class="chart-wrapper">
                     <canvas id="time50nmChart"></canvas>
@@ -1062,6 +1069,7 @@
             destroyChart('temperature');
             destroyChart('pressure');
             destroyChart('congestion');
+            destroyChart('entries');
 
             const selectedCategories = getSelectedCategories();
             const selectedTypes = getAircraftTypesForCategories(selectedCategories);
@@ -1069,6 +1077,7 @@
             
             if (currentCongestionData) {
                 renderCongestionChart(data, currentCongestionData);
+                renderEntriesChart(data, currentCongestionData);
             }
             
             renderTime50nmChart(data, selectedTypes);
@@ -2122,20 +2131,41 @@
                 return congestionSlot && congestionSlot.congestion !== undefined ? congestionSlot.congestion : null;
             });
 
+            const datasets = [{
+                label: 'Aircraft on Approach',
+                data: congestion,
+                borderColor: 'rgba(255, 99, 132, 1)',
+                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                tension: 0.1,
+                pointRadius: 2,
+                borderWidth: 2,
+                fill: true
+            }];
+
+            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+                const baselineCongestion = slots.map(slot => {
+                    const baseline = currentBaselineData.byTimeSlot[slot];
+                    return baseline && baseline.averageCongestion !== null ? baseline.averageCongestion : null;
+                });
+
+                datasets.push({
+                    label: 'Yearly Average',
+                    data: baselineCongestion,
+                    borderColor: 'rgba(0, 0, 0, 1)',
+                    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+                    borderWidth: 2,
+                    borderDash: [10, 5],
+                    pointRadius: 2,
+                    fill: false,
+                    tension: 0.1
+                });
+            }
+
             charts['congestion'] = new Chart(document.getElementById('congestionChart'), {
                 type: 'line',
                 data: {
                     labels: slots,
-                    datasets: [{
-                        label: 'Aircraft on Approach',
-                        data: congestion,
-                        borderColor: 'rgba(255, 99, 132, 1)',
-                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                        tension: 0.1,
-                        pointRadius: 2,
-                        borderWidth: 2,
-                        fill: true
-                    }]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
@@ -2158,7 +2188,84 @@
                             callbacks: {
                                 label: function(context) {
                                     if (context.parsed.y !== null) {
-                                        return `Aircraft on Approach: ${context.parsed.y}`;
+                                        return `${context.dataset.label}: ${Math.round(context.parsed.y)}`;
+                                    }
+                                    return '';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderEntriesChart(data, congestionData) {
+            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const slots = Object.keys(timeSlots).sort();
+            
+            const entries = slots.map(slot => {
+                const congestionSlot = congestionData.byTimeSlot && congestionData.byTimeSlot[slot];
+                return congestionSlot && congestionSlot.entries !== undefined ? congestionSlot.entries : null;
+            });
+
+            const datasets = [{
+                label: 'Aircraft Entering 50nm Zone',
+                data: entries,
+                borderColor: 'rgba(54, 162, 235, 1)',
+                backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                tension: 0.1,
+                pointRadius: 2,
+                borderWidth: 2,
+                fill: true
+            }];
+
+            if (currentBaselineData && currentBaselineData.byTimeSlot) {
+                const baselineEntries = slots.map(slot => {
+                    const baseline = currentBaselineData.byTimeSlot[slot];
+                    return baseline && baseline.averageEntries !== null ? baseline.averageEntries : null;
+                });
+
+                datasets.push({
+                    label: 'Yearly Average',
+                    data: baselineEntries,
+                    borderColor: 'rgba(0, 0, 0, 1)',
+                    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+                    borderWidth: 2,
+                    borderDash: [10, 5],
+                    pointRadius: 2,
+                    fill: false,
+                    tension: 0.1
+                });
+            }
+
+            charts['entries'] = new Chart(document.getElementById('entriesChart'), {
+                type: 'line',
+                data: {
+                    labels: slots,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Aircraft Count' },
+                            ticks: { precision: 0 }
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.parsed.y !== null) {
+                                        return `${context.dataset.label}: ${Math.round(context.parsed.y)}`;
                                     }
                                     return '';
                                 }

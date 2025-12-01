@@ -101,6 +101,7 @@ class TraceExtractor {
     }
 
     let extractedCount = 0;
+    const expectedCount = allAircraftIds.length;
     const icaosBySubdir = new Map();
     
     for (const icao of allAircraftIds) {
@@ -135,11 +136,14 @@ class TraceExtractor {
       }
     }
 
+    icaosBySubdir.clear();
+    allAircraftIds.length = 0;
+
     logger.info('Copied trace files', {
       airport,
       date,
       extractedCount,
-      expectedCount: allAircraftIds.length,
+      expectedCount,
     });
 
     logger.info('Step 5: Creating tar archive', { airport, date });
@@ -167,6 +171,10 @@ class TraceExtractor {
     logger.info('Cleaning up temporary extraction directory', { extractDir });
     if (fs.existsSync(extractDir)) {
       fs.rmSync(extractDir, { recursive: true, force: true });
+    }
+
+    if (global.gc) {
+      global.gc();
     }
 
     logger.info('Cleaning up raw tar file and extracted directory', {

@@ -149,11 +149,42 @@ class CongestionAnalyzer {
         timeSlots[slot] = {
           timestamp: dayStartTimestamp + hour * 3600 + minute * 60,
           congestion: 0,
+          entries: 0,
         };
       }
     }
 
-    // For each time slot, count aircraft that:
+    // First pass: Count aircraft entering 50nm in each time slot
+    for (const arrival of arrivals) {
+      const touchdownTime = arrival.touchdown.timestamp;
+
+      // Determine when aircraft was at 50nm
+      let timeAt50nm = null;
+
+      if (arrival.milestones && arrival.milestones.timeFrom50nm) {
+        // Aircraft was at 50nm this many seconds before touchdown
+        timeAt50nm = touchdownTime - arrival.milestones.timeFrom50nm;
+      } else {
+        // Estimate: typical approach from 50nm takes ~15-20 minutes
+        // Use 18 minutes (1080 seconds) as default
+        timeAt50nm = touchdownTime - (18 * 60);
+      }
+
+      // Find which time slot this entry falls into
+      // Only count entries that occur during the current day
+      if (timeAt50nm >= dayStartTimestamp && timeAt50nm < dayStartTimestamp + 24 * 60 * 60) {
+        const entryDate = new Date(timeAt50nm * 1000);
+        const entryHour = entryDate.getUTCHours();
+        const entryMinute = entryDate.getUTCMinutes();
+        const entrySlot = getTimeSlot(entryHour, entryMinute);
+
+        if (timeSlots[entrySlot]) {
+          timeSlots[entrySlot].entries++;
+        }
+      }
+    }
+
+    // Second pass: For each time slot, count aircraft that:
     // 1. Are landing within the next 2 hours (even if on next day)
     // 2. Were within 50nm at the slot time
     for (const [slot, slotData] of Object.entries(timeSlots)) {
@@ -204,7 +235,13 @@ class CongestionAnalyzer {
       date,
       generatedAt: new Date().toISOString(),
       byTimeSlot: Object.fromEntries(
-        Object.entries(timeSlots).map(([slot, data]) => [slot, { congestion: data.congestion }])
+        Object.entries(timeSlots).map(([slot, data]) => [
+          slot,
+          {
+            congestion: data.congestion,
+            entries: data.entries,
+          },
+        ])
       ),
     };
   }

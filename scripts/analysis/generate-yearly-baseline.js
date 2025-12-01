@@ -17,6 +17,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import L1StatsData from '../../src/analysis/l1-stats/L1StatsData.js';
+import CongestionData from '../../src/analysis/congestion/CongestionData.js';
 import logger from '../../src/utils/logger.js';
 
 dotenv.config();
@@ -84,6 +85,7 @@ async function generateBaseline(airport, year, force) {
   }
 
   const l1StatsData = new L1StatsData();
+  const congestionData = new CongestionData();
   const dates = getDaysInYear(year);
   
   logger.info('Generating yearly baseline', {
@@ -113,6 +115,8 @@ async function generateBaseline(airport, year, force) {
             counts: [],
             times50nm: [],
             times100nm: [],
+            congestion: [],
+            entries: [],
           };
         }
 
@@ -135,6 +139,36 @@ async function generateBaseline(airport, year, force) {
             timeSlotData[slot].times100nm.push(...times100nm);
           }
         }
+      }
+
+      try {
+        const congestion = await congestionData.load(airport, date);
+        if (congestion && congestion.byTimeSlot) {
+          for (const [slot, slotCongestion] of Object.entries(congestion.byTimeSlot)) {
+            if (!timeSlotData[slot]) {
+              timeSlotData[slot] = {
+                counts: [],
+                times50nm: [],
+                times100nm: [],
+                congestion: [],
+                entries: [],
+              };
+            }
+
+            if (slotCongestion.congestion !== undefined && slotCongestion.congestion !== null) {
+              timeSlotData[slot].congestion.push(slotCongestion.congestion);
+            }
+            if (slotCongestion.entries !== undefined && slotCongestion.entries !== null) {
+              timeSlotData[slot].entries.push(slotCongestion.entries);
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn('Failed to load congestion data for date', {
+          airport,
+          date,
+          error: error.message,
+        });
       }
 
       processedDays++;
@@ -183,14 +217,26 @@ async function generateBaseline(airport, year, force) {
       ? calculateMedian(data.times100nm)
       : null;
 
+    const avgCongestion = data.congestion.length > 0
+      ? data.congestion.reduce((a, b) => a + b, 0) / data.congestion.length
+      : null;
+
+    const avgEntries = data.entries.length > 0
+      ? data.entries.reduce((a, b) => a + b, 0) / data.entries.length
+      : null;
+
     baseline.byTimeSlot[slot] = {
       averageCount: Math.round(avgCount * 100) / 100,
       medianTimeFrom50nm: median50nm ? Math.round(median50nm * 100) / 100 : null,
       medianTimeFrom100nm: median100nm ? Math.round(median100nm * 100) / 100 : null,
+      averageCongestion: avgCongestion !== null ? Math.round(avgCongestion * 100) / 100 : null,
+      averageEntries: avgEntries !== null ? Math.round(avgEntries * 100) / 100 : null,
       sampleSize: {
         days: data.counts.length,
         arrivals50nm: data.times50nm.length,
         arrivals100nm: data.times100nm.length,
+        congestion: data.congestion.length,
+        entries: data.entries.length,
       },
     };
   }
