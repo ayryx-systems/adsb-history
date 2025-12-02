@@ -348,6 +348,79 @@ class L2StatsAnalyzer {
       }
     }
 
+    // Link go-arounds to subsequent arrivals
+    // Collect all arrivals with their ICAO and touchdown timestamp
+    const allArrivalsByICAO = {};
+    for (const slot of allTimeSlots) {
+      const slotData = byLocalTimeSlot[slot];
+      for (const aircraft of slotData.aircraft) {
+        if (!aircraft.touchdown || !aircraft.touchdown.utc) {
+          continue;
+        }
+        const icao = aircraft.icao;
+        if (!allArrivalsByICAO[icao]) {
+          allArrivalsByICAO[icao] = [];
+        }
+        const touchdownTimestamp = Math.floor(new Date(aircraft.touchdown.utc).getTime() / 1000);
+        allArrivalsByICAO[icao].push({
+          aircraft,
+          touchdownTimestamp,
+        });
+      }
+    }
+
+    // Sort arrivals by timestamp for each ICAO
+    for (const icao of Object.keys(allArrivalsByICAO)) {
+      allArrivalsByICAO[icao].sort((a, b) => a.touchdownTimestamp - b.touchdownTimestamp);
+    }
+
+    // Link go-arounds to subsequent arrivals
+    const maxTimeWindowSeconds = 30 * 60; // 30 minutes
+    let linkedGoArounds = 0;
+    let unlinkedGoArounds = 0;
+
+    for (const slot of allTimeSlots) {
+      const slotData = byLocalTimeSlot[slot];
+      for (const goAround of slotData.goArounds) {
+        if (!goAround.entryTime || !goAround.icao) {
+          continue;
+        }
+
+        const goAroundEntryTimestamp = Math.floor(new Date(goAround.entryTime).getTime() / 1000);
+        const arrivalsForICAO = allArrivalsByICAO[goAround.icao] || [];
+
+        // Find the next arrival after the go-around entry time
+        let linkedArrivalData = null;
+        for (const arrivalData of arrivalsForICAO) {
+          const timeDiff = arrivalData.touchdownTimestamp - goAroundEntryTimestamp;
+          if (timeDiff > 0 && timeDiff <= maxTimeWindowSeconds) {
+            linkedArrivalData = arrivalData;
+            break;
+          }
+        }
+
+        if (linkedArrivalData) {
+          goAround.linkedArrival = {
+            icao: linkedArrivalData.aircraft.icao,
+            type: linkedArrivalData.aircraft.type || 'UNKNOWN',
+            touchdown: linkedArrivalData.aircraft.touchdown.utc,
+            timeDiffMinutes: Math.round((linkedArrivalData.touchdownTimestamp - goAroundEntryTimestamp) / 60),
+          };
+          linkedGoArounds++;
+        } else {
+          unlinkedGoArounds++;
+        }
+      }
+    }
+
+    logger.debug('Go-around linking complete', {
+      airport: airportConfig.icao,
+      localDate,
+      linkedGoArounds,
+      unlinkedGoArounds,
+      linkRate: totalGoArounds > 0 ? ((linkedGoArounds / totalGoArounds) * 100).toFixed(1) + '%' : '0%',
+    });
+
     // Calculate statistics for each local time slot
     const timeSlotData = {};
     const timeSlotMedians = {};
@@ -377,6 +450,11 @@ class L2StatsAnalyzer {
     const overall = {
       count: totalArrivals,
       goAroundCount: totalGoArounds,
+      goAroundLinking: {
+        linked: linkedGoArounds,
+        unlinked: unlinkedGoArounds,
+        linkRate: totalGoArounds > 0 ? Math.round((linkedGoArounds / totalGoArounds) * 1000) / 10 : 0,
+      },
       milestones: {
         timeFrom100nm: this.calculateStats(overallMilestones.timeFrom100nm),
         timeFrom50nm: this.calculateStats(overallMilestones.timeFrom50nm),
@@ -391,6 +469,8 @@ class L2StatsAnalyzer {
       localDate,
       totalArrivals,
       totalGoArounds,
+      linkedGoArounds,
+      unlinkedGoArounds,
       volumes,
     });
 

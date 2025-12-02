@@ -476,7 +476,7 @@
                     <canvas id="arrivalsScatterChart"></canvas>
                 </div>
                 <div class="legend" id="scatterLegend" style="margin-top: 15px;"></div>
-                <small style="color: #666; display: block; margin-top: 10px;">Click on any dot to see touchdown time and duration. Click legend items to show/hide categories.</small>
+                <small style="color: #666; display: block; margin-top: 10px;">Click on any dot to see touchdown time and duration. Click on go-around markers (red triangles) to view the complete flight sequence including the subsequent landing. Click legend items to show/hide categories.</small>
             </div>
 
             <div class="chart-container">
@@ -1222,6 +1222,7 @@
             
             const grid = document.getElementById('infoGrid');
             const goAroundCount = data.totalGoArounds || (data.overall && data.overall.goAroundCount) || 0;
+            const goAroundLinking = data.overall && data.overall.goAroundLinking;
             
             let volumesHtml = '';
             if (data.volumes) {
@@ -1233,9 +1234,23 @@
                 `;
             }
             
+            let goAroundLinkingHtml = '';
+            if (goAroundLinking && goAroundCount > 0) {
+                goAroundLinkingHtml = `
+                    <div class="info-item" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e0e0e0;">
+                        <strong>Go-Around Linking:</strong>
+                        <div style="margin-left: 12px; margin-top: 4px; font-size: 0.9em; color: #666;">
+                            ${goAroundLinking.linked} linked to subsequent landing (${goAroundLinking.linkRate}%)<br>
+                            ${goAroundLinking.unlinked} without subsequent landing
+                        </div>
+                    </div>
+                `;
+            }
+            
             grid.innerHTML = `
                 <div class="info-item"><strong>Total Arrivals:</strong> ${data.totalArrivals.toLocaleString()}</div>
                 <div class="info-item"><strong>Go-Arounds:</strong> ${goAroundCount.toLocaleString()}</div>
+                ${goAroundLinkingHtml}
                 <div class="info-item"><strong>Generated:</strong> ${new Date(data.generatedAt).toLocaleString()}</div>
                 ${volumesHtml}
             `;
@@ -1823,9 +1838,8 @@
                             icao: goAround.icao,
                             type: goAround.type || 'UNKNOWN',
                             entryTime: entryTimeUTC,
-                            duration: goAround.duration,
                             entryAltitudeAGL_ft: goAround.entryAltitudeAGL_ft,
-                            maxAltitudeAGL_ft: goAround.maxAltitudeAGL_ft
+                            linkedArrival: goAround.linkedArrival || null
                         });
                     }
                 }
@@ -1981,10 +1995,21 @@
                                     } else if (dataset.goAroundInfo) {
                                         const goAround = dataset.goAroundInfo[dataIndex];
                                         if (goAround) {
-                                            return [
+                                            const tooltip = [
                                                 `Aircraft: ${goAround.type}`,
-                                                `ICAO: ${goAround.icao}`
+                                                `ICAO: ${goAround.icao}`,
+                                                `Go-Around Entry: ${new Date(goAround.entryTime).toISOString().replace('T', ' ').substring(0, 19)} UTC`
                                             ];
+                                            if (goAround.linkedArrival) {
+                                                const linkedTime = new Date(goAround.linkedArrival.touchdown);
+                                                tooltip.push(
+                                                    `→ Linked to landing at ${linkedTime.toISOString().replace('T', ' ').substring(0, 19)} UTC`,
+                                                    `Time to landing: ${goAround.linkedArrival.timeDiffMinutes} min`
+                                                );
+                                            } else {
+                                                tooltip.push('(No subsequent landing found)');
+                                            }
+                                            return tooltip;
                                         }
                                     }
                                     return '';
@@ -2010,7 +2035,21 @@
                             } else if (dataset.goAroundInfo) {
                                 const goAround = dataset.goAroundInfo[dataIndex];
                                 if (goAround) {
-                                    showTraceMap(goAround.icao, goAround.type, goAround.entryTime, true);
+                                    if (goAround.linkedArrival) {
+                                        const linkedArrivalTime = new Date(goAround.linkedArrival.touchdown);
+                                        const goAroundEntryTime = goAround.entryTime instanceof Date 
+                                            ? goAround.entryTime 
+                                            : new Date(goAround.entryTime);
+                                        showTraceMap(
+                                            goAround.linkedArrival.icao, 
+                                            goAround.linkedArrival.type, 
+                                            linkedArrivalTime, 
+                                            false,
+                                            goAroundEntryTime
+                                        );
+                                    } else {
+                                        showGoAroundInfo(goAround);
+                                    }
                                 }
                             }
                         }
@@ -2929,7 +2968,45 @@
             }
         }
 
-        function showTraceMap(icao, aircraftType, timestamp, isGoAround = false) {
+        function showGoAroundInfo(goAround) {
+            const modal = document.getElementById('traceModal');
+            const loading = document.getElementById('traceLoading');
+            const error = document.getElementById('traceError');
+            const mapContainer = document.getElementById('traceMap');
+            
+            modal.classList.add('active');
+            loading.style.display = 'none';
+            error.style.display = 'block';
+            mapContainer.innerHTML = '';
+            
+            const entryDate = goAround.entryTime instanceof Date ? goAround.entryTime : new Date(goAround.entryTime);
+            const dateStr = `${entryDate.getUTCFullYear()}-${String(entryDate.getUTCMonth() + 1).padStart(2, '0')}-${String(entryDate.getUTCDate()).padStart(2, '0')}`;
+            
+            document.getElementById('traceModalTitle').textContent = `Go-Around: ${goAround.icao} (${goAround.type}) - ${dateStr}`;
+            
+            error.innerHTML = `
+                <div style="padding: 20px;">
+                    <h3 style="margin-bottom: 15px;">Go-Around Information</h3>
+                    <p><strong>Aircraft:</strong> ${goAround.type} (${goAround.icao})</p>
+                    <p><strong>Entry Time:</strong> ${entryDate.toISOString().replace('T', ' ').substring(0, 19)} UTC</p>
+                    <p><strong>Entry Height:</strong> ${goAround.entryAltitudeAGL_ft} ft AGL</p>
+                    <p style="margin-top: 20px; color: #666;">
+                        <em>No trace file available for go-arounds. Trace files are only extracted for successful landings.</em>
+                    </p>
+                    ${goAround.linkedArrival ? `
+                        <p style="margin-top: 15px; color: #0066cc;">
+                            <strong>Note:</strong> This go-around was linked to a subsequent landing, but the trace file could not be found.
+                        </p>
+                    ` : `
+                        <p style="margin-top: 15px; color: #666;">
+                            <em>No subsequent landing found for this go-around.</em>
+                        </p>
+                    `}
+                </div>
+            `;
+        }
+
+        function showTraceMap(icao, aircraftType, timestamp, isGoAround = false, goAroundEntryTime = null) {
             const modal = document.getElementById('traceModal');
             const loading = document.getElementById('traceLoading');
             const error = document.getElementById('traceError');
@@ -2943,7 +3020,9 @@
             const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
             const dateStr = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
             
-            if (isGoAround) {
+            if (goAroundEntryTime) {
+                document.getElementById('traceModalTitle').textContent = `Flight Trace (with Go-Around): ${icao} (${aircraftType}) - ${dateStr}`;
+            } else if (isGoAround) {
                 document.getElementById('traceModalTitle').textContent = `Go-Around Trace: ${icao} (${aircraftType}) - ${dateStr}`;
             } else {
                 document.getElementById('traceModalTitle').textContent = `Flight Trace: ${icao} (${aircraftType}) - ${dateStr}`;
@@ -3018,7 +3097,7 @@
                 })
                 .then(traceData => {
                     loading.style.display = 'none';
-                    renderTraceMap(traceData);
+                    renderTraceMap(traceData, goAroundEntryTime);
                 })
                 .catch(err => {
                     loading.style.display = 'none';
@@ -3031,7 +3110,7 @@
                 });
         }
 
-        function renderTraceMap(traceData) {
+        function renderTraceMap(traceData, goAroundEntryTime = null) {
             if (!traceData.points || traceData.points.length === 0) {
                 document.getElementById('traceError').style.display = 'block';
                 document.getElementById('traceError').textContent = 'No trace points available';
@@ -3075,19 +3154,31 @@
                 return `${hours}:${minutes}:${seconds} UTC`;
             }
             
+            let goAroundStartTimestamp = null;
+            let goAroundEndTimestamp = null;
+            if (goAroundEntryTime) {
+                const goAroundEntryDate = goAroundEntryTime instanceof Date ? goAroundEntryTime : new Date(goAroundEntryTime);
+                goAroundStartTimestamp = Math.floor(goAroundEntryDate.getTime() / 1000);
+                goAroundEndTimestamp = goAroundStartTimestamp + 120;
+            }
+            
             const segments = [];
             for (let i = 0; i < points.length - 1; i++) {
                 const p1 = points[i];
                 const p2 = points[i + 1];
                 const color = getAltitudeColor(p1[2]);
+                const isGoAroundSegment = goAroundStartTimestamp && 
+                    p1[3] >= goAroundStartTimestamp && 
+                    p1[3] <= goAroundEndTimestamp;
                 segments.push({
                     latlngs: [[p1[0], p1[1]], [p2[0], p2[1]]],
-                    color: color,
+                    color: isGoAroundSegment ? '#ff0000' : color,
                     alt: p1[2],
                     track: p1[4],
                     timestamp: p1[3],
                     nextTimestamp: p2[3],
-                    index: i
+                    index: i,
+                    isGoAround: isGoAroundSegment
                 });
             }
             
@@ -3098,8 +3189,8 @@
             segments.forEach((segment, index) => {
                 const polyline = L.polyline(segment.latlngs, {
                     color: segment.color,
-                    weight: 3,
-                    opacity: 0.7
+                    weight: segment.isGoAround ? 5 : 3,
+                    opacity: segment.isGoAround ? 1.0 : 0.7
                 });
                 
                 if (index % arrowInterval === 0 && segment.track !== null && segment.track !== undefined) {
@@ -3133,12 +3224,16 @@
                 
                 const nextTimestampFormatted = formatTimestamp(segment.nextTimestamp);
                 
-                polyline.bindPopup(`
+                let popupContent = `
                     <strong>Segment ${index + 1}</strong><br>
                     Time: ${nextTimestampFormatted}<br>
                     Altitude: ${Math.round(segment.alt).toLocaleString()} ft<br>
                     Track: ${segment.track !== null ? segment.track + '°' : 'N/A'}
-                `);
+                `;
+                if (segment.isGoAround) {
+                    popupContent += '<br><strong style="color: #ff0000;">Go-Around Segment</strong>';
+                }
+                polyline.bindPopup(popupContent);
                 
                 traceMapLayer.addLayer(polyline);
             });
@@ -3170,6 +3265,29 @@
                 })
             }).addTo(traceMap);
             endMarker.bindPopup(`<strong>End</strong><br>Time: ${endTimestamp}<br>Altitude: ${Math.round(endPoint[2]).toLocaleString()} ft`);
+            
+            if (goAroundStartTimestamp) {
+                let goAroundPoint = null;
+                for (const point of points) {
+                    if (point[3] >= goAroundStartTimestamp && point[3] <= goAroundStartTimestamp + 60) {
+                        goAroundPoint = point;
+                        break;
+                    }
+                }
+                
+                if (goAroundPoint) {
+                    const goAroundTimestamp = formatTimestamp(goAroundPoint[3]);
+                    const goAroundMarker = L.marker([goAroundPoint[0], goAroundPoint[1]], {
+                        icon: L.divIcon({
+                            className: 'goaround-marker',
+                            html: '<div style="background: #ff6600; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 0 2px #ff6600;"></div>',
+                            iconSize: [14, 14],
+                            iconAnchor: [7, 7]
+                        })
+                    }).addTo(traceMap);
+                    goAroundMarker.bindPopup(`<strong>Go-Around Entry</strong><br>Time: ${goAroundTimestamp}<br>Altitude: ${Math.round(goAroundPoint[2]).toLocaleString()} ft`);
+                }
+            }
             
             const airport = document.getElementById('airportSelect').value;
             const airportCoords = airportCoordinates[airport];
