@@ -26,8 +26,50 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function showHelp() {
+  console.log(`
+Generate L2 statistics from L1 statistics data
+
+Calculates time-of-day volumes in local time:
+  - Morning volume (06:00-12:00 local)
+  - Afternoon volume (12:00-18:00 local)
+  - Evening volume (18:00-24:00 local)
+
+Usage:
+  # Single date
+  node scripts/analysis/generate-l2-stats.js --airport ICAO --date YYYY-MM-DD [options]
+  
+  # Date range (batch processing)
+  node scripts/analysis/generate-l2-stats.js --airport ICAO --start-date YYYY-MM-DD --end-date YYYY-MM-DD [options]
+
+Options:
+  --airport ICAO        Airport ICAO code (e.g., KLGA, KLAX, KORD)
+  --date YYYY-MM-DD     Single date to process (local date)
+  --start-date DATE     Start date for batch processing (local date)
+  --end-date DATE       End date for batch processing (local date)
+  --force               Reprocess even if data exists
+  --help, -h            Show this help message
+
+Examples:
+  # Process single date
+  node scripts/analysis/generate-l2-stats.js --airport KLGA --date 2025-11-08
+  
+  # Process date range (January 2025)
+  node scripts/analysis/generate-l2-stats.js --airport KORD --start-date 2025-01-01 --end-date 2025-01-31 --force
+  
+  # Show help
+  node scripts/analysis/generate-l2-stats.js --help
+      `);
+  process.exit(0);
+}
+
 function parseArgs() {
   const args = process.argv.slice(2);
+  
+  if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    showHelp();
+  }
+
   const options = {
     airport: null,
     date: null,
@@ -54,32 +96,7 @@ function parseArgs() {
     } else if (arg === '--force') {
       options.force = true;
     } else if (arg === '--help' || arg === '-h') {
-      console.log(`
-Generate L2 statistics from L1 statistics data
-
-Usage:
-  # Single date
-  node scripts/analysis/generate-l2-stats.js --airport ICAO --date YYYY-MM-DD [options]
-  
-  # Date range (batch processing)
-  node scripts/analysis/generate-l2-stats.js --airport ICAO --start-date YYYY-MM-DD --end-date YYYY-MM-DD [options]
-
-Options:
-  --airport ICAO        Airport ICAO code (e.g., KLGA, KLAX)
-  --date YYYY-MM-DD     Single date to process (local date)
-  --start-date DATE     Start date for batch processing (local date)
-  --end-date DATE       End date for batch processing (local date)
-  --force               Reprocess even if data exists
-  --help, -h            Show this help message
-
-Examples:
-  # Process single date
-  node scripts/analysis/generate-l2-stats.js --airport KLGA --date 2025-11-08
-  
-  # Process date range (January 2025)
-  node scripts/analysis/generate-l2-stats.js --airport KORD --start-date 2025-01-01 --end-date 2025-01-31 --force
-      `);
-      process.exit(0);
+      showHelp();
     }
   }
 
