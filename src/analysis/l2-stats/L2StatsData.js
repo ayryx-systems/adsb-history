@@ -18,18 +18,21 @@ class L2StatsData {
     this.region = config.region || process.env.AWS_REGION || 'us-west-1';
     this.cacheDir = config.cacheDir || './cache';
     this.useCache = config.useCache !== false;
+    this.localOnly = config.localOnly || false;
 
-    // Initialize S3 client
-    const clientConfig = { region: this.region };
-    
-    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-      clientConfig.credentials = {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      };
+    // Initialize S3 client only if not local-only
+    if (!this.localOnly) {
+      const clientConfig = { region: this.region };
+      
+      if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+        clientConfig.credentials = {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        };
+      }
+      
+      this.s3Client = new S3Client(clientConfig);
     }
-    
-    this.s3Client = new S3Client(clientConfig);
   }
 
   /**
@@ -115,12 +118,26 @@ class L2StatsData {
         logger.debug('Loaded from cache', { airport, date });
         return data;
       } catch (error) {
+        if (this.localOnly) {
+          logger.debug('Failed to load from cache (local-only mode)', {
+            airport,
+            date,
+            error: error.message,
+          });
+          return null;
+        }
         logger.warn('Failed to load from cache, trying S3', {
           airport,
           date,
           error: error.message,
         });
       }
+    }
+
+    // If local-only mode, don't try S3
+    if (this.localOnly) {
+      logger.debug('L2 stats data not found locally (local-only mode)', { airport, date });
+      return null;
     }
 
     // Load from S3

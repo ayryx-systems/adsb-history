@@ -807,7 +807,9 @@
         }
 
         function getSeasonalBaseline(baselineData, dateStr, airport, year) {
-            if (!baselineData) return null;
+            if (!baselineData) {
+                return null;
+            }
             
             const season = getSeason(dateStr, airport, year);
             const seasonData = baselineData[season];
@@ -821,7 +823,22 @@
             };
             
             if (seasonData.byTimeSlot) {
-                result.byTimeSlot = seasonData.byTimeSlot;
+                // Check if baseline is in UTC (based on timezone field or note)
+                const isUTC = baselineData.timezone === 'UTC' || baselineData.note?.includes('UTC');
+                
+                if (isUTC) {
+                    // Convert UTC baseline slots to local time slots
+                    const converted = convertBaselineToLocalTime(seasonData, dateStr, airport, year);
+                    if (converted && Object.keys(converted).length > 0) {
+                        result.byTimeSlot = converted;
+                    } else {
+                        console.warn('Baseline conversion resulted in no slots');
+                        result.byTimeSlot = seasonData.byTimeSlot;
+                    }
+                } else {
+                    // Baseline is already in local time
+                    result.byTimeSlot = seasonData.byTimeSlot;
+                }
             }
             
             if (seasonData.l2Volumes) {
@@ -869,6 +886,98 @@
             const slotMinute = Math.floor(utcMinute / 15) * 15;
             
             return `${String(utcHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
+        }
+
+        function convertUTCSlotToLocal(utcSlot, localDate, airport, year) {
+            // Convert UTC time slot to local time slot for the given local date
+            const [utcHour, utcMinute] = utcSlot.split(':').map(Number);
+            
+            // Get UTC offset
+            const season = getSeason(localDate, airport, year);
+            const offsets = {
+                'America/Los_Angeles': { winter: -8, summer: -7 },
+                'America/Denver': { winter: -7, summer: -6 },
+                'America/Chicago': { winter: -6, summer: -5 },
+                'America/New_York': { winter: -5, summer: -4 },
+            };
+            
+            const airportConfig = {
+                KORD: 'America/Chicago',
+                KLGA: 'America/New_York',
+                KJFK: 'America/New_York',
+                KLAX: 'America/Los_Angeles',
+                KSFO: 'America/Los_Angeles',
+            };
+            
+            const timezone = airportConfig[airport] || 'America/Chicago';
+            const offset = offsets[timezone] || { winter: -6, summer: -5 };
+            const offsetHours = season === 'summer' ? offset.summer : offset.winter;
+            
+            // Calculate local time directly
+            let localHour = utcHour + offsetHours;
+            let localMinute = utcMinute;
+            let dayOffset = 0;
+            
+            // Handle day rollover
+            if (localHour < 0) {
+                localHour += 24;
+                dayOffset = -1;
+            } else if (localHour >= 24) {
+                localHour -= 24;
+                dayOffset = 1;
+            }
+            
+            // Check if the local time is still on the same date
+            if (dayOffset !== 0) {
+                // Calculate the actual local date
+                const [yearStr, monthStr, dayStr] = localDate.split('-');
+                const dateObj = new Date(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr));
+                dateObj.setDate(dateObj.getDate() + dayOffset);
+                const actualLocalDate = dateObj.toISOString().split('T')[0];
+                
+                // Only return the slot if it's on the same local date
+                if (actualLocalDate !== localDate) {
+                    return null;
+                }
+            }
+            
+            const slotMinute = Math.floor(localMinute / 15) * 15;
+            return `${String(localHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
+        }
+
+        function convertBaselineToLocalTime(baselineData, localDate, airport, year) {
+            // Convert baseline data from UTC time slots to local time slots
+            if (!baselineData || !baselineData.byTimeSlot) {
+                return null;
+            }
+            
+            const localBaseline = {};
+            
+            for (const [utcSlot, slotData] of Object.entries(baselineData.byTimeSlot)) {
+                const localSlot = convertUTCSlotToLocal(utcSlot, localDate, airport, year);
+                if (localSlot) {
+                    if (!localBaseline[localSlot]) {
+                        localBaseline[localSlot] = { ...slotData };
+                    } else {
+                        // If multiple UTC slots map to same local slot, average them
+                        const existing = localBaseline[localSlot];
+                        localBaseline[localSlot] = {
+                            averageCount: existing.averageCount !== null && slotData.averageCount !== null
+                                ? (existing.averageCount + slotData.averageCount) / 2
+                                : existing.averageCount || slotData.averageCount,
+                            medianTimeFrom50nm: existing.medianTimeFrom50nm !== null && slotData.medianTimeFrom50nm !== null
+                                ? (existing.medianTimeFrom50nm + slotData.medianTimeFrom50nm) / 2
+                                : existing.medianTimeFrom50nm !== null ? existing.medianTimeFrom50nm : slotData.medianTimeFrom50nm,
+                            medianTimeFrom100nm: existing.medianTimeFrom100nm !== null && slotData.medianTimeFrom100nm !== null
+                                ? (existing.medianTimeFrom100nm + slotData.medianTimeFrom100nm) / 2
+                                : existing.medianTimeFrom100nm !== null ? existing.medianTimeFrom100nm : slotData.medianTimeFrom100nm,
+                            sampleSize: existing.sampleSize,
+                        };
+                    }
+                }
+            }
+            
+            return localBaseline;
         }
 
         function formatDualTimeLabels(slots, localDate, airport, year) {

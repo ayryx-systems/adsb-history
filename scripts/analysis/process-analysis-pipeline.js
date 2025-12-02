@@ -36,6 +36,7 @@ function parseArgs() {
     endDate: '2025-01-31',
     force: false,
     skipBaseline: false,
+    localOnly: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -54,6 +55,8 @@ function parseArgs() {
       options.force = true;
     } else if (arg === '--skip-baseline') {
       options.skipBaseline = true;
+    } else if (arg === '--local-only') {
+      options.localOnly = true;
     } else if (arg === '--help' || arg === '-h') {
       console.log(`
 Run analysis pipeline (Phase 3a, 3b, 3c, 3d, and 3e) for date range
@@ -70,6 +73,7 @@ Options:
   --end-date DATE       End date (default: 2025-01-31)
   --force               Reprocess even if data exists
   --skip-baseline       Skip yearly baseline generation (faster for incremental updates)
+  --local-only          Use only local L2 stats files (skip S3 downloads for baseline)
   --help, -h            Show this help message
 
 Examples:
@@ -289,6 +293,9 @@ async function main() {
       const baselineArgs = ['--airport', options.airport, '--year', year];
       if (options.force) {
         baselineArgs.push('--force');
+      }
+      if (options.localOnly) {
+        baselineArgs.push('--local-only');
       }
 
       await runCommand('node', [baselineScript, ...baselineArgs]);
