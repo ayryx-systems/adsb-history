@@ -765,6 +765,34 @@
             return getFirstSundayInNovember(year);
         }
 
+        function convertUTCToLocalTime(utcDate, dateStr, airport, year) {
+            // Get UTC offset for this date and airport
+            const season = getSeason(dateStr, airport, year);
+            const offsets = {
+                'America/Los_Angeles': { winter: -8, summer: -7 },
+                'America/Denver': { winter: -7, summer: -6 },
+                'America/Chicago': { winter: -6, summer: -5 },
+                'America/New_York': { winter: -5, summer: -4 },
+            };
+            
+            const airportConfig = {
+                KORD: 'America/Chicago',
+                KLGA: 'America/New_York',
+                KJFK: 'America/New_York',
+                KLAX: 'America/Los_Angeles',
+                KSFO: 'America/Los_Angeles',
+            };
+            
+            const timezone = airportConfig[airport] || 'America/Chicago';
+            const offset = offsets[timezone] || { winter: -6, summer: -5 };
+            const offsetHours = season === 'summer' ? offset.summer : offset.winter;
+            
+            // Convert UTC to local time
+            const utcTimestamp = utcDate.getTime();
+            const localTimestamp = utcTimestamp + offsetHours * 3600 * 1000;
+            return new Date(localTimestamp);
+        }
+        
         function getSeason(dateStr, airport, year) {
             const dateObj = new Date(dateStr + 'T00:00:00Z');
             const yearNum = typeof year === 'string' ? parseInt(year, 10) : year;
@@ -1822,14 +1850,18 @@
                     }
                     
                     if (ac.milestones?.timeFrom50nm !== undefined && ac.touchdown?.utc) {
-                        const touchdownTime = new Date(ac.touchdown.utc);
+                        const touchdownTimeUTC = new Date(ac.touchdown.utc);
                         const durationMinutes = ac.milestones.timeFrom50nm / 60;
                         
-                        // Convert UTC timestamp to local time
-                        // Since L2 stats already converted to local, we can parse the slot directly
-                        // But for scatter plot, we need hours since midnight in local time
-                        const [slotHour, slotMinute] = slot.split(':').map(Number);
-                        const hoursSinceMidnight = slotHour + slotMinute / 60;
+                        // Convert UTC touchdown time to airport local time
+                        const touchdownTimeLocal = convertUTCToLocalTime(touchdownTimeUTC, dateStr, airport, year);
+                        
+                        // Calculate hours since midnight in local time from actual touchdown time
+                        // Use the actual touchdown time, not the time slot, for accurate positioning
+                        const localHours = touchdownTimeLocal.getUTCHours();
+                        const localMinutes = touchdownTimeLocal.getUTCMinutes();
+                        const localSeconds = touchdownTimeLocal.getUTCSeconds();
+                        const hoursSinceMidnight = localHours + localMinutes / 60 + localSeconds / 3600;
                         
                         const category = getAircraftCategory(ac.type || 'UNKNOWN');
                         
@@ -1839,7 +1871,7 @@
                             icao: ac.icao,
                             type: ac.type || 'UNKNOWN',
                             category: category,
-                            touchdownTime: touchdownTime,
+                            touchdownTime: touchdownTimeUTC,
                             durationMinutes: durationMinutes
                         });
                     }
@@ -1940,10 +1972,15 @@
                     }
                     
                     if (goAround.entryTime) {
-                        const entryTime = new Date(goAround.entryTime);
-                        // Go-arounds are grouped by slot in L2 stats, so use the slot's local time
-                        const [slotHour, slotMinute] = slot.split(':').map(Number);
-                        const hoursSinceMidnight = slotHour + slotMinute / 60;
+                        const entryTimeUTC = new Date(goAround.entryTime);
+                        // Convert UTC entry time to airport local time
+                        const entryTimeLocal = convertUTCToLocalTime(entryTimeUTC, dateStr, airport, year);
+                        
+                        // Calculate hours since midnight in local time from actual entry time
+                        const localHours = entryTimeLocal.getUTCHours();
+                        const localMinutes = entryTimeLocal.getUTCMinutes();
+                        const localSeconds = entryTimeLocal.getUTCSeconds();
+                        const hoursSinceMidnight = localHours + localMinutes / 60 + localSeconds / 3600;
                         
                         goAroundData.push({
                             x: hoursSinceMidnight,
@@ -1953,7 +1990,7 @@
                         goAroundInfo.push({
                             icao: goAround.icao,
                             type: goAround.type || 'UNKNOWN',
-                            entryTime: entryTime,
+                            entryTime: entryTimeUTC,
                             duration: goAround.duration,
                             entryAltitudeAGL_ft: goAround.entryAltitudeAGL_ft,
                             maxAltitudeAGL_ft: goAround.maxAltitudeAGL_ft
