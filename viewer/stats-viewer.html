@@ -889,7 +889,20 @@
         function getTimeSlotFromTimestamp(timestamp, localDate, airport, year) {
             if (!timestamp) return null;
             // METAR timestamps are in UTC, convert to local time slot
-            const utcDate = new Date(timestamp);
+            let utcDate;
+            if (typeof timestamp === 'string') {
+                let dateStr = timestamp;
+                if (!timestamp.includes('T')) {
+                    dateStr = timestamp.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})$/, '$1T$2');
+                }
+                // METAR timestamps are in UTC - append 'Z' to ensure UTC parsing
+                if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-', 10)) {
+                    dateStr += 'Z';
+                }
+                utcDate = new Date(dateStr);
+            } else {
+                utcDate = new Date(timestamp);
+            }
             if (isNaN(utcDate.getTime())) return null;
             
             // Get UTC offset for this date
@@ -914,11 +927,22 @@
             const offsetHours = season === 'summer' ? offset.summer : offset.winter;
             
             // Convert UTC to local time
-            const localTimestamp = utcDate.getTime() + offsetHours * 3600 * 1000;
-            const localDateObj = new Date(localTimestamp);
+            const utcHours = utcDate.getUTCHours();
+            const utcMinutes = utcDate.getUTCMinutes();
             
-            const hours = String(localDateObj.getUTCHours()).padStart(2, '0');
-            const minutes = String(Math.floor(localDateObj.getUTCMinutes() / 15) * 15).padStart(2, '0');
+            // Calculate local time by adding offset
+            let localHours = utcHours + offsetHours;
+            let localMinutes = utcMinutes;
+            
+            // Handle day rollover
+            if (localHours < 0) {
+                localHours += 24;
+            } else if (localHours >= 24) {
+                localHours -= 24;
+            }
+            
+            const hours = String(localHours).padStart(2, '0');
+            const minutes = String(Math.floor(localMinutes / 15) * 15).padStart(2, '0');
             return `${hours}:${minutes}`;
         }
 
@@ -973,12 +997,17 @@
                 
                 let recordDate;
                 if (typeof record.valid === 'string') {
+                    let dateStr;
                     if (record.valid.includes('T')) {
-                        recordDate = new Date(record.valid);
+                        dateStr = record.valid;
                     } else {
-                        const dateStr = record.valid.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})$/, '$1T$2');
-                        recordDate = new Date(dateStr);
+                        dateStr = record.valid.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})$/, '$1T$2');
                     }
+                    // METAR timestamps are in UTC - append 'Z' to ensure UTC parsing
+                    if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-', 10)) {
+                        dateStr += 'Z';
+                    }
+                    recordDate = new Date(dateStr);
                 } else {
                     recordDate = new Date(record.valid);
                 }
