@@ -382,8 +382,8 @@ class L2StatsAnalyzer {
         timeFrom50nm: this.calculateStats(overallMilestones.timeFrom50nm),
         timeFrom20nm: this.calculateStats(overallMilestones.timeFrom20nm),
       },
-      byTouchdownTimeSlot: timeSlotData,
-      byTouchdownTimeSlotMedians: timeSlotMedians,
+      byTouchdownTimeSlotLocal: timeSlotData,
+      byTouchdownTimeSlotMediansLocal: timeSlotMedians,
     };
 
     logger.info('L2 analysis complete', {

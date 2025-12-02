@@ -21,6 +21,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import L2StatsData from '../../src/analysis/l2-stats/L2StatsData.js';
+import CongestionData from '../../src/analysis/congestion/CongestionData.js';
 import logger from '../../src/utils/logger.js';
 import { getSeason, getDSTDates } from '../../src/utils/dst.js';
 
@@ -92,10 +93,11 @@ async function generateBaseline(airport, year, force, localOnly) {
   }
 
   const l2StatsData = new L2StatsData({ localOnly });
+  const congestionData = new CongestionData({ localOnly });
   const dates = getDaysInYear(year);
   
   const dstDates = getDSTDates(airport, year);
-  logger.info('Generating seasonal baseline from L2 stats (local time)', {
+  logger.info('Generating seasonal baseline from L2 stats and congestion data', {
     airport,
     year,
     totalDays: dates.length,
@@ -129,12 +131,12 @@ async function generateBaseline(airport, year, force, localOnly) {
       
       const l2Data = await l2StatsData.load(airport, date);
       
-      if (!l2Data || !l2Data.overall || !l2Data.overall.byTouchdownTimeSlot) {
+      if (!l2Data || !l2Data.overall || !l2Data.overall.byTouchdownTimeSlotLocal) {
         skippedDays++;
         continue;
       }
 
-      const bySlot = l2Data.overall.byTouchdownTimeSlot;
+      const bySlot = l2Data.overall.byTouchdownTimeSlotLocal;
       
       for (const [slot, slotData] of Object.entries(bySlot)) {
         if (!timeSlotData[slot]) {
@@ -142,6 +144,8 @@ async function generateBaseline(airport, year, force, localOnly) {
             counts: [],
             times50nm: [],
             times100nm: [],
+            congestion: [],
+            entries: [],
           };
         }
 
@@ -164,6 +168,37 @@ async function generateBaseline(airport, year, force, localOnly) {
             timeSlotData[slot].times100nm.push(...times100nm);
           }
         }
+      }
+
+      // Load congestion data for this date
+      try {
+        const congestionStats = await congestionData.load(airport, date);
+        if (congestionStats && congestionStats.byTimeSlotLocal) {
+          for (const [slot, slotData] of Object.entries(congestionStats.byTimeSlotLocal)) {
+            if (!timeSlotData[slot]) {
+              timeSlotData[slot] = {
+                counts: [],
+                times50nm: [],
+                times100nm: [],
+                congestion: [],
+                entries: [],
+              };
+            }
+            
+            if (slotData.congestion !== undefined && slotData.congestion !== null) {
+              timeSlotData[slot].congestion.push(slotData.congestion);
+            }
+            if (slotData.entries !== undefined && slotData.entries !== null) {
+              timeSlotData[slot].entries.push(slotData.entries);
+            }
+          }
+        }
+      } catch (error) {
+        logger.debug('Failed to load congestion data for date', {
+          airport,
+          date,
+          error: error.message,
+        });
       }
 
       if (l2Data.volumes) {
@@ -221,14 +256,12 @@ async function generateBaseline(airport, year, force, localOnly) {
     winterDays,
     dstStart: dstDates.start.toISOString().split('T')[0],
     dstEnd: dstDates.end.toISOString().split('T')[0],
-    timezone: 'UTC',
-    note: 'Time slots in byTimeSlot are in UTC',
     summer: {
-      byTimeSlot: {},
+      byTimeSlotLocal: {},
       l2Volumes: {},
     },
     winter: {
-      byTimeSlot: {},
+      byTimeSlotLocal: {},
       l2Volumes: {},
     },
   };
@@ -248,22 +281,34 @@ async function generateBaseline(airport, year, force, localOnly) {
         ? calculateMedian(data.times100nm)
         : null;
 
+      const avgCongestion = data.congestion.length > 0
+        ? data.congestion.reduce((a, b) => a + b, 0) / data.congestion.length
+        : null;
+
+      const avgEntries = data.entries.length > 0
+        ? data.entries.reduce((a, b) => a + b, 0) / data.entries.length
+        : null;
+
       result[slot] = {
         averageCount: Math.round(avgCount * 100) / 100,
         medianTimeFrom50nm: median50nm ? Math.round(median50nm * 100) / 100 : null,
         medianTimeFrom100nm: median100nm ? Math.round(median100nm * 100) / 100 : null,
+        averageCongestion: avgCongestion !== null ? Math.round(avgCongestion * 100) / 100 : null,
+        averageEntries: avgEntries !== null ? Math.round(avgEntries * 100) / 100 : null,
         sampleSize: {
           days: data.counts.length,
           arrivals50nm: data.times50nm.length,
           arrivals100nm: data.times100nm.length,
+          congestion: data.congestion.length,
+          entries: data.entries.length,
         },
       };
     }
     return result;
   }
 
-  baseline.summer.byTimeSlot = aggregateSeason(summerTimeSlotData, 'summer');
-  baseline.winter.byTimeSlot = aggregateSeason(winterTimeSlotData, 'winter');
+  baseline.summer.byTimeSlotLocal = aggregateSeason(summerTimeSlotData, 'summer');
+  baseline.winter.byTimeSlotLocal = aggregateSeason(winterTimeSlotData, 'winter');
 
   function aggregateL2Volumes(volumesData) {
     return {
@@ -296,8 +341,8 @@ async function generateBaseline(airport, year, force, localOnly) {
     airport,
     year,
     path: baselinePath,
-    summerTimeSlots: Object.keys(baseline.summer.byTimeSlot).length,
-    winterTimeSlots: Object.keys(baseline.winter.byTimeSlot).length,
+    summerTimeSlots: Object.keys(baseline.summer.byTimeSlotLocal).length,
+    winterTimeSlots: Object.keys(baseline.winter.byTimeSlotLocal).length,
   });
 
   console.log(`\n${'='.repeat(60)}`);
@@ -307,8 +352,8 @@ async function generateBaseline(airport, year, force, localOnly) {
   console.log(`Skipped Days: ${skippedDays}`);
   console.log(`DST Start: ${baseline.dstStart}`);
   console.log(`DST End: ${baseline.dstEnd}`);
-  console.log(`Summer Time Slots: ${Object.keys(baseline.summer.byTimeSlot).length}`);
-  console.log(`Winter Time Slots: ${Object.keys(baseline.winter.byTimeSlot).length}`);
+  console.log(`Summer Time Slots: ${Object.keys(baseline.summer.byTimeSlotLocal).length}`);
+  console.log(`Winter Time Slots: ${Object.keys(baseline.winter.byTimeSlotLocal).length}`);
   console.log(`Saved to: ${baselinePath}`);
   console.log('='.repeat(60) + '\n');
 }

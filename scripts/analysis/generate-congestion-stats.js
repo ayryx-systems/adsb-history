@@ -258,7 +258,7 @@ async function main() {
         console.log(`\n${'='.repeat(60)}`);
         console.log(`Congestion Statistics for ${options.airport} on ${dates[0]}`);
         console.log('='.repeat(60));
-        console.log(`Time Slots: ${Object.keys(data.byTimeSlot || {}).length}`);
+        console.log(`Time Slots: ${Object.keys(data.byTimeSlotLocal || {}).length}`);
         console.log('='.repeat(60) + '\n');
         return;
       }
@@ -268,11 +268,11 @@ async function main() {
       console.log(`\n${'='.repeat(60)}`);
       console.log(`Congestion Statistics for ${options.airport} on ${dates[0]}`);
       console.log('='.repeat(60));
-      console.log(`Time Slots: ${Object.keys(stats.byTimeSlot || {}).length}`);
+      console.log(`Time Slots: ${Object.keys(stats.byTimeSlotLocal || {}).length}`);
       
       // Show max congestion
       const maxCongestion = Math.max(
-        ...Object.values(stats.byTimeSlot || {}).map(s => s.congestion || 0)
+        ...Object.values(stats.byTimeSlotLocal || {}).map(s => s.congestion || 0)
       );
       console.log(`Max Congestion: ${maxCongestion} aircraft`);
       console.log('='.repeat(60) + '\n');

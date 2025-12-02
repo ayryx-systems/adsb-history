@@ -253,6 +253,62 @@ Generate aggregated statistics from flight summaries (arrival times, aircraft ty
 - **3a** (`analyze-airport-day.js`): Analyzes raw flight traces to create detailed per-flight summaries
 - **3b** (`generate-l1-stats.js`): Aggregates those summaries into statistical reports
 
+**Timezone**: L1 statistics use **UTC time slots** (15-minute intervals). This is the raw aggregation from flight summaries which use UTC timestamps.
+
+### 3c. L2 Statistics Generation
+
+Convert L1 statistics from UTC to local time slots and calculate time-of-day volumes.
+
+**Input**: L1 statistics from Phase 3b (`s3://ayryx-adsb-history/l1-stats/AIRPORT/YYYY/MM/DD.json`)  
+**Output**:
+
+- **S3**: `s3://ayryx-adsb-history/l2-stats/AIRPORT/YYYY/MM/DD.json` (local time statistics)
+- **Local cache**: `./cache/AIRPORT/YYYY/MM/l2-stats-DD.json` (when running locally)
+
+**Timezone**: L2 statistics use **local time slots** (airport timezone, 15-minute intervals). All time slot fields are suffixed with `Local` (e.g., `byTouchdownTimeSlotLocal`) to make the timezone explicit.
+
+**Purpose**: L2 stats are the primary data source for the viewer. They represent flight data in local time, making it easy to compare with weather data and understand daily patterns.
+
+#### Local
+
+```bash
+node scripts/analysis/generate-l2-stats.js --airport KLGA --date 2025-11-08
+```
+
+#### EC2
+
+```bash
+# Same script, run on EC2 instance
+node scripts/analysis/generate-l2-stats.js --airport KLGA --date 2025-11-08
+```
+
+### 3d. Congestion Statistics Generation
+
+Calculate congestion metrics (aircraft within 50nm landing in next 2 hours) and entry counts (aircraft entering 50nm zone).
+
+**Input**: Flight summaries from Phase 3a (`s3://ayryx-adsb-history/flight-summaries/AIRPORT/YYYY/MM/DD.json`)  
+**Output**:
+
+- **S3**: `s3://ayryx-adsb-history/congestion/AIRPORT/YYYY/MM/DD.json` (congestion and entry counts)
+- **Local cache**: `./cache/AIRPORT/YYYY/MM/congestion-DD.json` (when running locally)
+
+**Timezone**: Congestion statistics use **local time slots** (airport timezone, 15-minute intervals). Field name is `byTimeSlotLocal`.
+
+#### Local
+
+```bash
+node scripts/analysis/generate-congestion-stats.js --airport KLGA --date 2025-11-08
+```
+
+#### EC2
+
+```bash
+# Same script, run on EC2 instance
+node scripts/analysis/generate-congestion-stats.js --airport KLGA --date 2025-11-08
+```
+
+### 3e. Yearly Baseline Generation
+
 #### Local
 
 ```bash
@@ -266,11 +322,14 @@ node scripts/analysis/generate-l1-stats.js --airport KLGA --date 2025-11-08
 node scripts/analysis/generate-l1-stats.js --airport KLGA --date 2025-11-08
 ```
 
-### 3c. Yearly Baseline Generation
+### 3e. Yearly Baseline Generation
 
 Generate yearly baseline data for comparing daily statistics against yearly averages. This creates aggregated baseline data used by the viewer to show how each day compares to the yearly average.
 
-**Input**: Daily L1 statistics from Phase 3b (all days for a year)  
+**Input**: 
+- Daily L2 statistics from Phase 3c (all days for a year)
+- Daily congestion statistics from Phase 3d (all days for a year)
+
 **Output**:
 
 - **Local cache**: `./cache/AIRPORT/YYYY/yearly-baseline.json` (yearly averages per time slot)
@@ -278,8 +337,12 @@ Generate yearly baseline data for comparing daily statistics against yearly aver
   - Average arrival counts per time slot across the year
   - Median time from 50nm per time slot (aggregated across all days)
   - Median time from 100nm per time slot (aggregated across all days)
+  - Average congestion per time slot (aircraft within 50nm)
+  - Average entries per time slot (aircraft entering 50nm zone)
 
-**Note**: This script **must be run after Phase 3b** has generated L1 statistics for the year. It aggregates all daily L1 stats files to create baseline comparisons. The baseline data is used by the viewer to overlay yearly averages on daily charts.
+**Timezone**: Baseline uses **local time slots** (`byTimeSlotLocal`), matching L2 stats and congestion data.
+
+**Note**: This script **must be run after Phase 3c and 3d** have generated L2 and congestion statistics for the year. It aggregates all daily stats files to create baseline comparisons. The baseline data is used by the viewer to overlay yearly averages on daily charts.
 
 #### Local
 
@@ -302,18 +365,20 @@ node scripts/analysis/generate-yearly-baseline.js --airport KORD --year 2025
 
 ### Running Complete Analysis Pipeline
 
-Run analysis phases (2, 3a, and 3b) for a date range in one command. This script processes each day sequentially, running:
+Run analysis phases (2, 3a, 3b, 3c, and 3d) for a date range in one command. This script processes each day sequentially, running:
 
 1. Phase 2: Identify ground aircraft
 2. Phase 3a: Analyze flights (create flight summaries) - **requires extracted traces to exist**
-3. Phase 3b: Generate L1 statistics
+3. Phase 3b: Generate L1 statistics (UTC time slots)
+4. Phase 3c: Generate L2 statistics (local time slots)
+5. Phase 3d: Generate congestion statistics (local time slots)
 
 **Prerequisites**:
 
 - Raw ADSB data from Phase 1 (must be ingested first)
 - Extracted traces from Phase 2.5 (run `extract-all-airports.js` first)
 
-**Output**: Complete analysis pipeline outputs (ground aircraft lists, flight summaries, and L1 statistics)
+**Output**: Complete analysis pipeline outputs (ground aircraft lists, flight summaries, L1 statistics, L2 statistics, and congestion statistics)
 
 #### Local
 
@@ -349,13 +414,35 @@ Ground Aircraft List (S3) ~100KB/day
 Extracted Traces (S3) ~50-200MB/day per airport
     ↓ (Phase 3a: Flight Analysis)
 Flight Summaries (S3) ~1-10MB/day per airport
-    ↓ (Phase 3b: L1 Statistics)
+    ↓ (Phase 3b: L1 Statistics - UTC time slots)
 L1 Statistics (S3) ~100KB/day per airport
-    ↓ (Phase 3c: Yearly Baseline - Optional)
+    ↓ (Phase 3c: L2 Statistics - Local time slots)
+L2 Statistics (S3) ~100KB/day per airport
+    ↓ (Phase 3d: Congestion Statistics - Local time slots)
+Congestion Statistics (S3) ~50KB/day per airport
+    ↓ (Phase 3e: Yearly Baseline - Optional, Local time slots)
 Yearly Baseline (Local Cache)
 ```
 
 **Important**: Phase 2.5 (Extraction) **must be completed** before Phase 3a. Once extraction is done for a date range, you never need to download raw tar files again. Downstream scripts will fail if extracted traces don't exist.
+
+## Architecture: Timezone Handling
+
+The system uses a clean separation between UTC and local time:
+
+- **L1 Statistics**: UTC time slots (raw aggregation from flight summaries)
+- **L2 Statistics**: Local time slots (converted from L1, primary data source for viewer)
+- **Congestion Statistics**: Local time slots (generated from flight traces)
+- **Baseline**: Local time slots (aggregated from L2 + congestion)
+- **Weather Data**: Loaded separately from METAR files, converted to local time slots in viewer
+
+**Viewer**: Uses only local time data:
+- L2 statistics (`byTouchdownTimeSlotLocal`)
+- Congestion data (`byTimeSlotLocal`)
+- Baseline data (`byTimeSlotLocal`)
+- Weather data (converted from UTC METAR timestamps to local time slots)
+
+All time slot fields are explicitly named with `Local` suffix to avoid confusion. The viewer performs no timezone conversions - it only displays local time data.
 
 ## Weather Data
 

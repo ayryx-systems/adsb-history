@@ -822,23 +822,8 @@
                 season: season,
             };
             
-            if (seasonData.byTimeSlot) {
-                // Check if baseline is in UTC (based on timezone field or note)
-                const isUTC = baselineData.timezone === 'UTC' || baselineData.note?.includes('UTC');
-                
-                if (isUTC) {
-                    // Convert UTC baseline slots to local time slots
-                    const converted = convertBaselineToLocalTime(seasonData, dateStr, airport, year);
-                    if (converted && Object.keys(converted).length > 0) {
-                        result.byTimeSlot = converted;
-                    } else {
-                        console.warn('Baseline conversion resulted in no slots');
-                        result.byTimeSlot = seasonData.byTimeSlot;
-                    }
-                } else {
-                    // Baseline is already in local time
-                    result.byTimeSlot = seasonData.byTimeSlot;
-                }
+            if (seasonData.byTimeSlotLocal) {
+                result.byTimeSlot = seasonData.byTimeSlotLocal;
             }
             
             if (seasonData.l2Volumes) {
@@ -848,272 +833,42 @@
             return result;
         }
 
-        function convertLocalSlotToUTC(localSlot, localDate, airport, year) {
-            // Convert local time slot to UTC time slot
-            const [localHour, localMinute] = localSlot.split(':').map(Number);
-            
-            // Get UTC offset
-            const season = getSeason(localDate, airport, year);
-            const offsets = {
-                'America/Los_Angeles': { winter: -8, summer: -7 },
-                'America/Denver': { winter: -7, summer: -6 },
-                'America/Chicago': { winter: -6, summer: -5 },
-                'America/New_York': { winter: -5, summer: -4 },
-            };
-            
-            const airportConfig = {
-                KORD: 'America/Chicago',
-                KLGA: 'America/New_York',
-                KJFK: 'America/New_York',
-                KLAX: 'America/Los_Angeles',
-                KSFO: 'America/Los_Angeles',
-            };
-            
-            const timezone = airportConfig[airport] || 'America/Chicago';
-            const offset = offsets[timezone] || { winter: -6, summer: -5 };
-            const offsetHours = season === 'summer' ? offset.summer : offset.winter;
-            
-            // Create a date object for the local time
-            const [yearStr, monthStr, dayStr] = localDate.split('-');
-            const localDateObj = new Date(Date.UTC(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr), localHour, localMinute));
-            
-            // Subtract offset to get UTC time
-            const utcTimestamp = localDateObj.getTime() - offsetHours * 3600 * 1000;
-            const utcDateObj = new Date(utcTimestamp);
-            
-            const utcHour = utcDateObj.getUTCHours();
-            const utcMinute = utcDateObj.getUTCMinutes();
-            const slotMinute = Math.floor(utcMinute / 15) * 15;
-            
-            return `${String(utcHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
-        }
-
-        function convertUTCSlotToLocal(utcSlot, localDate, airport, year) {
-            // Convert UTC time slot to local time slot for the given local date
-            const [utcHour, utcMinute] = utcSlot.split(':').map(Number);
-            
-            // Get UTC offset
-            const season = getSeason(localDate, airport, year);
-            const offsets = {
-                'America/Los_Angeles': { winter: -8, summer: -7 },
-                'America/Denver': { winter: -7, summer: -6 },
-                'America/Chicago': { winter: -6, summer: -5 },
-                'America/New_York': { winter: -5, summer: -4 },
-            };
-            
-            const airportConfig = {
-                KORD: 'America/Chicago',
-                KLGA: 'America/New_York',
-                KJFK: 'America/New_York',
-                KLAX: 'America/Los_Angeles',
-                KSFO: 'America/Los_Angeles',
-            };
-            
-            const timezone = airportConfig[airport] || 'America/Chicago';
-            const offset = offsets[timezone] || { winter: -6, summer: -5 };
-            const offsetHours = season === 'summer' ? offset.summer : offset.winter;
-            
-            // Calculate local time directly
-            let localHour = utcHour + offsetHours;
-            let localMinute = utcMinute;
-            let dayOffset = 0;
-            
-            // Handle day rollover
-            if (localHour < 0) {
-                localHour += 24;
-                dayOffset = -1;
-            } else if (localHour >= 24) {
-                localHour -= 24;
-                dayOffset = 1;
-            }
-            
-            // Check if the local time is still on the same date
-            if (dayOffset !== 0) {
-                // Calculate the actual local date
-                const [yearStr, monthStr, dayStr] = localDate.split('-');
-                const dateObj = new Date(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr));
-                dateObj.setDate(dateObj.getDate() + dayOffset);
-                const actualLocalDate = dateObj.toISOString().split('T')[0];
-                
-                // Only return the slot if it's on the same local date
-                if (actualLocalDate !== localDate) {
-                    return null;
-                }
-            }
-            
-            const slotMinute = Math.floor(localMinute / 15) * 15;
-            return `${String(localHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
-        }
-
-        function convertBaselineToLocalTime(baselineData, localDate, airport, year) {
-            // Convert baseline data from UTC time slots to local time slots
-            if (!baselineData || !baselineData.byTimeSlot) {
-                return null;
-            }
-            
-            const localBaseline = {};
-            
-            for (const [utcSlot, slotData] of Object.entries(baselineData.byTimeSlot)) {
-                const localSlot = convertUTCSlotToLocal(utcSlot, localDate, airport, year);
-                if (localSlot) {
-                    if (!localBaseline[localSlot]) {
-                        localBaseline[localSlot] = { ...slotData };
-                    } else {
-                        // If multiple UTC slots map to same local slot, average them
-                        const existing = localBaseline[localSlot];
-                        localBaseline[localSlot] = {
-                            averageCount: existing.averageCount !== null && slotData.averageCount !== null
-                                ? (existing.averageCount + slotData.averageCount) / 2
-                                : existing.averageCount || slotData.averageCount,
-                            medianTimeFrom50nm: existing.medianTimeFrom50nm !== null && slotData.medianTimeFrom50nm !== null
-                                ? (existing.medianTimeFrom50nm + slotData.medianTimeFrom50nm) / 2
-                                : existing.medianTimeFrom50nm !== null ? existing.medianTimeFrom50nm : slotData.medianTimeFrom50nm,
-                            medianTimeFrom100nm: existing.medianTimeFrom100nm !== null && slotData.medianTimeFrom100nm !== null
-                                ? (existing.medianTimeFrom100nm + slotData.medianTimeFrom100nm) / 2
-                                : existing.medianTimeFrom100nm !== null ? existing.medianTimeFrom100nm : slotData.medianTimeFrom100nm,
-                            sampleSize: existing.sampleSize,
-                        };
-                    }
-                }
-            }
-            
-            return localBaseline;
-        }
-
         function formatDualTimeLabels(slots, localDate, airport, year) {
+            // Convert local time slots to UTC for display in labels
+            const season = getSeason(localDate, airport, year);
+            const offsets = {
+                'America/Los_Angeles': { winter: -8, summer: -7 },
+                'America/Denver': { winter: -7, summer: -6 },
+                'America/Chicago': { winter: -6, summer: -5 },
+                'America/New_York': { winter: -5, summer: -4 },
+            };
+            
+            const airportConfig = {
+                KORD: 'America/Chicago',
+                KLGA: 'America/New_York',
+                KJFK: 'America/New_York',
+                KLAX: 'America/Los_Angeles',
+                KSFO: 'America/Los_Angeles',
+            };
+            
+            const timezone = airportConfig[airport] || 'America/Chicago';
+            const offset = offsets[timezone] || { winter: -6, summer: -5 };
+            const offsetHours = season === 'summer' ? offset.summer : offset.winter;
+            
             return slots.map(slot => {
-                const utcSlot = convertLocalSlotToUTC(slot, localDate, airport, year);
+                const [localHour, localMinute] = slot.split(':').map(Number);
+                const [yearStr, monthStr, dayStr] = localDate.split('-');
+                const localDateObj = new Date(Date.UTC(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr), localHour, localMinute));
+                const utcTimestamp = localDateObj.getTime() - offsetHours * 3600 * 1000;
+                const utcDateObj = new Date(utcTimestamp);
+                const utcHour = utcDateObj.getUTCHours();
+                const utcMinute = utcDateObj.getUTCMinutes();
+                const slotMinute = Math.floor(utcMinute / 15) * 15;
+                const utcSlot = `${String(utcHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
                 return `${slot} (${utcSlot} UTC)`;
             });
         }
 
-        function convertCongestionToLocalTime(congestionData, localDate, airport, year) {
-            if (!congestionData || !congestionData.byTimeSlot) {
-                return null;
-            }
-
-            // Get UTC offset for this date
-            const season = getSeason(localDate, airport, year);
-            const offsets = {
-                'America/Los_Angeles': { winter: -8, summer: -7 },
-                'America/Denver': { winter: -7, summer: -6 },
-                'America/Chicago': { winter: -6, summer: -5 },
-                'America/New_York': { winter: -5, summer: -4 },
-            };
-            
-            const airportConfig = {
-                KORD: 'America/Chicago',
-                KLGA: 'America/New_York',
-                KJFK: 'America/New_York',
-                KLAX: 'America/Los_Angeles',
-                KSFO: 'America/Los_Angeles',
-            };
-            
-            const timezone = airportConfig[airport] || 'America/Chicago';
-            const offset = offsets[timezone] || { winter: -6, summer: -5 };
-            const offsetHours = season === 'summer' ? offset.summer : offset.winter;
-
-            // Initialize all local time slots (00:00 to 23:45)
-            const localCongestion = {};
-            for (let hour = 0; hour < 24; hour++) {
-                for (let minute = 0; minute < 60; minute += 15) {
-                    const slot = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-                    localCongestion[slot] = {
-                        congestion: null,
-                        entries: null,
-                    };
-                }
-            }
-
-            // Convert UTC congestion slots to local time slots
-            // We need to check both the current UTC day and next UTC day
-            const [localYear, localMonth, localDay] = localDate.split('-').map(Number);
-            
-            // Try current UTC day
-            const currentUtcDate = localDate;
-            for (const [utcSlot, slotData] of Object.entries(congestionData.byTimeSlot)) {
-                const [utcHour, utcMinute] = utcSlot.split(':').map(Number);
-                
-                // Try as current UTC day
-                const utcDate1 = new Date(currentUtcDate + 'T' + utcSlot + ':00Z');
-                const localDateObj1 = new Date(utcDate1.getTime() + offsetHours * 3600 * 1000);
-                const slotLocalDate1 = localDateObj1.toISOString().split('T')[0];
-                
-                if (slotLocalDate1 === localDate) {
-                    const localHour = localDateObj1.getUTCHours();
-                    const localMinute = localDateObj1.getUTCMinutes();
-                    const slotMinute = Math.floor(localMinute / 15) * 15;
-                    const localSlot = `${String(localHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
-                    
-                    if (localCongestion[localSlot]) {
-                        if (localCongestion[localSlot].congestion === null) {
-                            localCongestion[localSlot].congestion = slotData.congestion || 0;
-                        } else {
-                            localCongestion[localSlot].congestion = Math.max(
-                                localCongestion[localSlot].congestion,
-                                slotData.congestion || 0
-                            );
-                        }
-                        
-                        if (localCongestion[localSlot].entries === null) {
-                            localCongestion[localSlot].entries = slotData.entries || 0;
-                        } else {
-                            localCongestion[localSlot].entries = Math.max(
-                                localCongestion[localSlot].entries,
-                                slotData.entries || 0
-                            );
-                        }
-                    }
-                }
-            }
-            
-            // Also try next UTC day (for late evening local hours)
-            const nextUtcDateObj = new Date(currentUtcDate + 'T00:00:00Z');
-            nextUtcDateObj.setUTCDate(nextUtcDateObj.getUTCDate() + 1);
-            const nextUtcDate = nextUtcDateObj.toISOString().split('T')[0];
-            
-            // Note: congestionData might already include next day's data if loadCongestionData merged it
-            // But we'll process it again to be safe
-            for (const [utcSlot, slotData] of Object.entries(congestionData.byTimeSlot)) {
-                const [utcHour, utcMinute] = utcSlot.split(':').map(Number);
-                
-                // Try as next UTC day
-                const utcDate2 = new Date(nextUtcDate + 'T' + utcSlot + ':00Z');
-                const localDateObj2 = new Date(utcDate2.getTime() + offsetHours * 3600 * 1000);
-                const slotLocalDate2 = localDateObj2.toISOString().split('T')[0];
-                
-                if (slotLocalDate2 === localDate) {
-                    const localHour = localDateObj2.getUTCHours();
-                    const localMinute = localDateObj2.getUTCMinutes();
-                    const slotMinute = Math.floor(localMinute / 15) * 15;
-                    const localSlot = `${String(localHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
-                    
-                    if (localCongestion[localSlot]) {
-                        if (localCongestion[localSlot].congestion === null) {
-                            localCongestion[localSlot].congestion = slotData.congestion || 0;
-                        } else {
-                            localCongestion[localSlot].congestion = Math.max(
-                                localCongestion[localSlot].congestion,
-                                slotData.congestion || 0
-                            );
-                        }
-                        
-                        if (localCongestion[localSlot].entries === null) {
-                            localCongestion[localSlot].entries = slotData.entries || 0;
-                        } else {
-                            localCongestion[localSlot].entries = Math.max(
-                                localCongestion[localSlot].entries,
-                                slotData.entries || 0
-                            );
-                        }
-                    }
-                }
-            }
-            
-            return {
-                byTimeSlot: localCongestion,
-            };
-        }
 
         async function loadBaselineData() {
             try {
@@ -1386,49 +1141,17 @@
                 const nextUtcDate = nextDate.toISOString().split('T')[0];
                 const nextPath = getCongestionPath(nextUtcDate);
                 
-                // Try to load both days
-                const congestionData = { byTimeSlot: {} };
-                
                 try {
-                    const currentResponse = await fetch(currentPath);
-                    if (currentResponse.ok) {
-                        const currentData = await currentResponse.json();
-                        if (currentData.byTimeSlot) {
-                            Object.assign(congestionData.byTimeSlot, currentData.byTimeSlot);
-                        }
+                    const response = await fetch(currentPath);
+                    if (response.ok) {
+                        const data = await response.json();
+                        return data;
                     }
                 } catch (error) {
-                    console.warn(`Failed to load current UTC day congestion data: ${error.message}`);
+                    console.warn(`Failed to load congestion data: ${error.message}`);
                 }
                 
-                try {
-                    const nextResponse = await fetch(nextPath);
-                    if (nextResponse.ok) {
-                        const nextData = await nextResponse.json();
-                        if (nextData.byTimeSlot) {
-                            // Merge next day's data
-                            for (const [slot, data] of Object.entries(nextData.byTimeSlot)) {
-                                if (!congestionData.byTimeSlot[slot]) {
-                                    congestionData.byTimeSlot[slot] = data;
-                                } else {
-                                    // If slot exists in both, take max (or sum, depending on logic)
-                                    congestionData.byTimeSlot[slot].congestion = Math.max(
-                                        congestionData.byTimeSlot[slot].congestion || 0,
-                                        data.congestion || 0
-                                    );
-                                    congestionData.byTimeSlot[slot].entries = Math.max(
-                                        congestionData.byTimeSlot[slot].entries || 0,
-                                        data.entries || 0
-                                    );
-                                }
-                            }
-                        }
-                    }
-                } catch (error) {
-                    console.warn(`Failed to load next UTC day congestion data: ${error.message}`);
-                }
-                
-                return Object.keys(congestionData.byTimeSlot).length > 0 ? congestionData : null;
+                return null;
             } catch (error) {
                 console.warn(`Error loading congestion data: ${error.message}`);
                 return null;
@@ -1679,7 +1402,7 @@
         }
 
         function renderArrivalCountChart(data, selectedTypes) {
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
             const counts = slots.map(slot => {
@@ -1827,7 +1550,7 @@
         }
 
         function renderTime100nmChart(data, selectedTypes) {
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
             const medians = [];
@@ -1947,7 +1670,7 @@
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
             
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const allArrivals = [];
             
             for (const [slot, slotData] of Object.entries(timeSlots)) {
@@ -2153,7 +1876,32 @@
                                     const localTime = String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
                                     
                                     // Convert local time to UTC for display
-                                    const utcSlot = convertLocalSlotToUTC(localTime, callbackDateStr, callbackAirport, callbackYear);
+                                    const season = getSeason(callbackDateStr, callbackAirport, callbackYear);
+                                    const offsets = {
+                                        'America/Los_Angeles': { winter: -8, summer: -7 },
+                                        'America/Denver': { winter: -7, summer: -6 },
+                                        'America/Chicago': { winter: -6, summer: -5 },
+                                        'America/New_York': { winter: -5, summer: -4 },
+                                    };
+                                    const airportConfig = {
+                                        KORD: 'America/Chicago',
+                                        KLGA: 'America/New_York',
+                                        KJFK: 'America/New_York',
+                                        KLAX: 'America/Los_Angeles',
+                                        KSFO: 'America/Los_Angeles',
+                                    };
+                                    const timezone = airportConfig[callbackAirport] || 'America/Chicago';
+                                    const offset = offsets[timezone] || { winter: -6, summer: -5 };
+                                    const offsetHours = season === 'summer' ? offset.summer : offset.winter;
+                                    const [yearStr, monthStr, dayStr] = callbackDateStr.split('-');
+                                    const [localHour, localMinute] = localTime.split(':').map(Number);
+                                    const localDateObj = new Date(Date.UTC(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr), localHour, localMinute));
+                                    const utcTimestamp = localDateObj.getTime() - offsetHours * 3600 * 1000;
+                                    const utcDateObj = new Date(utcTimestamp);
+                                    const utcHour = utcDateObj.getUTCHours();
+                                    const utcMinute = utcDateObj.getUTCMinutes();
+                                    const slotMinute = Math.floor(utcMinute / 15) * 15;
+                                    const utcSlot = `${String(utcHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`;
                                     
                                     return `${localTime} (${utcSlot})`;
                                 }
@@ -2323,7 +2071,7 @@
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
             
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
             const medians = [];
@@ -2494,7 +2242,7 @@
 
 
         function renderAircraftTypeTimeChart(data, selectedTypes) {
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
             const datasets = [];
@@ -2590,7 +2338,7 @@
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
             
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
             const visibility = slots.map(slot => {
@@ -2638,7 +2386,7 @@
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
             
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
             const ceiling = slots.map(slot => {
@@ -2686,7 +2434,7 @@
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
             
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
             const windSpeed = slots.map(slot => {
@@ -2748,7 +2496,7 @@
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
             
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
             const precipitation = slots.map(slot => {
@@ -2794,7 +2542,7 @@
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
             
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
             const temperature = slots.map(slot => {
@@ -2841,7 +2589,7 @@
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
             
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
             const pressure = slots.map(slot => {
@@ -2884,17 +2632,15 @@
         }
 
         function renderCongestionChart(data, congestionData) {
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
-            // Convert congestion data from UTC to local time
             const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
-            const localCongestionData = convertCongestionToLocalTime(congestionData, dateStr, airport, year);
             
             const congestion = slots.map(slot => {
-                const congestionSlot = localCongestionData && localCongestionData.byTimeSlot && localCongestionData.byTimeSlot[slot];
+                const congestionSlot = congestionData && congestionData.byTimeSlotLocal && congestionData.byTimeSlotLocal[slot];
                 return congestionSlot && congestionSlot.congestion !== undefined ? congestionSlot.congestion : null;
             });
 
@@ -2972,17 +2718,15 @@
         }
 
         function renderEntriesChart(data, congestionData) {
-            const timeSlots = data.overall.byTouchdownTimeSlot;
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
             const slots = Object.keys(timeSlots).sort();
             
-            // Convert congestion data from UTC to local time
             const dateStr = data.localDate || data.date || `${document.getElementById('yearSelect').value}-${String(document.getElementById('monthSelect').value).padStart(2, '0')}-${String(document.getElementById('daySelect').value).padStart(2, '0')}`;
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
-            const localCongestionData = convertCongestionToLocalTime(congestionData, dateStr, airport, year);
             
             const entries = slots.map(slot => {
-                const congestionSlot = localCongestionData && localCongestionData.byTimeSlot && localCongestionData.byTimeSlot[slot];
+                const congestionSlot = congestionData && congestionData.byTimeSlotLocal && congestionData.byTimeSlotLocal[slot];
                 return congestionSlot && congestionSlot.entries !== undefined ? congestionSlot.entries : null;
             });
 

@@ -1,4 +1,5 @@
 import logger from '../../utils/logger.js';
+import { getSeason } from '../../utils/dst.js';
 
 /**
  * Calculate distance between two coordinates using Haversine formula
@@ -104,12 +105,62 @@ class CongestionAnalyzer {
   }
 
   /**
+   * Get UTC offset in hours for a given date and airport
+   */
+  getUTCOffsetHours(airportConfig, date) {
+    const timezone = airportConfig.timezone;
+    if (!timezone) {
+      logger.warn('No timezone configured for airport, defaulting to UTC', {
+        airport: airportConfig.icao,
+      });
+      return 0;
+    }
+
+    const [year] = date.split('-');
+    const season = getSeason(date, airportConfig.icao, year);
+
+    const offsets = {
+      'America/Los_Angeles': { winter: -8, summer: -7 },
+      'America/Denver': { winter: -7, summer: -6 },
+      'America/Chicago': { winter: -6, summer: -5 },
+      'America/New_York': { winter: -5, summer: -4 },
+    };
+
+    const offset = offsets[timezone];
+    if (!offset) {
+      logger.warn('Unknown timezone, defaulting to UTC', {
+        airport: airportConfig.icao,
+        timezone,
+      });
+      return 0;
+    }
+
+    return season === 'summer' ? offset.summer : offset.winter;
+  }
+
+  /**
+   * Convert UTC timestamp to local time slot (HH:MM format)
+   */
+  utcToLocalTimeSlot(utcTimestamp, airportConfig, localDate) {
+    const offsetHours = this.getUTCOffsetHours(airportConfig, localDate);
+    const offsetSeconds = offsetHours * 3600;
+    const localTimestamp = utcTimestamp + offsetSeconds;
+    const localDateObj = new Date(localTimestamp * 1000);
+    
+    const hour = localDateObj.getUTCHours();
+    const minute = localDateObj.getUTCMinutes();
+    const slotMinute = Math.floor(minute / 15) * 15;
+    
+    return getTimeSlot(hour, slotMinute);
+  }
+
+  /**
    * Analyze congestion for a specific day
    * @param {Array} currentDayFlights - Flights from current day
    * @param {Array} nextDayFlights - Flights from next day (for 2-hour lookahead)
    * @param {object} airportConfig - Airport configuration
-   * @param {string} date - Current date in YYYY-MM-DD format
-   * @returns {object} Congestion statistics
+   * @param {string} date - Local date in YYYY-MM-DD format
+   * @returns {object} Congestion statistics with local time slots
    */
   analyze(currentDayFlights, nextDayFlights, airportConfig, date) {
     logger.debug('Starting congestion analysis', {
@@ -121,8 +172,25 @@ class CongestionAnalyzer {
 
     const airportLat = airportConfig.coordinates.lat;
     const airportLon = airportConfig.coordinates.lon;
-    const dateObj = new Date(date + 'T00:00:00Z');
-    const dayStartTimestamp = Math.floor(dateObj.getTime() / 1000);
+    const offsetHours = this.getUTCOffsetHours(airportConfig, date);
+    
+    // Create local time slots (00:00 to 23:45 local time)
+    const timeSlots = {};
+    for (let hour = 0; hour < 24; hour++) {
+      for (let minute = 0; minute < 60; minute += 15) {
+        const slot = getTimeSlot(hour, minute);
+        // Calculate UTC timestamp for this local time slot
+        const [year, month, day] = date.split('-').map(Number);
+        const localDateObj = new Date(Date.UTC(year, month - 1, day, hour, minute));
+        const utcTimestamp = Math.floor((localDateObj.getTime() - offsetHours * 3600 * 1000) / 1000);
+        timeSlots[slot] = {
+          timestamp: utcTimestamp,
+          congestion: 0,
+          entries: 0,
+        };
+      }
+    }
+
     const lookaheadSeconds = this.lookaheadHours * 60 * 60;
 
     // Filter for arrivals only
@@ -137,27 +205,9 @@ class CongestionAnalyzer {
         airport: airportConfig.icao,
         date,
         generatedAt: new Date().toISOString(),
-        byTimeSlot: {},
+        byTimeSlotLocal: {},
       };
     }
-
-    // Create time slots for the day (15-minute intervals)
-    const timeSlots = {};
-    for (let hour = 0; hour < 24; hour++) {
-      for (let minute = 0; minute < 60; minute += 15) {
-        const slot = getTimeSlot(hour, minute);
-        timeSlots[slot] = {
-          timestamp: dayStartTimestamp + hour * 3600 + minute * 60,
-          congestion: 0,
-          entries: 0,
-        };
-      }
-    }
-
-    // First pass: Count aircraft entering 50nm in each time slot
-    // For each time slot, count entries that occur during that slot's 15-minute window
-    // For late slots, also include entries from next day that occur within the lookahead period
-    const dayEndTimestamp = dayStartTimestamp + 24 * 60 * 60;
     
     for (const arrival of arrivals) {
       const touchdownTime = arrival.touchdown.timestamp;
@@ -178,23 +228,15 @@ class CongestionAnalyzer {
         continue; // Invalid: entry after touchdown
       }
 
-      // Count entries in the slot where they occur
-      // Entries are counted based on when they occur, not when they land
-      // This ensures entries at the end of the day (e.g., 23:50) are counted even if they land on the next day
-      for (const [slot, slotData] of Object.entries(timeSlots)) {
-        const slotTimestamp = slotData.timestamp;
-        const slotEnd = slotTimestamp + 15 * 60; // 15-minute window
-        
-        // Count entry if it occurs during this slot's time window
-        // This handles both current day entries and entries that occur late in the day but land on next day
-        if (timeAt50nm >= slotTimestamp && timeAt50nm < slotEnd) {
-          slotData.entries++;
-          break; // Entry can only belong to one slot
-        }
+      // Count entries in the local time slot where they occur
+      // Convert UTC timestamp to local time slot
+      const entryLocalSlot = this.utcToLocalTimeSlot(timeAt50nm, airportConfig, date);
+      if (timeSlots[entryLocalSlot]) {
+        timeSlots[entryLocalSlot].entries++;
       }
     }
 
-    // Second pass: For each time slot, count aircraft that:
+    // Second pass: For each local time slot, count aircraft that:
     // 1. Are landing within the next 2 hours (even if on next day)
     // 2. Were within 50nm at the slot time
     for (const [slot, slotData] of Object.entries(timeSlots)) {
@@ -215,17 +257,12 @@ class CongestionAnalyzer {
         let timeAt50nm = null;
 
         if (arrival.milestones && arrival.milestones.timeFrom50nm) {
-          // Aircraft was at 50nm this many seconds before touchdown
           timeAt50nm = touchdownTime - arrival.milestones.timeFrom50nm;
         } else {
-          // Estimate: typical approach from 50nm takes ~15-20 minutes
-          // Use 18 minutes (1080 seconds) as default
           timeAt50nm = touchdownTime - (18 * 60);
         }
 
         // Check if aircraft was within 50nm at the slot time
-        // Aircraft is within 50nm if slot time is between 50nm time and touchdown
-        // (i.e., aircraft has passed 50nm but hasn't landed yet)
         if (timeAt50nm <= slotTimestamp && slotTimestamp < touchdownTime) {
           congestionCount++;
         }
@@ -244,7 +281,7 @@ class CongestionAnalyzer {
       airport: airportConfig.icao,
       date,
       generatedAt: new Date().toISOString(),
-      byTimeSlot: Object.fromEntries(
+      byTimeSlotLocal: Object.fromEntries(
         Object.entries(timeSlots).map(([slot, data]) => [
           slot,
           {
@@ -258,3 +295,4 @@ class CongestionAnalyzer {
 }
 
 export default CongestionAnalyzer;
+
