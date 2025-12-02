@@ -149,11 +149,11 @@ class TraceReader {
     const extractDir = path.join(path.dirname(tarPath), 'extracted');
     
     if (fs.existsSync(extractDir)) {
-      logger.info('Tar already extracted', { extractDir });
+      logger.debug('Tar already extracted', { extractDir });
       return extractDir;
     }
 
-    logger.info('Extracting tar', { tarPath });
+    logger.debug('Extracting tar', { tarPath });
     return await this.extractor.extractTar(tarPath, extractDir);
   }
 
@@ -166,7 +166,7 @@ class TraceReader {
     const extractDir = path.join(path.dirname(localTarPath), 'extracted');
 
     if (fs.existsSync(extractDir)) {
-      logger.info('Extracted traces already downloaded and extracted', { airport, date, extractDir });
+      logger.debug('Extracted traces already available', { airport, date });
       return extractDir;
     }
 
@@ -176,7 +176,7 @@ class TraceReader {
       return null;
     }
 
-    logger.info('Extracting airport traces', { airport, date, tarPath });
+    logger.info('Extracting airport traces', { airport, date });
     return await this.extractTar(tarPath);
   }
 
@@ -271,7 +271,7 @@ class TraceReader {
       })
       .sort();
 
-    logger.info('Streaming traces', {
+    logger.debug('Streaming traces', {
       extractDir: path.basename(extractDir),
       subdirs: traceSubdirs.length,
     });

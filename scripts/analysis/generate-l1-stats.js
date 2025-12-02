@@ -126,7 +126,7 @@ async function processDate(airport, date, force) {
   }
 
   // Load summary data
-  logger.info('Loading flight summary data', {
+  logger.debug('Loading flight summary data', {
     airport,
     date,
   });
@@ -140,7 +140,7 @@ async function processDate(airport, date, force) {
     return { success: false, skipped: false, date, error: 'Flight summary data not found' };
   }
 
-  logger.info('Flight summary data loaded', {
+  logger.debug('Flight summary data loaded', {
     airport,
     date,
     flights: summary.flights.length,

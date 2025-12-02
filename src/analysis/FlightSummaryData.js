@@ -78,7 +78,7 @@ class FlightSummaryData {
       });
 
       await this.s3Client.send(command);
-      logger.info('Saved to S3', { s3Key });
+      logger.debug('Saved to S3', { s3Key });
 
       // Save to cache
       if (this.useCache) {
@@ -87,7 +87,7 @@ class FlightSummaryData {
           fs.mkdirSync(cacheDir, { recursive: true, mode: 0o755 });
         }
         fs.writeFileSync(cachePath, jsonData);
-        logger.info('Saved to cache', { cachePath });
+        logger.debug('Saved to cache', { cachePath });
       }
     } catch (error) {
       logger.error('Failed to save flight summary data', {
@@ -112,7 +112,7 @@ class FlightSummaryData {
       try {
         const jsonData = fs.readFileSync(cachePath, 'utf-8');
         const data = JSON.parse(jsonData);
-        logger.info('Loaded from cache', { airport, date, cachePath });
+        logger.debug('Loaded from cache', { airport, date });
         return data;
       } catch (error) {
         logger.warn('Failed to load from cache, trying S3', {
@@ -125,7 +125,7 @@ class FlightSummaryData {
 
     // Load from S3
     try {
-      logger.info('Loading from S3', { airport, date, s3Key });
+      logger.info('Loading from S3', { airport, date });
       
       const command = new GetObjectCommand({
         Bucket: this.bucketName,
@@ -143,10 +143,10 @@ class FlightSummaryData {
           fs.mkdirSync(cacheDir, { recursive: true, mode: 0o755 });
         }
         fs.writeFileSync(cachePath, jsonData);
-        logger.info('Cached data from S3', { cachePath });
+        logger.debug('Cached data from S3', { cachePath });
       }
 
-      logger.info('Loaded from S3', { airport, date });
+      logger.debug('Loaded from S3', { airport, date });
       return data;
 
     } catch (error) {

@@ -221,7 +221,7 @@ class L2StatsAnalyzer {
    * @returns {object} L2 statistics with local time slots
    */
   analyze(l1StatsArray, airportConfig, localDate) {
-    logger.info('Starting L2 analysis (full time slot conversion)', {
+    logger.debug('Starting L2 analysis (full time slot conversion)', {
       airport: airportConfig.icao,
       localDate,
       l1StatsCount: l1StatsArray.length,

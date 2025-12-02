@@ -123,15 +123,15 @@ class L1StatsAnalyzer {
    * @returns {object} L1 statistics object
    */
   analyze(flights, airport, date) {
-    logger.info('Starting L1 stats analysis', { airport, date, totalFlights: flights.length });
+    logger.debug('Starting L1 stats analysis', { airport, date, totalFlights: flights.length });
 
     // Filter for arrivals only
     const arrivals = flights.filter(f => f.classification === 'arrival');
-    logger.info('Filtered arrivals', { arrivals: arrivals.length });
+    logger.debug('Filtered arrivals', { arrivals: arrivals.length });
 
     // Filter for go-arounds
     const goArounds = flights.filter(f => f.classification === 'go_around');
-    logger.info('Filtered go-arounds', { goArounds: goArounds.length });
+    logger.debug('Filtered go-arounds', { goArounds: goArounds.length });
 
     // Track go-arounds by time slot (use entry time for go-arounds)
     const goAroundsByTimeSlot = {};

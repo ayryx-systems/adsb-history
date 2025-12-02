@@ -78,7 +78,7 @@ class L1StatsData {
       });
 
       await this.s3Client.send(command);
-      logger.info('Saved to S3', { s3Key });
+      logger.debug('Saved to S3', { s3Key });
 
       // Save to cache
       if (this.useCache) {
@@ -87,7 +87,7 @@ class L1StatsData {
           fs.mkdirSync(cacheDir, { recursive: true, mode: 0o755 });
         }
         fs.writeFileSync(cachePath, jsonData);
-        logger.info('Saved to cache', { cachePath });
+        logger.debug('Saved to cache', { cachePath });
       }
     } catch (error) {
       logger.error('Failed to save L1 stats data', {
@@ -112,7 +112,7 @@ class L1StatsData {
       try {
         const jsonData = fs.readFileSync(cachePath, 'utf-8');
         const data = JSON.parse(jsonData);
-        logger.info('Loaded from cache', { airport, date, cachePath });
+        logger.debug('Loaded from cache', { airport, date });
         return data;
       } catch (error) {
         logger.warn('Failed to load from cache, trying S3', {

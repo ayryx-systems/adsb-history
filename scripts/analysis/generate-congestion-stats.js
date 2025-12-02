@@ -151,7 +151,7 @@ async function processDate(airport, date, force) {
   const airportConfig = await loadAirportConfig(airport);
 
   // Load current day summary data
-  logger.info('Loading flight summary data', {
+  logger.debug('Loading flight summary data', {
     airport,
     date,
   });
@@ -173,7 +173,7 @@ async function processDate(airport, date, force) {
       try {
         nextDaySummary = await summaryData.load(airport, nextDate);
         if (nextDaySummary && nextDaySummary.flights) {
-          logger.info('Loaded next day summary data for lookahead', {
+          logger.debug('Loaded next day summary data for lookahead', {
             airport,
             date,
             nextDate,
@@ -197,7 +197,7 @@ async function processDate(airport, date, force) {
     }
   }
 
-  logger.info('Flight summary data loaded', {
+  logger.debug('Flight summary data loaded', {
     airport,
     date,
     currentDayFlights: currentDaySummary.flights.length,

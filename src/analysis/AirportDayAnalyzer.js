@@ -377,7 +377,7 @@ class AirportDayAnalyzer {
   async analyzeDay(airport, date, airportConfig) {
     logger.info('Starting airport day analysis', { airport, date });
 
-    logger.info('Step 1: Downloading extracted traces', { airport, date });
+    logger.debug('Loading extracted traces', { airport, date });
     const extractDir = await this.traceReader.downloadExtractedTraces(airport, date);
 
     if (!extractDir) {
@@ -393,39 +393,33 @@ class AirportDayAnalyzer {
       try {
         previousExtractDir = await this.traceReader.downloadExtractedTraces(airport, previousDate);
         if (previousExtractDir) {
-          logger.info('Downloaded previous day traces for milestone lookup', {
+          logger.debug('Loaded previous day traces for milestone lookup', {
             airport,
             date,
             previousDate,
           });
         }
       } catch (error) {
-        logger.warn('Could not load previous day traces (may not exist)', {
+        logger.debug('Previous day traces not available', {
           airport,
           date,
           previousDate,
-          error: error.message,
         });
       }
     }
-
-    logger.info('Step 2: Analyzing flights', {
-      airport,
-      date,
-    });
 
     const flights = [];
     let processedCount = 0;
     let tracesSaved = 0;
     const savedArrivals = new Set(); // Track saved arrivals by icao-touchdownTimestamp
-    const progressInterval = 50;
+    const progressInterval = 500;
     const traceCache = new Map(); // Cache traces by ICAO to avoid re-reading
 
     for await (const { icao, trace, registration, aircraftType, description } of this.traceReader.streamAllTraces(extractDir)) {
       processedCount++;
 
       if (processedCount % progressInterval === 0) {
-        logger.info('Analysis progress', {
+        logger.debug('Analysis progress', {
           airport,
           date,
           processed: processedCount,
@@ -492,7 +486,7 @@ class AirportDayAnalyzer {
                   // Mark this event as using merged trace
                   event._useMergedTrace = true;
                   events.push(event);
-                  logger.info('Found arrival from previous day trace that lands on current day', {
+                  logger.debug('Found arrival from previous day trace that lands on current day', {
                     airport,
                     date,
                     icao,
@@ -522,7 +516,7 @@ class AirportDayAnalyzer {
                                      !event.milestones.timeFrom20nm;
             
             if (timeSinceMidnight < earlyDayThreshold && missingMilestones) {
-              logger.info('Arrival missing milestones, checking previous day', {
+              logger.debug('Arrival missing milestones, checking previous day', {
                 airport,
                 date,
                 icao,
@@ -566,13 +560,12 @@ class AirportDayAnalyzer {
                      recalculatedMilestones.timeFrom50nm > recalculatedMilestones.timeFrom20nm);
 
                   if (milestonesValid) {
-                    logger.info('Found better milestones from previous day', {
+                    logger.debug('Found better milestones from previous day', {
                       airport,
                       date,
                       icao,
                       originalMilestones: Object.keys(event.milestones).length,
                       recalculatedMilestones: Object.keys(recalculatedMilestones).length,
-                      milestones: recalculatedMilestones,
                     });
 
                     // Update the event with recalculated milestones
@@ -731,12 +724,12 @@ class AirportDayAnalyzer {
     });
 
     if (!this.skipCleanup) {
-      logger.info('Cleaning up extracted data', { airport, date });
+      logger.debug('Cleaning up extracted data', { airport, date });
       const extractedTarPath = path.join(this.traceReader.tempDir, 'extracted', airport, date, `${airport}-${date}.tar`);
       const extractedExtractDir = path.join(path.dirname(extractedTarPath), 'extracted');
       if (fs.existsSync(extractedExtractDir)) {
         fs.rmSync(extractedExtractDir, { recursive: true, force: true });
-        logger.info('Cleaned up extracted traces directory', { airport, date, path: extractedExtractDir });
+        logger.debug('Cleaned up extracted traces directory', { airport, date });
       }
 
       if (previousExtractDir && previousDate) {
@@ -744,11 +737,9 @@ class AirportDayAnalyzer {
         const previousExtractedExtractDir = path.join(path.dirname(previousExtractedTarPath), 'extracted');
         if (fs.existsSync(previousExtractedExtractDir)) {
           fs.rmSync(previousExtractedExtractDir, { recursive: true, force: true });
-          logger.info('Cleaned up previous day extracted traces directory', { airport, previousDate, path: previousExtractedExtractDir });
+          logger.debug('Cleaned up previous day extracted traces directory', { airport, previousDate });
         }
       }
-    } else {
-      logger.info('Skipping cleanup (extracted data preserved for reuse)', { airport, date });
     }
 
     return {

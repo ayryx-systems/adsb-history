@@ -112,7 +112,7 @@ class CongestionAnalyzer {
    * @returns {object} Congestion statistics
    */
   analyze(currentDayFlights, nextDayFlights, airportConfig, date) {
-    logger.info('Starting congestion analysis', {
+    logger.debug('Starting congestion analysis', {
       airport: airportConfig.icao,
       date,
       currentDayFlights: currentDayFlights.length,
@@ -130,7 +130,7 @@ class CongestionAnalyzer {
       f => f.classification === 'arrival' && f.touchdown && f.touchdown.timestamp
     );
 
-    logger.info('Filtered arrivals', { arrivals: arrivals.length });
+    logger.debug('Filtered arrivals', { arrivals: arrivals.length });
 
     if (arrivals.length === 0) {
       return {

@@ -144,7 +144,7 @@ async function processDate(airport, localDate, force) {
 
   // Get relevant UTC dates for this local date
   const relevantUTCDates = analyzer.getRelevantUTCDates(localDate, airportConfig);
-  logger.info('Loading L1 stats for UTC dates', {
+  logger.debug('Loading L1 stats for UTC dates', {
     airport,
     localDate,
     utcDates: relevantUTCDates,
