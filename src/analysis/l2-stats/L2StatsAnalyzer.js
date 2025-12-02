@@ -330,8 +330,8 @@ class L2StatsAnalyzer {
         // Process go-arounds (they're already grouped by UTC slot in L1)
         if (slotData.goArounds && Array.isArray(slotData.goArounds)) {
           for (const goAround of slotData.goArounds) {
-            if (goAround.touchdown && goAround.touchdown.utc) {
-              const goAroundUtcDate = new Date(goAround.touchdown.utc);
+            if (goAround.entryTime) {
+              const goAroundUtcDate = new Date(goAround.entryTime);
               const goAroundUtcTimestamp = Math.floor(goAroundUtcDate.getTime() / 1000);
               const goAroundLocalDate = this.utcToLocalDate(goAroundUtcTimestamp, airportConfig);
               
