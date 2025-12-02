@@ -2955,28 +2955,75 @@
             KSFO: [37.6213, -122.3790]
         };
 
-        function getTracePath(icao, touchdownTimestamp, fallbackToOldFormat = false) {
+        function getTracePath(icao, touchdownTimestamp, fallbackToOldFormat = false, useUtcDate = true) {
             const airport = document.getElementById('airportSelect').value;
-            const year = document.getElementById('yearSelect').value;
-            const month = document.getElementById('monthSelect').value;
-            const day = document.getElementById('daySelect').value;
+            
+            // Convert Date object or timestamp to Unix timestamp (seconds) and UTC date
+            let timestamp;
+            let dateObj;
+            if (touchdownTimestamp instanceof Date) {
+                timestamp = Math.floor(touchdownTimestamp.getTime() / 1000);
+                dateObj = touchdownTimestamp;
+            } else if (typeof touchdownTimestamp === 'number') {
+                // Already a timestamp - assume seconds if < year 2100, milliseconds otherwise
+                timestamp = touchdownTimestamp > 4102444800 ? Math.floor(touchdownTimestamp / 1000) : touchdownTimestamp;
+                dateObj = new Date(timestamp * 1000);
+            } else {
+                // Try to parse as Date string
+                dateObj = new Date(touchdownTimestamp);
+                timestamp = Math.floor(dateObj.getTime() / 1000);
+            }
+            
+            // Use UTC date from touchdown timestamp (not the selected date)
+            // This ensures evening arrivals (next UTC day) are found in the correct folder
+            let year, month, day;
+            if (useUtcDate) {
+                year = dateObj.getUTCFullYear();
+                month = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+                day = String(dateObj.getUTCDate()).padStart(2, '0');
+            } else {
+                // Fallback: use selected date from UI
+                year = document.getElementById('yearSelect').value;
+                month = document.getElementById('monthSelect').value;
+                day = document.getElementById('daySelect').value;
+            }
             
             // Handle fallback to old format (without touchdown timestamp)
             if (fallbackToOldFormat) {
                 return `cache/traces/${airport}/${year}/${month}/${day}/${icao}.json`;
             }
             
-            // Convert Date object or timestamp to Unix timestamp (seconds)
+            return `cache/traces/${airport}/${year}/${month}/${day}/${icao}-${timestamp}.json`;
+        }
+        
+        function getNextDayPath(icao, touchdownTimestamp) {
+            // Get UTC date from timestamp and add one day
+            let dateObj;
+            if (touchdownTimestamp instanceof Date) {
+                dateObj = new Date(touchdownTimestamp);
+            } else if (typeof touchdownTimestamp === 'number') {
+                const timestamp = touchdownTimestamp > 4102444800 ? Math.floor(touchdownTimestamp / 1000) : touchdownTimestamp;
+                dateObj = new Date(timestamp * 1000);
+            } else {
+                dateObj = new Date(touchdownTimestamp);
+            }
+            
+            // Add one day
+            const nextDay = new Date(dateObj);
+            nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+            
+            const airport = document.getElementById('airportSelect').value;
+            const year = nextDay.getUTCFullYear();
+            const month = String(nextDay.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(nextDay.getUTCDate()).padStart(2, '0');
+            
             let timestamp;
             if (touchdownTimestamp instanceof Date) {
                 timestamp = Math.floor(touchdownTimestamp.getTime() / 1000);
             } else if (typeof touchdownTimestamp === 'number') {
-                // Already a timestamp - assume seconds if < year 2100, milliseconds otherwise
                 timestamp = touchdownTimestamp > 4102444800 ? Math.floor(touchdownTimestamp / 1000) : touchdownTimestamp;
             } else {
-                // Try to parse as Date string
-                const date = new Date(touchdownTimestamp);
-                timestamp = Math.floor(date.getTime() / 1000);
+                timestamp = Math.floor(new Date(touchdownTimestamp).getTime() / 1000);
             }
             
             return `cache/traces/${airport}/${year}/${month}/${day}/${icao}-${timestamp}.json`;
@@ -3012,52 +3059,66 @@
                 document.getElementById('traceModalTitle').textContent = `Flight Trace: ${icao} (${aircraftType}) - ${dateStr}`;
             }
             
-            // Try new format first (with touchdown timestamp as integer)
-            const tracePath = getTracePath(icao, timestamp);
+            // Try new format first (with touchdown timestamp as integer, using UTC date)
+            const tracePath = getTracePath(icao, timestamp, false, true);
             
             fetch(tracePath)
                 .then(response => {
                     if (!response.ok) {
-                        // Try fallback: search for files with this ICAO and find closest timestamp match
+                        // Try fallback: check next UTC day (for evening arrivals that land next UTC day)
                         if (!isGoAround) {
-                            const airport = document.getElementById('airportSelect').value;
-                            const year = document.getElementById('yearSelect').value;
-                            const month = document.getElementById('monthSelect').value;
-                            const day = document.getElementById('daySelect').value;
-                            
-                            // Get target timestamp in seconds (for matching)
-                            let targetTimestampSeconds;
-                            if (timestamp instanceof Date) {
-                                targetTimestampSeconds = timestamp.getTime() / 1000;
-                            } else if (typeof timestamp === 'number') {
-                                targetTimestampSeconds = timestamp > 4102444800 ? timestamp / 1000 : timestamp;
-                            } else {
-                                targetTimestampSeconds = new Date(timestamp).getTime() / 1000;
-                            }
-                            
-                            // Try decimal format (for existing files created before the fix)
-                            const decimalPath = `cache/traces/${airport}/${year}/${month}/${day}/${icao}-${targetTimestampSeconds}.json`;
-                            
-                            return fetch(decimalPath).then(decimalResponse => {
-                                if (!decimalResponse.ok) {
-                                    // Try fallback to old format (without touchdown timestamp)
-                                    const fallbackPath = getTracePath(icao, timestamp, true);
-                                    return fetch(fallbackPath).then(fallbackResponse => {
-                                        if (!fallbackResponse.ok) {
-                                            throw new Error(`Trace not found: ${response.status}`);
-                                        }
-                                        return fallbackResponse.json();
-                                    });
+                            const nextDayPath = getNextDayPath(icao, timestamp);
+                            return fetch(nextDayPath).then(nextDayResponse => {
+                                if (nextDayResponse.ok) {
+                                    return nextDayResponse.json();
                                 }
-                                return decimalResponse.json();
-                            }).catch(() => {
-                                // If decimal format fails, try old format
-                                const fallbackPath = getTracePath(icao, timestamp, true);
-                                return fetch(fallbackPath).then(fallbackResponse => {
-                                    if (!fallbackResponse.ok) {
-                                        throw new Error(`Trace not found: ${response.status}`);
+                                
+                                // Try selected date folder (for backward compatibility)
+                                const selectedDatePath = getTracePath(icao, timestamp, false, false);
+                                return fetch(selectedDatePath).then(selectedDateResponse => {
+                                    if (selectedDateResponse.ok) {
+                                        return selectedDateResponse.json();
                                     }
-                                    return fallbackResponse.json();
+                                    
+                                    // Try decimal format in UTC date folder
+                                    let targetTimestampSeconds;
+                                    if (timestamp instanceof Date) {
+                                        targetTimestampSeconds = timestamp.getTime() / 1000;
+                                    } else if (typeof timestamp === 'number') {
+                                        targetTimestampSeconds = timestamp > 4102444800 ? timestamp / 1000 : timestamp;
+                                    } else {
+                                        targetTimestampSeconds = new Date(timestamp).getTime() / 1000;
+                                    }
+                                    
+                                    const dateObj = timestamp instanceof Date ? timestamp : new Date(timestamp);
+                                    const utcYear = dateObj.getUTCFullYear();
+                                    const utcMonth = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+                                    const utcDay = String(dateObj.getUTCDate()).padStart(2, '0');
+                                    const airport = document.getElementById('airportSelect').value;
+                                    const decimalPath = `cache/traces/${airport}/${utcYear}/${utcMonth}/${utcDay}/${icao}-${targetTimestampSeconds}.json`;
+                                    
+                                    return fetch(decimalPath).then(decimalResponse => {
+                                        if (!decimalResponse.ok) {
+                                            // Try fallback to old format (without touchdown timestamp) in UTC date folder
+                                            const fallbackPath = getTracePath(icao, timestamp, true, true);
+                                            return fetch(fallbackPath).then(fallbackResponse => {
+                                                if (!fallbackResponse.ok) {
+                                                    throw new Error(`Trace not found: ${response.status}`);
+                                                }
+                                                return fallbackResponse.json();
+                                            });
+                                        }
+                                        return decimalResponse.json();
+                                    }).catch(() => {
+                                        // If decimal format fails, try old format
+                                        const fallbackPath = getTracePath(icao, timestamp, true, true);
+                                        return fetch(fallbackPath).then(fallbackResponse => {
+                                            if (!fallbackResponse.ok) {
+                                                throw new Error(`Trace not found: ${response.status}`);
+                                            }
+                                            return fallbackResponse.json();
+                                        });
+                                    });
                                 });
                             });
                         }

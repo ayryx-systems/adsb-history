@@ -649,13 +649,18 @@ class AirportDayAnalyzer {
                 );
 
                 if (arrivalSegment) {
+                  // Use UTC date from touchdown timestamp for folder structure
+                  // This ensures evening arrivals (next UTC day) are saved in the correct folder
+                  const touchdownDate = new Date(event.touchdown.timestamp * 1000);
+                  const utcDate = `${touchdownDate.getUTCFullYear()}-${String(touchdownDate.getUTCMonth() + 1).padStart(2, '0')}-${String(touchdownDate.getUTCDate()).padStart(2, '0')}`;
+                  
                   await this.traceData.save(
                     airport,
-                    date,
+                    utcDate,
                     icao,
                     {
                       icao,
-                      date,
+                      date: utcDate,
                       airport,
                       classification: 'arrival',
                       touchdownTimestamp: event.touchdown.timestamp,
