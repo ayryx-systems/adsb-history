@@ -3172,7 +3172,7 @@
                     p1[3] <= goAroundEndTimestamp;
                 segments.push({
                     latlngs: [[p1[0], p1[1]], [p2[0], p2[1]]],
-                    color: isGoAroundSegment ? '#ff0000' : color,
+                    color: isGoAroundSegment ? '#FF00FF' : color,
                     alt: p1[2],
                     track: p1[4],
                     timestamp: p1[3],
@@ -3231,7 +3231,7 @@
                     Track: ${segment.track !== null ? segment.track + '°' : 'N/A'}
                 `;
                 if (segment.isGoAround) {
-                    popupContent += '<br><strong style="color: #ff0000;">Go-Around Segment</strong>';
+                    popupContent += '<br><strong style="color: #FF00FF;">Go-Around Segment</strong>';
                 }
                 polyline.bindPopup(popupContent);
                 
@@ -3239,29 +3239,6 @@
             });
             
             traceMapLayer.addTo(traceMap);
-            
-            if (goAroundStartTimestamp) {
-                let goAroundPoint = null;
-                for (const point of points) {
-                    if (point[3] >= goAroundStartTimestamp && point[3] <= goAroundStartTimestamp + 60) {
-                        goAroundPoint = point;
-                        break;
-                    }
-                }
-                
-                if (goAroundPoint) {
-                    const goAroundTimestamp = formatTimestamp(goAroundPoint[3]);
-                    const goAroundMarker = L.marker([goAroundPoint[0], goAroundPoint[1]], {
-                        icon: L.divIcon({
-                            className: 'goaround-marker',
-                            html: '<div style="background: #ff6600; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 0 2px #ff6600;"></div>',
-                            iconSize: [14, 14],
-                            iconAnchor: [7, 7]
-                        })
-                    }).addTo(traceMap);
-                    goAroundMarker.bindPopup(`<strong>Go-Around Entry</strong><br>Time: ${goAroundTimestamp}<br>Altitude: ${Math.round(goAroundPoint[2]).toLocaleString()} ft`);
-                }
-            }
             
             const airport = document.getElementById('airportSelect').value;
             const airportCoords = airportCoordinates[airport];
