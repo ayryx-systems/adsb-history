@@ -2,7 +2,7 @@ import logger from '../../utils/logger.js';
 
 /**
  * Analyzes arrival flight data to generate L1 statistics
- * Groups arrivals by aircraft type and calculates milestone statistics
+ * Calculates milestone statistics for all arrivals
  */
 class L1StatsAnalyzer {
   constructor(config = {}) {
@@ -178,7 +178,6 @@ class L1StatsAnalyzer {
         generatedAt: new Date().toISOString(),
         totalArrivals: 0,
         totalGoArounds: goArounds.length,
-        byAircraftType: {},
         overall: {
           count: 0,
           goAroundCount: goArounds.length,
@@ -195,58 +194,6 @@ class L1StatsAnalyzer {
           },
           byTouchdownTimeSlot: emptyTimeSlotData,
           byTouchdownTimeSlotMedians: {},
-        },
-      };
-    }
-
-    // Group arrivals by aircraft type
-    const byType = {};
-    for (const arrival of arrivals) {
-      const type = arrival.type || 'UNKNOWN';
-      if (!byType[type]) {
-        byType[type] = [];
-      }
-      byType[type].push(arrival);
-    }
-
-    logger.info('Grouped by aircraft type', {
-      types: Object.keys(byType).length,
-      typeCounts: Object.fromEntries(
-        Object.entries(byType).map(([type, flights]) => [type, flights.length])
-      ),
-    });
-
-    // Analyze each aircraft type
-    const typeStats = {};
-    for (const [type, typeArrivals] of Object.entries(byType)) {
-      const milestones = {
-        timeFrom100nm: [],
-        timeFrom50nm: [],
-        timeFrom20nm: [],
-      };
-
-      // Extract milestone values
-      for (const arrival of typeArrivals) {
-        if (arrival.milestones) {
-          if (arrival.milestones.timeFrom100nm !== undefined) {
-            milestones.timeFrom100nm.push(arrival.milestones.timeFrom100nm);
-          }
-          if (arrival.milestones.timeFrom50nm !== undefined) {
-            milestones.timeFrom50nm.push(arrival.milestones.timeFrom50nm);
-          }
-          if (arrival.milestones.timeFrom20nm !== undefined) {
-            milestones.timeFrom20nm.push(arrival.milestones.timeFrom20nm);
-          }
-        }
-      }
-
-      // Calculate statistics for each milestone
-      typeStats[type] = {
-        count: typeArrivals.length,
-        milestones: {
-          timeFrom100nm: this.calculateStats(milestones.timeFrom100nm),
-          timeFrom50nm: this.calculateStats(milestones.timeFrom50nm),
-          timeFrom20nm: this.calculateStats(milestones.timeFrom20nm),
         },
       };
     }
@@ -414,7 +361,6 @@ class L1StatsAnalyzer {
       airport,
       date,
       totalArrivals: arrivals.length,
-      typesAnalyzed: Object.keys(typeStats).length,
     });
 
     return {
@@ -423,7 +369,6 @@ class L1StatsAnalyzer {
       generatedAt: new Date().toISOString(),
       totalArrivals: arrivals.length,
       totalGoArounds: goArounds.length,
-      byAircraftType: typeStats,
       overall,
     };
   }

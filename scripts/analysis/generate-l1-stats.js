@@ -4,7 +4,6 @@
  * Generate L1 statistics from flight summary data
  * 
  * Creates detailed statistics for arrival flights including:
- * - Statistics grouped by aircraft type
  * - Overall statistics for all arrivals
  * - Milestone statistics (timeFrom100nm, timeFrom50nm, timeFrom20nm)
  * 
@@ -197,7 +196,6 @@ async function main() {
         console.log(`L1 Statistics for ${options.airport} on ${dates[0]}`);
         console.log('='.repeat(60));
         console.log(`Total Arrivals: ${data.totalArrivals}`);
-        console.log(`Aircraft Types: ${Object.keys(data.byAircraftType).length}`);
         console.log('='.repeat(60) + '\n');
         
         if (data.overall && data.overall.milestones.timeFrom20nm) {
@@ -219,7 +217,6 @@ async function main() {
       console.log(`L1 Statistics for ${options.airport} on ${dates[0]}`);
       console.log('='.repeat(60));
       console.log(`Total Arrivals: ${stats.totalArrivals}`);
-      console.log(`Aircraft Types: ${Object.keys(stats.byAircraftType).length}`);
       console.log('='.repeat(60) + '\n');
 
       if (stats.overall && stats.overall.milestones) {
@@ -239,26 +236,6 @@ async function main() {
             console.log(`  Max: ${stat.max.toFixed(1)}s (${(stat.max / 60).toFixed(1)} min)`);
             console.log(`  Std Dev: ${stat.stdDev.toFixed(1)}s`);
             console.log(`  Percentiles: P10=${stat.percentiles.p10.toFixed(1)}s, P25=${stat.percentiles.p25.toFixed(1)}s, P75=${stat.percentiles.p75.toFixed(1)}s, P90=${stat.percentiles.p90.toFixed(1)}s`);
-          }
-        }
-        console.log('');
-      }
-
-      const typeEntries = Object.entries(stats.byAircraftType)
-        .sort((a, b) => b[1].count - a[1].count)
-        .slice(0, 5);
-
-      if (typeEntries.length > 0) {
-        console.log('Statistics by Aircraft Type (Top 5):');
-        console.log('─'.repeat(60));
-        
-        for (const [type, typeData] of typeEntries) {
-          console.log(`\n${type} (${typeData.count} arrivals):`);
-          if (typeData.milestones.timeFrom20nm) {
-            const stat = typeData.milestones.timeFrom20nm;
-            console.log(`  Time from 20nm:`);
-            console.log(`    Mean: ${stat.mean.toFixed(1)}s (${(stat.mean / 60).toFixed(1)} min)`);
-            console.log(`    Median: ${stat.median.toFixed(1)}s (${(stat.median / 60).toFixed(1)} min)`);
           }
         }
         console.log('');
