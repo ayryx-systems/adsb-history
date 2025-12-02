@@ -3240,32 +3240,6 @@
             
             traceMapLayer.addTo(traceMap);
             
-            const startPoint = points[0];
-            const endPoint = points[points.length - 1];
-            
-            const startTimestamp = formatTimestamp(startPoint[3]);
-            const endTimestamp = formatTimestamp(endPoint[3]);
-            
-            const startMarker = L.marker([startPoint[0], startPoint[1]], {
-                icon: L.divIcon({
-                    className: 'start-marker',
-                    html: '<div style="background: #00ff00; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 0 2px #00ff00;"></div>',
-                    iconSize: [12, 12],
-                    iconAnchor: [6, 6]
-                })
-            }).addTo(traceMap);
-            startMarker.bindPopup(`<strong>Start</strong><br>Time: ${startTimestamp}<br>Altitude: ${Math.round(startPoint[2]).toLocaleString()} ft`);
-            
-            const endMarker = L.marker([endPoint[0], endPoint[1]], {
-                icon: L.divIcon({
-                    className: 'end-marker',
-                    html: '<div style="background: #ff0000; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 0 2px #ff0000;"></div>',
-                    iconSize: [12, 12],
-                    iconAnchor: [6, 6]
-                })
-            }).addTo(traceMap);
-            endMarker.bindPopup(`<strong>End</strong><br>Time: ${endTimestamp}<br>Altitude: ${Math.round(endPoint[2]).toLocaleString()} ft`);
-            
             if (goAroundStartTimestamp) {
                 let goAroundPoint = null;
                 for (const point of points) {
