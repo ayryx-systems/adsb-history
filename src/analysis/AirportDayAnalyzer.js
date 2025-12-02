@@ -14,6 +14,7 @@ class AirportDayAnalyzer {
     this.traceReader = new TraceReader(config);
     this.flightAnalyzer = new FlightAnalyzer(config);
     this.traceData = new SimplifiedTraceData(config);
+    this.skipCleanup = config.skipCleanup || false;
   }
 
   /**
@@ -729,23 +730,25 @@ class AirportDayAnalyzer {
       summary,
     });
 
-    // Clean up extracted traces directory
-    logger.info('Cleaning up extracted data', { airport, date });
-    const extractedTarPath = path.join(this.traceReader.tempDir, 'extracted', airport, date, `${airport}-${date}.tar`);
-    const extractedExtractDir = path.join(path.dirname(extractedTarPath), 'extracted');
-    if (fs.existsSync(extractedExtractDir)) {
-      fs.rmSync(extractedExtractDir, { recursive: true, force: true });
-      logger.info('Cleaned up extracted traces directory', { airport, date, path: extractedExtractDir });
-    }
-
-    // Clean up previous day's extracted traces directory if we used it
-    if (previousExtractDir && previousDate) {
-      const previousExtractedTarPath = path.join(this.traceReader.tempDir, 'extracted', airport, previousDate, `${airport}-${previousDate}.tar`);
-      const previousExtractedExtractDir = path.join(path.dirname(previousExtractedTarPath), 'extracted');
-      if (fs.existsSync(previousExtractedExtractDir)) {
-        fs.rmSync(previousExtractedExtractDir, { recursive: true, force: true });
-        logger.info('Cleaned up previous day extracted traces directory', { airport, previousDate, path: previousExtractedExtractDir });
+    if (!this.skipCleanup) {
+      logger.info('Cleaning up extracted data', { airport, date });
+      const extractedTarPath = path.join(this.traceReader.tempDir, 'extracted', airport, date, `${airport}-${date}.tar`);
+      const extractedExtractDir = path.join(path.dirname(extractedTarPath), 'extracted');
+      if (fs.existsSync(extractedExtractDir)) {
+        fs.rmSync(extractedExtractDir, { recursive: true, force: true });
+        logger.info('Cleaned up extracted traces directory', { airport, date, path: extractedExtractDir });
       }
+
+      if (previousExtractDir && previousDate) {
+        const previousExtractedTarPath = path.join(this.traceReader.tempDir, 'extracted', airport, previousDate, `${airport}-${previousDate}.tar`);
+        const previousExtractedExtractDir = path.join(path.dirname(previousExtractedTarPath), 'extracted');
+        if (fs.existsSync(previousExtractedExtractDir)) {
+          fs.rmSync(previousExtractedExtractDir, { recursive: true, force: true });
+          logger.info('Cleaned up previous day extracted traces directory', { airport, previousDate, path: previousExtractedExtractDir });
+        }
+      }
+    } else {
+      logger.info('Skipping cleanup (extracted data preserved for reuse)', { airport, date });
     }
 
     return {

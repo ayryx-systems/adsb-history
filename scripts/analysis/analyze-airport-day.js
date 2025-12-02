@@ -101,7 +101,7 @@ async function main() {
       name: airport.name,
     });
 
-    const analyzer = new AirportDayAnalyzer();
+    const analyzer = new AirportDayAnalyzer({ skipCleanup: true });
     const dataStore = new FlightSummaryData();
 
     // Check if already processed

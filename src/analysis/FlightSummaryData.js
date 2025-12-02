@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import logger from '../utils/logger.js';
 
 /**
@@ -169,8 +169,32 @@ class FlightSummaryData {
    * Check if flight summary data exists
    */
   async exists(airport, date) {
-    const data = await this.load(airport, date);
-    return data !== null;
+    const cachePath = this.getCachePath(airport, date);
+    
+    if (this.useCache && fs.existsSync(cachePath)) {
+      return true;
+    }
+    
+    const s3Key = this.getS3Key(airport, date);
+    try {
+      const command = new HeadObjectCommand({
+        Bucket: this.bucketName,
+        Key: s3Key,
+      });
+      await this.s3Client.send(command);
+      return true;
+    } catch (error) {
+      if (error.name === 'NotFound' || error.name === 'NoSuchKey') {
+        return false;
+      }
+      logger.warn('Failed to check if flight summary exists, falling back to load', {
+        airport,
+        date,
+        error: error.message,
+      });
+      const data = await this.load(airport, date);
+      return data !== null;
+    }
   }
 }
 

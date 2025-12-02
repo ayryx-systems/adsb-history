@@ -150,15 +150,17 @@ async function processDate(airport, localDate, force) {
     utcDates: relevantUTCDates,
   });
 
-  // Load L1 stats for all relevant UTC dates
   const l1StatsArray = [];
   for (const utcDate of relevantUTCDates) {
     try {
-      const l1Stats = await l1StatsData.load(airport, utcDate);
-      if (l1Stats) {
-        l1StatsArray.push(l1Stats);
+      const exists = await l1StatsData.exists(airport, utcDate);
+      if (exists) {
+        const l1Stats = await l1StatsData.load(airport, utcDate);
+        if (l1Stats) {
+          l1StatsArray.push(l1Stats);
+        }
       } else {
-        logger.warn('L1 stats not found for UTC date', {
+        logger.debug('L1 stats not found for UTC date, skipping', {
           airport,
           utcDate,
           localDate,

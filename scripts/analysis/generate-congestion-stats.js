@@ -165,26 +165,34 @@ async function processDate(airport, date, force) {
     return { success: false, skipped: false, date, error: 'Flight summary data not found' };
   }
 
-  // Load next day summary data (for 2-hour lookahead)
   const nextDate = getNextDate(date);
   let nextDaySummary = null;
   if (nextDate) {
-    try {
-      nextDaySummary = await summaryData.load(airport, nextDate);
-      if (nextDaySummary && nextDaySummary.flights) {
-        logger.info('Loaded next day summary data for lookahead', {
+    const nextDayExists = await summaryData.exists(airport, nextDate);
+    if (nextDayExists) {
+      try {
+        nextDaySummary = await summaryData.load(airport, nextDate);
+        if (nextDaySummary && nextDaySummary.flights) {
+          logger.info('Loaded next day summary data for lookahead', {
+            airport,
+            date,
+            nextDate,
+            flights: nextDaySummary.flights.length,
+          });
+        }
+      } catch (error) {
+        logger.warn('Could not load next day summary', {
           airport,
           date,
           nextDate,
-          flights: nextDaySummary.flights.length,
+          error: error.message,
         });
       }
-    } catch (error) {
-      logger.warn('Could not load next day summary (may not exist)', {
+    } else {
+      logger.debug('Next day summary does not exist, skipping lookahead', {
         airport,
         date,
         nextDate,
-        error: error.message,
       });
     }
   }
