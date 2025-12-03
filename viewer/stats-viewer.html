@@ -657,6 +657,39 @@
             return null;
         }
 
+        function normalizeHolidayName(name) {
+            return name
+                .toLowerCase()
+                .replace(/'/g, '')
+                .replace(/\s+/g, '_')
+                .replace(/\./g, '');
+        }
+
+        function getHolidayCategory(dateStr) {
+            const [year, month, day] = dateStr.split('-').map(Number);
+            const date = new Date(year, month - 1, day);
+            const holidays = getUSHolidays(year);
+            
+            for (const holiday of holidays) {
+                const holidayDate = new Date(year, holiday.month - 1, holiday.day);
+                const diffMs = date - holidayDate;
+                const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+                
+                if (diffDays >= -2 && diffDays <= 2) {
+                    return { category: normalizeHolidayName(holiday.name), offset: diffDays };
+                }
+            }
+            
+            return null;
+        }
+
+        function getDayOfWeekLowercase(dateStr) {
+            const [year, month, day] = dateStr.split('-').map(Number);
+            const date = new Date(year, month - 1, day);
+            const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+            return days[date.getDay()];
+        }
+
         function populateDaySelect() {
             const year = parseInt(document.getElementById('yearSelect').value);
             const month = parseInt(document.getElementById('monthSelect').value);
@@ -1547,6 +1580,101 @@
                     fill: false,
                     tension: 0.1
                 });
+            }
+
+            if (currentBaselineData && seasonalBaseline) {
+                const season = seasonalBaseline.season;
+                const seasonData = currentBaselineData[season];
+                
+                const offsetLabels = {
+                    '-2': '-2',
+                    '-1': '-1',
+                    '0': 'day',
+                    '1': '+1',
+                    '2': '+2'
+                };
+                
+                const holidayColors = [
+                    'rgba(255, 159, 64, 1)',
+                    'rgba(255, 99, 132, 1)',
+                    'rgba(153, 102, 255, 1)',
+                    'rgba(54, 162, 235, 1)',
+                ];
+                
+                let holidayColorIndex = 0;
+                
+                if (seasonData.holidayVolumes) {
+                    const holidayKeys = Object.keys(seasonData.holidayVolumes).sort();
+                    holidayKeys.forEach(categoryKey => {
+                        const holidayVolumes = seasonData.holidayVolumes[categoryKey];
+                        if (holidayVolumes && holidayVolumes.morning !== null) {
+                            const [holidayName, offsetStr] = categoryKey.split('_');
+                            const offset = parseInt(offsetStr);
+                            const offsetLabel = offsetLabels[offsetStr] || offsetStr;
+                            const displayName = holidayName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                            const holidayLabel = `${displayName} ${offsetLabel}`;
+                            
+                            const color = holidayColors[holidayColorIndex % holidayColors.length];
+                            holidayColorIndex++;
+                            
+                            datasets.push({
+                                label: holidayLabel,
+                                data: [
+                                    holidayVolumes.morning,
+                                    holidayVolumes.afternoon,
+                                    holidayVolumes.evening,
+                                ],
+                                type: 'line',
+                                borderColor: color,
+                                backgroundColor: color.replace('1)', '0.1)'),
+                                borderWidth: 1.5,
+                                borderDash: [4, 4],
+                                pointRadius: 3,
+                                fill: false,
+                                tension: 0.1
+                            });
+                        }
+                    });
+                }
+                
+                const dayColors = [
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(54, 162, 235, 1)',
+                    'rgba(153, 102, 255, 1)',
+                    'rgba(255, 159, 64, 1)',
+                    'rgba(255, 99, 132, 1)',
+                    'rgba(201, 203, 207, 1)',
+                    'rgba(76, 175, 80, 1)',
+                ];
+                
+                const dayOrder = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+                
+                if (seasonData.dayOfWeekVolumes) {
+                    dayOrder.forEach((day, index) => {
+                        const dayVolumes = seasonData.dayOfWeekVolumes[day];
+                        if (dayVolumes && dayVolumes.morning !== null) {
+                            const dayLabel = day.charAt(0).toUpperCase() + day.slice(1);
+                            const color = dayColors[index % dayColors.length];
+                            
+                            datasets.push({
+                                label: `${dayLabel} Avg`,
+                                data: [
+                                    dayVolumes.morning,
+                                    dayVolumes.afternoon,
+                                    dayVolumes.evening,
+                                ],
+                                type: 'line',
+                                borderColor: color,
+                                backgroundColor: color.replace('1)', '0.1)'),
+                                borderWidth: 1.5,
+                                borderDash: [6, 3],
+                                pointRadius: 3,
+                                fill: false,
+                                tension: 0.1
+                            });
+                        }
+                    });
+                }
             }
 
             charts['l2Volumes'] = new Chart(document.getElementById('l2VolumesChart'), {
