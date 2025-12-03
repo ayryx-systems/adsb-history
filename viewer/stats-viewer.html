@@ -1609,7 +1609,9 @@
                     holidayKeys.forEach(categoryKey => {
                         const holidayVolumes = seasonData.holidayVolumes[categoryKey];
                         if (holidayVolumes && holidayVolumes.morning !== null) {
-                            const [holidayName, offsetStr] = categoryKey.split('_');
+                            const parts = categoryKey.split('_');
+                            const offsetStr = parts[parts.length - 1];
+                            const holidayName = parts.slice(0, -1).join('_');
                             const offset = parseInt(offsetStr);
                             const offsetLabel = offsetLabels[offsetStr] || offsetStr;
                             const displayName = holidayName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
