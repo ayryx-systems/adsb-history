@@ -1251,37 +1251,11 @@
             
             const grid = document.getElementById('infoGrid');
             const goAroundCount = data.totalGoArounds || (data.overall && data.overall.goAroundCount) || 0;
-            const goAroundLinking = data.overall && data.overall.goAroundLinking;
-            
-            let volumesHtml = '';
-            if (data.volumes) {
-                const volumes = data.volumes;
-                volumesHtml = `
-                    <div class="info-item"><strong>Morning (06:00-12:00):</strong> ${volumes.morning.toLocaleString()}</div>
-                    <div class="info-item"><strong>Afternoon (12:00-18:00):</strong> ${volumes.afternoon.toLocaleString()}</div>
-                    <div class="info-item"><strong>Evening (18:00-24:00):</strong> ${volumes.evening.toLocaleString()}</div>
-                `;
-            }
-            
-            let goAroundLinkingHtml = '';
-            if (goAroundLinking && goAroundCount > 0) {
-                goAroundLinkingHtml = `
-                    <div class="info-item" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e0e0e0;">
-                        <strong>Go-Around Linking:</strong>
-                        <div style="margin-left: 12px; margin-top: 4px; font-size: 0.9em; color: #666;">
-                            ${goAroundLinking.linked} linked to subsequent landing (${goAroundLinking.linkRate}%)<br>
-                            ${goAroundLinking.unlinked} without subsequent landing
-                        </div>
-                    </div>
-                `;
-            }
             
             grid.innerHTML = `
                 <div class="info-item"><strong>Total Arrivals:</strong> ${data.totalArrivals.toLocaleString()}</div>
                 <div class="info-item"><strong>Go-Arounds:</strong> ${goAroundCount.toLocaleString()}</div>
-                ${goAroundLinkingHtml}
                 <div class="info-item"><strong>Generated:</strong> ${new Date(data.generatedAt).toLocaleString()}</div>
-                ${volumesHtml}
             `;
         }
 
