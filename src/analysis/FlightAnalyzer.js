@@ -526,31 +526,33 @@ class FlightAnalyzer {
         continue;
       }
       
-      const lookbackWindow = 15 * 60;
-      const positionsBefore = traceToCheck.filter(p => 
-        p.timestamp < pos.timestamp && 
-        p.timestamp >= pos.timestamp - lookbackWindow
-      );
-      
-      if (positionsBefore.length === 0) {
-        continue;
-      }
-      
-      const wasOutsideRecently = positionsBefore.some(p => p.distance > boundary);
-      if (!wasOutsideRecently) {
-        continue;
-      }
-      
-      const wasOutside = true;
-      
-      if (wasOutside) {
-        const segmentStartTime = positionsWithDistance[0]?.timestamp || 0;
-        const segmentEndTime = positionsWithDistance[positionsWithDistance.length - 1]?.timestamp || Infinity;
-        if (pos.timestamp >= segmentStartTime && pos.timestamp <= segmentEndTime) {
-          entryPos = { ...pos, agl };
-          entryIndex = i;
-          break;
+      let wasOutside = false;
+      if (i > 0) {
+        const prevPos = traceToCheck[i - 1];
+        if (prevPos.distance > boundary) {
+          wasOutside = true;
         }
+      } else {
+        const lookbackWindow = 15 * 60;
+        const windowStart = pos.timestamp - lookbackWindow;
+        for (let j = i - 1; j >= 0 && traceToCheck[j].timestamp >= windowStart; j--) {
+          if (traceToCheck[j].distance > boundary) {
+            wasOutside = true;
+            break;
+          }
+        }
+      }
+      
+      if (!wasOutside) {
+        continue;
+      }
+      
+      const segmentStartTime = positionsWithDistance[0]?.timestamp || 0;
+      const segmentEndTime = positionsWithDistance[positionsWithDistance.length - 1]?.timestamp || Infinity;
+      if (pos.timestamp >= segmentStartTime && pos.timestamp <= segmentEndTime) {
+        entryPos = { ...pos, agl };
+        entryIndex = i;
+        break;
       }
     }
     
@@ -559,16 +561,25 @@ class FlightAnalyzer {
     }
     
     const traceForApproachCheck = (fullTrace && fullTrace.length > 0) ? fullTrace : positionsWithDistance;
-    const positionsBeforeEntry = traceForApproachCheck.filter(pos => pos.timestamp < entryPos.timestamp);
-    
-    if (positionsBeforeEntry.length === 0) {
-      return null;
-    }
     
     let passedThreshold = false;
-    for (let i = positionsBeforeEntry.length - 1; i >= 0; i--) {
-      if (positionsBeforeEntry[i].distance >= this.goAroundMinDistance) {
+    const lookbackWindow = 10 * 60;
+    const windowStart = entryPos.timestamp - lookbackWindow;
+    let recentBefore = [];
+    
+    for (let i = traceForApproachCheck.length - 1; i >= 0; i--) {
+      const pos = traceForApproachCheck[i];
+      if (pos.timestamp >= entryPos.timestamp) {
+        continue;
+      }
+      
+      if (!passedThreshold && pos.distance >= this.goAroundMinDistance) {
         passedThreshold = true;
+      }
+      
+      if (pos.timestamp >= windowStart) {
+        recentBefore.unshift(pos);
+      } else if (passedThreshold && recentBefore.length > 0) {
         break;
       }
     }
@@ -577,18 +588,15 @@ class FlightAnalyzer {
       return null;
     }
     
-    const lookbackWindow = 10 * 60;
-    const recentBefore = positionsBeforeEntry.filter(pos => 
-      pos.timestamp >= entryPos.timestamp - lookbackWindow
-    );
+    if (recentBefore.length < 2) {
+      return null;
+    }
     
-    if (recentBefore.length >= 2) {
-      const firstDist = recentBefore[0].distance;
-      const lastDist = recentBefore[recentBefore.length - 1].distance;
-      const isApproaching = lastDist < firstDist;
-      if (!isApproaching) {
-        return null;
-      }
+    const firstDist = recentBefore[0].distance;
+    const lastDist = recentBefore[recentBefore.length - 1].distance;
+    const isApproaching = lastDist < firstDist;
+    if (!isApproaching) {
+      return null;
     }
     
     const traceToSearch = (fullTrace && fullTrace.length > 0) ? fullTrace : positionsWithDistance;
