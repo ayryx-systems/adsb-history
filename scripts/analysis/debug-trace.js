@@ -192,3 +192,4 @@ debugTrace(icao, airport, date).catch(error => {
   process.exit(1);
 });
 
+

@@ -80,6 +80,79 @@ function getBaselinePath(airport, year) {
   return path.join(process.cwd(), 'cache', airport, year, 'yearly-baseline.json');
 }
 
+function getNthWeekday(year, month, weekday, n) {
+  const firstDay = new Date(year, month - 1, 1);
+  const firstWeekday = firstDay.getDay();
+  const offset = (weekday - firstWeekday + 7) % 7;
+  const day = 1 + offset + (n - 1) * 7;
+  return day;
+}
+
+function getLastWeekday(year, month, weekday) {
+  const lastDay = new Date(year, month, 0).getDate();
+  const lastDate = new Date(year, month - 1, lastDay);
+  const lastWeekday = lastDate.getDay();
+  const offset = (lastWeekday - weekday + 7) % 7;
+  return lastDay - offset;
+}
+
+function getUSHolidays(year) {
+  const holidays = [];
+  const yearNum = typeof year === 'string' ? parseInt(year, 10) : year;
+  
+  holidays.push({ name: "New Year's Day", month: 1, day: 1 });
+  
+  holidays.push({ name: "Independence Day", month: 7, day: 4 });
+  
+  const thanksgiving = getNthWeekday(yearNum, 11, 4, 4);
+  holidays.push({ name: "Thanksgiving", month: 11, day: thanksgiving });
+  
+  holidays.push({ name: "Christmas", month: 12, day: 25 });
+  
+  return holidays;
+}
+
+function normalizeHolidayName(name) {
+  return name
+    .toLowerCase()
+    .replace(/'/g, '')
+    .replace(/\s+/g, '_')
+    .replace(/\./g, '');
+}
+
+function getHolidayCategory(dateStr) {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  const holidays = getUSHolidays(year);
+  
+  for (const holiday of holidays) {
+    const holidayDate = new Date(year, holiday.month - 1, holiday.day);
+    const diffMs = date - holidayDate;
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === -2) {
+      return { category: normalizeHolidayName(holiday.name), offset: -2 };
+    } else if (diffDays === -1) {
+      return { category: normalizeHolidayName(holiday.name), offset: -1 };
+    } else if (diffDays === 0) {
+      return { category: normalizeHolidayName(holiday.name), offset: 0 };
+    } else if (diffDays === 1) {
+      return { category: normalizeHolidayName(holiday.name), offset: 1 };
+    } else if (diffDays === 2) {
+      return { category: normalizeHolidayName(holiday.name), offset: 2 };
+    }
+  }
+  
+  return null;
+}
+
+function getDayOfWeek(dateStr) {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  return days[date.getDay()];
+}
+
 async function generateBaseline(airport, year, force, localOnly) {
   const baselinePath = getBaselinePath(airport, year);
   
@@ -118,6 +191,28 @@ async function generateBaseline(airport, year, force, localOnly) {
     afternoon: [],
     evening: [],
   };
+  
+  const summerHolidayVolumes = {};
+  const winterHolidayVolumes = {};
+  const summerDayOfWeekVolumes = {
+    monday: { morning: [], afternoon: [], evening: [] },
+    tuesday: { morning: [], afternoon: [], evening: [] },
+    wednesday: { morning: [], afternoon: [], evening: [] },
+    thursday: { morning: [], afternoon: [], evening: [] },
+    friday: { morning: [], afternoon: [], evening: [] },
+    saturday: { morning: [], afternoon: [], evening: [] },
+    sunday: { morning: [], afternoon: [], evening: [] },
+  };
+  const winterDayOfWeekVolumes = {
+    monday: { morning: [], afternoon: [], evening: [] },
+    tuesday: { morning: [], afternoon: [], evening: [] },
+    wednesday: { morning: [], afternoon: [], evening: [] },
+    thursday: { morning: [], afternoon: [], evening: [] },
+    friday: { morning: [], afternoon: [], evening: [] },
+    saturday: { morning: [], afternoon: [], evening: [] },
+    sunday: { morning: [], afternoon: [], evening: [] },
+  };
+  
   let processedDays = 0;
   let skippedDays = 0;
   let summerDays = 0;
@@ -210,6 +305,48 @@ async function generateBaseline(airport, year, force, localOnly) {
         }
         if (l2Data.volumes.evening !== undefined) {
           volumesData.evening.push(l2Data.volumes.evening);
+        }
+      }
+      
+      const holidayCategory = getHolidayCategory(date);
+      const dayOfWeek = getDayOfWeek(date);
+      
+      if (holidayCategory) {
+        const holidayVolumes = season === 'summer' ? summerHolidayVolumes : winterHolidayVolumes;
+        const categoryKey = `${holidayCategory.category}_${holidayCategory.offset}`;
+        
+        if (!holidayVolumes[categoryKey]) {
+          holidayVolumes[categoryKey] = {
+            morning: [],
+            afternoon: [],
+            evening: [],
+          };
+        }
+        
+        if (l2Data.volumes) {
+          if (l2Data.volumes.morning !== undefined) {
+            holidayVolumes[categoryKey].morning.push(l2Data.volumes.morning);
+          }
+          if (l2Data.volumes.afternoon !== undefined) {
+            holidayVolumes[categoryKey].afternoon.push(l2Data.volumes.afternoon);
+          }
+          if (l2Data.volumes.evening !== undefined) {
+            holidayVolumes[categoryKey].evening.push(l2Data.volumes.evening);
+          }
+        }
+      } else {
+        const dayOfWeekVolumes = season === 'summer' ? summerDayOfWeekVolumes : winterDayOfWeekVolumes;
+        
+        if (dayOfWeekVolumes[dayOfWeek] && l2Data.volumes) {
+          if (l2Data.volumes.morning !== undefined) {
+            dayOfWeekVolumes[dayOfWeek].morning.push(l2Data.volumes.morning);
+          }
+          if (l2Data.volumes.afternoon !== undefined) {
+            dayOfWeekVolumes[dayOfWeek].afternoon.push(l2Data.volumes.afternoon);
+          }
+          if (l2Data.volumes.evening !== undefined) {
+            dayOfWeekVolumes[dayOfWeek].evening.push(l2Data.volumes.evening);
+          }
         }
       }
 
@@ -329,6 +466,28 @@ async function generateBaseline(airport, year, force, localOnly) {
 
   baseline.summer.l2Volumes = aggregateL2Volumes(summerL2Volumes);
   baseline.winter.l2Volumes = aggregateL2Volumes(winterL2Volumes);
+  
+  function aggregateHolidayVolumes(holidayVolumes) {
+    const result = {};
+    for (const [categoryKey, volumesData] of Object.entries(holidayVolumes)) {
+      result[categoryKey] = aggregateL2Volumes(volumesData);
+    }
+    return result;
+  }
+  
+  baseline.summer.holidayVolumes = aggregateHolidayVolumes(summerHolidayVolumes);
+  baseline.winter.holidayVolumes = aggregateHolidayVolumes(winterHolidayVolumes);
+  
+  function aggregateDayOfWeekVolumes(dayOfWeekVolumes) {
+    const result = {};
+    for (const [day, volumesData] of Object.entries(dayOfWeekVolumes)) {
+      result[day] = aggregateL2Volumes(volumesData);
+    }
+    return result;
+  }
+  
+  baseline.summer.dayOfWeekVolumes = aggregateDayOfWeekVolumes(summerDayOfWeekVolumes);
+  baseline.winter.dayOfWeekVolumes = aggregateDayOfWeekVolumes(winterDayOfWeekVolumes);
 
   const baselineDir = path.dirname(baselinePath);
   if (!fs.existsSync(baselineDir)) {
@@ -354,6 +513,10 @@ async function generateBaseline(airport, year, force, localOnly) {
   console.log(`DST End: ${baseline.dstEnd}`);
   console.log(`Summer Time Slots: ${Object.keys(baseline.summer.byTimeSlotLocal).length}`);
   console.log(`Winter Time Slots: ${Object.keys(baseline.winter.byTimeSlotLocal).length}`);
+  console.log(`Summer Holiday Categories: ${Object.keys(baseline.summer.holidayVolumes).length}`);
+  console.log(`Winter Holiday Categories: ${Object.keys(baseline.winter.holidayVolumes).length}`);
+  console.log(`Summer Day-of-Week Categories: ${Object.keys(baseline.summer.dayOfWeekVolumes).length}`);
+  console.log(`Winter Day-of-Week Categories: ${Object.keys(baseline.winter.dayOfWeekVolumes).length}`);
   console.log(`Saved to: ${baselinePath}`);
   console.log('='.repeat(60) + '\n');
 }
