@@ -7,7 +7,7 @@
  * - Average arrival counts per local time slot across the year
  * - Average time from 50nm per local time slot (median across all days)
  * - Average time from 100nm per local time slot (median across all days)
- * - Average time-of-day volumes (morning/afternoon/evening)
+ * - Average time-of-day volumes (morning/afternoon/evening) based on 50nm threshold passing
  * 
  * Usage:
  *   node scripts/analysis/generate-yearly-baseline.js --airport KORD --year 2025 [--force] [--local-only]

@@ -3,10 +3,10 @@
 /**
  * Generate L2 statistics from L1 statistics data
  * 
- * Calculates time-of-day volumes in local time:
- * - Morning volume (06:00-12:00 local)
- * - Afternoon volume (12:00-18:00 local)
- * - Evening volume (18:00-24:00 local)
+ * Calculates time-of-day volumes in local time based on 50nm threshold passing:
+ * - Morning volume (06:00-12:00 local) - aircraft passing 50nm threshold
+ * - Afternoon volume (12:00-18:00 local) - aircraft passing 50nm threshold
+ * - Evening volume (18:00-24:00 local) - aircraft passing 50nm threshold
  * 
  * Usage:
  *   node scripts/analysis/generate-l2-stats.js --airport KLGA --date 2025-11-08
@@ -30,10 +30,10 @@ function showHelp() {
   console.log(`
 Generate L2 statistics from L1 statistics data
 
-Calculates time-of-day volumes in local time:
-  - Morning volume (06:00-12:00 local)
-  - Afternoon volume (12:00-18:00 local)
-  - Evening volume (18:00-24:00 local)
+Calculates time-of-day volumes in local time based on 50nm threshold passing:
+  - Morning volume (06:00-12:00 local) - aircraft passing 50nm threshold
+  - Afternoon volume (12:00-18:00 local) - aircraft passing 50nm threshold
+  - Evening volume (18:00-24:00 local) - aircraft passing 50nm threshold
 
 Usage:
   # Single date

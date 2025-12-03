@@ -421,10 +421,11 @@
             </div>
 
             <div class="chart-container">
-                <h3>Time-of-Day Volumes (Local Time)</h3>
+                <h3>Time-of-Day Volumes: Aircraft Passing 50nm Threshold (Local Time)</h3>
                 <div class="chart-wrapper">
                     <canvas id="l2VolumesChart"></canvas>
                 </div>
+                <small style="color: #666; display: block; margin-top: 10px;">Volumes are based on when aircraft pass the 50nm threshold, which is more representative of traffic conditions than actual landing times (which depend on runway availability).</small>
             </div>
 
             <div class="chart-container">
@@ -1498,7 +1499,7 @@
                 return;
             }
 
-            const labels = ['Morning (06:00-12:00)', 'Afternoon (12:00-18:00)', 'Evening (18:00-24:00)'];
+            const labels = ['Morning (06:00-12:00)\nPassing 50nm', 'Afternoon (12:00-18:00)\nPassing 50nm', 'Evening (18:00-24:00)\nPassing 50nm'];
             const volumes = [
                 data.volumes.morning || 0,
                 data.volumes.afternoon || 0,

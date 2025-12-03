@@ -319,11 +319,20 @@ class L2StatsAnalyzer {
 
           totalArrivals++;
 
-          // Count time-of-day volumes
-          const localHour = parseInt(localSlot.split(':')[0], 10);
-          const period = this.getTimePeriod(localHour);
-          if (period) {
-            volumes[period]++;
+          // Count time-of-day volumes based on 50nm threshold passing time
+          // This is more representative of traffic conditions than touchdown time
+          if (aircraft.milestones && aircraft.milestones.timeFrom50nm !== undefined && aircraft.milestones.timeFrom50nm !== null) {
+            // Calculate when aircraft passed 50nm: touchdown time - timeFrom50nm
+            const timeFrom50nmSeconds = aircraft.milestones.timeFrom50nm;
+            const passing50nmTimestamp = utcTimestamp - timeFrom50nmSeconds;
+            
+            // Convert 50nm passing time to local time slot
+            const passing50nmLocalSlot = this.utcToLocalTimeSlot(passing50nmTimestamp, airportConfig);
+            const passing50nmLocalHour = parseInt(passing50nmLocalSlot.split(':')[0], 10);
+            const period = this.getTimePeriod(passing50nmLocalHour);
+            if (period) {
+              volumes[period]++;
+            }
           }
         }
 
