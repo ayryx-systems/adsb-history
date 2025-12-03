@@ -358,7 +358,14 @@ class AirportDayAnalyzer {
       
       if (milestonePos) {
         const timeToTouchdown = originalTouchdown.timestamp - milestonePos.timestamp;
-        if (timeToTouchdown > 0 && timeToTouchdown < 24 * 60 * 60) { // Reasonable range: 0 to 24 hours
+        
+        // Only include milestone if it's within a reasonable arrival time window
+        // This prevents including milestones from earlier flight segments (e.g., cruise)
+        // Typical arrival times: 100nm ~30-60min, 50nm ~15-30min, 20nm ~5-15min
+        // Use generous upper bounds: 100nm = 2 hours, 50nm = 1.5 hours, 20nm = 1 hour
+        const maxReasonableTime = milestone === 100 ? 2 * 3600 : milestone === 50 ? 1.5 * 3600 : 3600;
+        
+        if (timeToTouchdown > 0 && timeToTouchdown <= maxReasonableTime) {
           milestoneTimes[`timeFrom${milestone}nm`] = timeToTouchdown;
         }
       }
