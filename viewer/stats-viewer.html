@@ -3262,6 +3262,19 @@
             }
         });
 
+        function updateBodyPadding() {
+            const headerBar = document.querySelector('.header-bar');
+            if (headerBar) {
+                const headerHeight = headerBar.offsetHeight;
+                document.body.style.paddingTop = `${headerHeight}px`;
+            }
+        }
+
+        window.addEventListener('resize', updateBodyPadding);
+        window.addEventListener('load', updateBodyPadding);
+        
+        setTimeout(updateBodyPadding, 0);
+
         populateDaySelect();
         loadData();
     </script>
