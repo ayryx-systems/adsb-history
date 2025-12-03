@@ -62,7 +62,7 @@ class FlightAnalyzer {
     this.missedApproachMaxAGL = config.missedApproachMaxAGL || 1000; // feet AGL
     this.missedApproachMaxTime = config.missedApproachMaxTime || 2 * 60; // 2 minutes in seconds
     this.goAroundBoundary = config.goAroundBoundary || this.MIN_DISTANCE_THRESHOLD; // nm
-    this.goAroundMaxAGL = config.goAroundMaxAGL || 1000; // feet AGL
+    this.goAroundMaxAGL = config.goAroundMaxAGL || 1400; // feet AGL
     this.goAroundMaxTime = config.goAroundMaxTime || 2 * 60; // 2 minutes in seconds
     this.goAroundMinDistance = config.goAroundMinDistance || 5; // nm - must have passed this distance before go-around
     this.goAroundMaxTimeFromThreshold = config.goAroundMaxTimeFromThreshold || 15 * 60; // 15 minutes - max time between passing threshold and go-around
@@ -511,21 +511,46 @@ class FlightAnalyzer {
     const positionsWithDistance = segment;
     const boundary = this.goAroundBoundary;
     
-    // Find entry and exit points for the boundary
+    const traceToCheck = (fullTrace && fullTrace.length > 0) ? fullTrace : positionsWithDistance;
+    
     let entryPos = null;
     let entryIndex = -1;
     
-    // Find first entry into boundary below 1000ft AGL
-    for (let i = 0; i < positionsWithDistance.length; i++) {
-      const pos = positionsWithDistance[i];
+    for (let i = 0; i < traceToCheck.length; i++) {
+      const pos = traceToCheck[i];
       const agl = pos.alt_baro - airportElevation;
       
-      // Check if entering boundary (was outside, now inside) and below max AGL
-      const wasOutside = i === 0 || positionsWithDistance[i - 1].distance > boundary;
-      if (wasOutside && pos.distance <= boundary && agl < this.goAroundMaxAGL) {
-        entryPos = { ...pos, agl };
-        entryIndex = i;
-        break;
+      const isInsideBoundary = pos.distance <= boundary;
+      
+      if (!isInsideBoundary || agl >= this.goAroundMaxAGL) {
+        continue;
+      }
+      
+      const lookbackWindow = 15 * 60;
+      const positionsBefore = traceToCheck.filter(p => 
+        p.timestamp < pos.timestamp && 
+        p.timestamp >= pos.timestamp - lookbackWindow
+      );
+      
+      if (positionsBefore.length === 0) {
+        continue;
+      }
+      
+      const wasOutsideRecently = positionsBefore.some(p => p.distance > boundary);
+      if (!wasOutsideRecently) {
+        continue;
+      }
+      
+      const wasOutside = true;
+      
+      if (wasOutside) {
+        const segmentStartTime = positionsWithDistance[0]?.timestamp || 0;
+        const segmentEndTime = positionsWithDistance[positionsWithDistance.length - 1]?.timestamp || Infinity;
+        if (pos.timestamp >= segmentStartTime && pos.timestamp <= segmentEndTime) {
+          entryPos = { ...pos, agl };
+          entryIndex = i;
+          break;
+        }
       }
     }
     
@@ -533,77 +558,58 @@ class FlightAnalyzer {
       return null;
     }
     
-    // Check that aircraft passed the threshold distance (5nm) before entry
-    // This ensures it was approaching from a reasonable distance
-    const positionsBeforeEntry = positionsWithDistance.slice(0, entryIndex);
+    const traceForApproachCheck = (fullTrace && fullTrace.length > 0) ? fullTrace : positionsWithDistance;
+    const positionsBeforeEntry = traceForApproachCheck.filter(pos => pos.timestamp < entryPos.timestamp);
+    
     if (positionsBeforeEntry.length === 0) {
-      return null; // No approach pattern visible
+      return null;
     }
     
-    // Find when aircraft passed the threshold distance (5nm) going towards airport
-    let thresholdCrossTime = null;
-    let thresholdCrossIndex = -1;
+    let passedThreshold = false;
     for (let i = positionsBeforeEntry.length - 1; i >= 0; i--) {
-      const pos = positionsBeforeEntry[i];
-      if (pos.distance >= this.goAroundMinDistance) {
-        thresholdCrossTime = pos.timestamp;
-        thresholdCrossIndex = i;
+      if (positionsBeforeEntry[i].distance >= this.goAroundMinDistance) {
+        passedThreshold = true;
         break;
       }
     }
     
-    if (!thresholdCrossTime) {
-      return null; // Never passed the threshold distance - not a go-around
+    if (!passedThreshold) {
+      return null;
     }
     
-    // Check time limit: go-around must occur within reasonable time after passing threshold
-    const timeFromThreshold = entryPos.timestamp - thresholdCrossTime;
-    if (timeFromThreshold < 0 || timeFromThreshold > this.goAroundMaxTimeFromThreshold) {
-      return null; // Too much time passed between threshold and go-around
-    }
-
-    // CRITICAL: Filter out pattern work by checking if aircraft was beyond approach distance
-    // in the past 90 minutes. This ensures it's a real approach, not just circuits.
-    // Use fullTrace if provided, otherwise use segment (for testing/backwards compatibility)
-    const traceToCheck = fullTrace && fullTrace.length > 0 ? fullTrace : positionsWithDistance;
-    const lookbackStartTime = entryPos.timestamp - this.goAroundMaxApproachTime;
-    const relevantPositions = traceToCheck.filter(pos => 
-      pos.timestamp >= lookbackStartTime && pos.timestamp <= entryPos.timestamp
+    const lookbackWindow = 10 * 60;
+    const recentBefore = positionsBeforeEntry.filter(pos => 
+      pos.timestamp >= entryPos.timestamp - lookbackWindow
     );
     
-    if (relevantPositions.length > 0) {
-      const maxDistanceInWindow = Math.max(...relevantPositions.map(pos => pos.distance));
-      if (maxDistanceInWindow < this.goAroundMinApproachDistance) {
-        return null; // Aircraft was never far enough away - likely pattern work, not a real approach
-      }
-    } else {
-      return null; // No positions in lookback window
-    }
-    
-    // Check that aircraft was descending before entry (approach pattern)
-    if (positionsBeforeEntry.length >= 3) {
-      const recentBefore = positionsBeforeEntry.slice(-5); // Last 5 positions before entry
-      const altitudes = recentBefore.map(pos => pos.alt_baro).filter(alt => alt !== null);
-      if (altitudes.length >= 2) {
-        const firstAlt = altitudes[0];
-        const lastAlt = altitudes[altitudes.length - 1];
-        // Should be descending (or at least not climbing significantly)
-        if (lastAlt > firstAlt + 500) {
-          return null; // Was climbing, not approaching
-        }
+    if (recentBefore.length >= 2) {
+      const firstDist = recentBefore[0].distance;
+      const lastDist = recentBefore[recentBefore.length - 1].distance;
+      const isApproaching = lastDist < firstDist;
+      if (!isApproaching) {
+        return null;
       }
     }
     
-    // Find first exit from boundary after entry
+    const traceToSearch = (fullTrace && fullTrace.length > 0) ? fullTrace : positionsWithDistance;
     let exitPos = null;
-    let exitIndex = -1;
-    for (let i = entryIndex + 1; i < positionsWithDistance.length; i++) {
-      const pos = positionsWithDistance[i];
-      
-      // Check if exiting boundary (was inside, now outside)
-      if (pos.distance > boundary) {
+    
+    let searchEntryIndex = -1;
+    for (let i = 0; i < traceToSearch.length; i++) {
+      if (traceToSearch[i].timestamp === entryPos.timestamp &&
+          Math.abs(traceToSearch[i].distance - entryPos.distance) < 0.01) {
+        searchEntryIndex = i;
+        break;
+      }
+    }
+    
+    const startSearchIndex = searchEntryIndex >= 0 ? searchEntryIndex + 1 : entryIndex + 1;
+    
+    for (let i = startSearchIndex; i < traceToSearch.length; i++) {
+      const pos = traceToSearch[i];
+      const wasInside = i === startSearchIndex || traceToSearch[i - 1].distance <= boundary;
+      if (wasInside && pos.distance > boundary) {
         exitPos = { ...pos, agl: pos.alt_baro - airportElevation };
-        exitIndex = i;
         break;
       }
     }
@@ -613,33 +619,20 @@ class FlightAnalyzer {
     }
     
     const duration = exitPos.timestamp - entryPos.timestamp;
-    
-    // Check if left within 2 minutes
-    // Also require minimum duration of at least 10 seconds to avoid very brief passes
     if (duration < 10 || duration > this.goAroundMaxTime) {
       return null;
     }
     
-    // CRITICAL: Check that aircraft climbed above 1000ft AGL after entry
-    // This distinguishes go-arounds from missed approaches
-    // Look for positions after entry but before/at exit that are above 1000ft AGL
-    const positionsAfterEntry = positionsWithDistance.slice(entryIndex, exitIndex + 1);
-    let maxAltitudeAGL = entryPos.agl;
-    let climbedAboveThreshold = false;
+    const positionsAfterEntry = traceToSearch.filter(pos => 
+      pos.timestamp >= entryPos.timestamp && pos.timestamp <= exitPos.timestamp
+    );
     
+    let maxAltitudeAGL = entryPos.agl;
     for (const pos of positionsAfterEntry) {
       const agl = pos.alt_baro - airportElevation;
       if (agl > maxAltitudeAGL) {
         maxAltitudeAGL = agl;
       }
-      if (agl > this.goAroundMaxAGL) {
-        climbedAboveThreshold = true;
-      }
-    }
-    
-    // Must have climbed above 1000ft AGL to be considered a go-around
-    if (!climbedAboveThreshold) {
-      return null; // Didn't climb - might be a missed approach instead
     }
     
     return {
