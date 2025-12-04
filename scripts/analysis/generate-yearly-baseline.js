@@ -1,18 +1,25 @@
 #!/usr/bin/env node
 
 /**
- * Generate yearly baseline data from daily L2 statistics (local time)
+ * Generate yearly or multi-year seasonal baseline data from daily L2 statistics (local time)
  * 
  * Aggregates daily L2 stats files (which are in local time) to create baseline comparisons:
- * - Average arrival counts per local time slot across the year
+ * - Average arrival counts per local time slot across the year(s)
  * - Average time from 50nm per local time slot (median across all days)
  * - Average time from 100nm per local time slot (median across all days)
  * - Average time-of-day volumes (morning/afternoon/evening) based on 50nm threshold passing
  * 
- * Usage:
+ * Usage (single year):
  *   node scripts/analysis/generate-yearly-baseline.js --airport KORD --year 2025 [--force] [--local-only]
  * 
+ * Usage (multiple years):
+ *   node scripts/analysis/generate-yearly-baseline.js --airport KORD --years 2024,2025 [--force] [--local-only]
+ *   node scripts/analysis/generate-yearly-baseline.js --airport KORD --years 2024 2025 [--force] [--local-only]
+ * 
  * Options:
+ *   --year YYYY     Single year to process (mutually exclusive with --years)
+ *   --years YYYY... Multiple years to process (comma-separated or space-separated)
+ *   --force         Regenerate baseline even if it already exists
  *   --local-only    Only use local L2 stats files, skip S3 downloads (faster when processing limited date ranges)
  */
 
@@ -35,6 +42,7 @@ function parseArgs() {
   const options = {
     airport: null,
     year: null,
+    years: null,
     force: false,
     localOnly: false,
   };
@@ -48,6 +56,21 @@ function parseArgs() {
     } else if (arg === '--year' && i + 1 < args.length) {
       options.year = args[i + 1];
       i++;
+    } else if (arg === '--years') {
+      const yearsList = [];
+      i++;
+      while (i < args.length && !args[i].startsWith('--')) {
+        if (args[i].includes(',')) {
+          yearsList.push(...args[i].split(',').map(y => y.trim()));
+        } else {
+          yearsList.push(args[i]);
+        }
+        i++;
+      }
+      i--;
+      if (yearsList.length > 0) {
+        options.years = yearsList;
+      }
     } else if (arg === '--force') {
       options.force = true;
     } else if (arg === '--local-only') {
@@ -55,8 +78,18 @@ function parseArgs() {
     }
   }
 
-  if (!options.airport || !options.year) {
-    console.error('Usage: node scripts/analysis/generate-yearly-baseline.js --airport AIRPORT --year YYYY [--force] [--local-only]');
+  if (!options.airport) {
+    console.error('Usage: node scripts/analysis/generate-yearly-baseline.js --airport AIRPORT (--year YYYY | --years YYYY...) [--force] [--local-only]');
+    process.exit(1);
+  }
+
+  if (!options.year && !options.years) {
+    console.error('Usage: node scripts/analysis/generate-yearly-baseline.js --airport AIRPORT (--year YYYY | --years YYYY...) [--force] [--local-only]');
+    process.exit(1);
+  }
+
+  if (options.year && options.years) {
+    console.error('Error: Cannot specify both --year and --years');
     process.exit(1);
   }
 
@@ -65,8 +98,9 @@ function parseArgs() {
 
 function getDaysInYear(year) {
   const dates = [];
-  const start = new Date(year, 0, 1);
-  const end = new Date(year, 11, 31);
+  const yearNum = typeof year === 'string' ? parseInt(year, 10) : year;
+  const start = new Date(yearNum, 0, 1);
+  const end = new Date(yearNum, 11, 31);
   
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const dateStr = d.toISOString().split('T')[0];
@@ -76,7 +110,19 @@ function getDaysInYear(year) {
   return dates;
 }
 
-function getBaselinePath(airport, year) {
+function getDaysInYears(years) {
+  const allDates = [];
+  for (const year of years) {
+    allDates.push(...getDaysInYear(year));
+  }
+  return allDates.sort();
+}
+
+function getBaselinePath(airport, year, years) {
+  if (years && years.length > 1) {
+    const yearRange = `${years[0]}-${years[years.length - 1]}`;
+    return path.join(process.cwd(), 'cache', airport, yearRange, 'yearly-baseline.json');
+  }
   return path.join(process.cwd(), 'cache', airport, year, 'yearly-baseline.json');
 }
 
@@ -153,13 +199,14 @@ function getDayOfWeek(dateStr) {
   return days[date.getDay()];
 }
 
-async function generateBaseline(airport, year, force, localOnly) {
-  const baselinePath = getBaselinePath(airport, year);
+async function generateBaseline(airport, year, years, force, localOnly) {
+  const actualYears = years || [year];
+  const baselinePath = getBaselinePath(airport, year, years);
   
   if (!force && fs.existsSync(baselinePath)) {
     logger.info('Yearly baseline already exists, skipping', {
       airport,
-      year,
+      year: years ? actualYears.join(',') : year,
       path: baselinePath,
     });
     return;
@@ -167,15 +214,19 @@ async function generateBaseline(airport, year, force, localOnly) {
 
   const l2StatsData = new L2StatsData({ localOnly });
   const congestionData = new CongestionData({ localOnly });
-  const dates = getDaysInYear(year);
+  const dates = years ? getDaysInYears(years) : getDaysInYear(year);
   
-  const dstDates = getDSTDates(airport, year);
+  const yearRange = years ? `${actualYears[0]}-${actualYears[actualYears.length - 1]}` : year;
+  const dstDatesByYear = {};
+  for (const y of actualYears) {
+    dstDatesByYear[y] = getDSTDates(airport, y);
+  }
+  
   logger.info('Generating seasonal baseline from L2 stats and congestion data', {
     airport,
-    year,
+    year: years ? actualYears.join(',') : year,
+    yearRange,
     totalDays: dates.length,
-    dstStart: dstDates.start.toISOString().split('T')[0],
-    dstEnd: dstDates.end.toISOString().split('T')[0],
     localOnly,
   });
 
@@ -220,7 +271,8 @@ async function generateBaseline(airport, year, force, localOnly) {
 
   for (const date of dates) {
     try {
-      const season = getSeason(date, airport, year);
+      const [dateYear] = date.split('-').map(Number);
+      const season = getSeason(date, airport, dateYear);
       const timeSlotData = season === 'summer' ? summerTimeSlotData : winterTimeSlotData;
       const volumesData = season === 'summer' ? summerL2Volumes : winterL2Volumes;
       
@@ -385,14 +437,23 @@ async function generateBaseline(airport, year, force, localOnly) {
 
   const baseline = {
     airport,
-    year,
+    year: years ? undefined : year,
+    years: years ? actualYears : undefined,
+    yearRange,
     generatedAt: new Date().toISOString(),
     processedDays,
     skippedDays,
     summerDays,
     winterDays,
-    dstStart: dstDates.start.toISOString().split('T')[0],
-    dstEnd: dstDates.end.toISOString().split('T')[0],
+    dstDatesByYear: Object.fromEntries(
+      Object.entries(dstDatesByYear).map(([y, dates]) => [
+        y,
+        {
+          start: dates.start.toISOString().split('T')[0],
+          end: dates.end.toISOString().split('T')[0],
+        },
+      ])
+    ),
     summer: {
       byTimeSlotLocal: {},
       l2Volumes: {},
@@ -498,19 +559,28 @@ async function generateBaseline(airport, year, force, localOnly) {
   
   logger.info('Seasonal baseline generated', {
     airport,
-    year,
+    year: years ? actualYears.join(',') : year,
     path: baselinePath,
     summerTimeSlots: Object.keys(baseline.summer.byTimeSlotLocal).length,
     winterTimeSlots: Object.keys(baseline.winter.byTimeSlotLocal).length,
   });
 
+  const yearLabel = years ? `${actualYears.join(', ')}` : year;
   console.log(`\n${'='.repeat(60)}`);
-  console.log(`Seasonal Baseline for ${airport} in ${year}`);
+  console.log(`Seasonal Baseline for ${airport} in ${yearLabel}`);
   console.log('='.repeat(60));
   console.log(`Processed Days: ${processedDays} (Summer: ${summerDays}, Winter: ${winterDays})`);
   console.log(`Skipped Days: ${skippedDays}`);
-  console.log(`DST Start: ${baseline.dstStart}`);
-  console.log(`DST End: ${baseline.dstEnd}`);
+  if (years) {
+    console.log(`Years: ${actualYears.join(', ')}`);
+    console.log(`DST Dates by Year:`);
+    for (const [y, dates] of Object.entries(baseline.dstDatesByYear)) {
+      console.log(`  ${y}: ${dates.start} to ${dates.end}`);
+    }
+  } else {
+    console.log(`DST Start: ${baseline.dstDatesByYear[year].start}`);
+    console.log(`DST End: ${baseline.dstDatesByYear[year].end}`);
+  }
   console.log(`Summer Time Slots: ${Object.keys(baseline.summer.byTimeSlotLocal).length}`);
   console.log(`Winter Time Slots: ${Object.keys(baseline.winter.byTimeSlotLocal).length}`);
   console.log(`Summer Holiday Categories: ${Object.keys(baseline.summer.holidayVolumes).length}`);
@@ -536,7 +606,13 @@ async function main() {
   logger.info('Starting yearly baseline generation', options);
 
   try {
-    await generateBaseline(options.airport, options.year, options.force, options.localOnly);
+    await generateBaseline(
+      options.airport,
+      options.year,
+      options.years,
+      options.force,
+      options.localOnly
+    );
   } catch (error) {
     logger.error('Failed to generate yearly baseline', {
       error: error.message,
