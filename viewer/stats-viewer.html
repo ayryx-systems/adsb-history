@@ -214,6 +214,9 @@
             position: relative;
             height: 400px;
         }
+        #l2VolumesChartWrapper {
+            height: 600px;
+        }
         .loading {
             text-align: center;
             padding: 40px;
@@ -423,7 +426,7 @@
 
             <div class="chart-container">
                 <h3>Time-of-Day Volumes: Aircraft Passing 50nm Threshold (Local Time)</h3>
-                <div class="chart-wrapper">
+                <div class="chart-wrapper" id="l2VolumesChartWrapper">
                     <canvas id="l2VolumesChart"></canvas>
                 </div>
                 <small style="color: #666; display: block; margin-top: 10px;">Volumes are based on when aircraft pass the 50nm threshold, which is more representative of traffic conditions than actual landing times (which depend on runway availability).</small>
