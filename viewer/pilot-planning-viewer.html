@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pilot Planning Viewer - Traffic Analysis</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -279,6 +280,55 @@
         let trafficChart = null;
         let airportMap = null;
         let currentBaselineData = null;
+        let arrivalZonePluginRegistered = false;
+
+        const arrivalZonePlugin = {
+            id: 'arrivalZone',
+            afterDraw: (chart) => {
+                const zoneData = chart.options.plugins?.arrivalZone;
+                if (!zoneData || zoneData.startIndex < 0 || zoneData.endIndex < 0) {
+                    return;
+                }
+
+                const { ctx, chartArea, scales } = chart;
+                const { startIndex, endIndex, centerIndex } = zoneData;
+                const xScale = scales.x;
+                const yScale = scales.y;
+
+                const startX = xScale.getPixelForValue(startIndex - 0.5);
+                const endX = xScale.getPixelForValue(endIndex + 0.5);
+                const centerX = xScale.getPixelForValue(centerIndex);
+                const topY = chartArea.top;
+                const bottomY = chartArea.bottom;
+
+                ctx.save();
+                
+                const gradient = ctx.createLinearGradient(startX, topY, endX, topY);
+                gradient.addColorStop(0, 'rgba(255, 87, 34, 0.08)');
+                gradient.addColorStop(0.3, 'rgba(255, 87, 34, 0.15)');
+                gradient.addColorStop(0.5, 'rgba(255, 87, 34, 0.25)');
+                gradient.addColorStop(0.7, 'rgba(255, 87, 34, 0.15)');
+                gradient.addColorStop(1, 'rgba(255, 87, 34, 0.08)');
+
+                ctx.fillStyle = gradient;
+                ctx.fillRect(startX, topY, endX - startX, bottomY - topY);
+
+                ctx.strokeStyle = 'rgba(255, 87, 34, 0.4)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(startX, topY, endX - startX, bottomY - topY);
+
+                ctx.strokeStyle = 'rgba(255, 87, 34, 0.6)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([]);
+                ctx.beginPath();
+                ctx.moveTo(centerX, topY);
+                ctx.lineTo(centerX, bottomY);
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        };
 
         function initializeMap(airportCode) {
             const airport = airportData[airportCode];
@@ -382,6 +432,33 @@
             });
             
             return nearestSlot;
+        }
+
+        function formatTimeSlot(hours, minutes) {
+            const h = ((hours % 24) + 24) % 24;
+            const m = minutes % 60;
+            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        }
+
+        function getTimeSlotRange(centerSlot, allTimeSlots, rangeMinutes = 15) {
+            const [centerHours, centerMinutes] = centerSlot.split(':').map(Number);
+            const centerMinutesTotal = centerHours * 60 + centerMinutes;
+            
+            const startMinutesTotal = centerMinutesTotal - rangeMinutes;
+            const endMinutesTotal = centerMinutesTotal + rangeMinutes;
+            
+            const startHours = Math.floor(startMinutesTotal / 60);
+            const startMins = ((startMinutesTotal % 60) + 60) % 60;
+            const startSlotStr = formatTimeSlot(startHours, startMins);
+            
+            const endHours = Math.floor(endMinutesTotal / 60);
+            const endMins = endMinutesTotal % 60;
+            const endSlotStr = formatTimeSlot(endHours, endMins);
+            
+            const startSlot = findNearestTimeSlot(allTimeSlots, startSlotStr);
+            const endSlot = findNearestTimeSlot(allTimeSlots, endSlotStr);
+            
+            return { startSlot, endSlot, centerSlot };
         }
 
         function getSeason(date, airportCode, baselineData) {
@@ -500,9 +577,20 @@
 
             document.getElementById('chartTitle').textContent = `Aircraft Passing 50nm Threshold - ${dayOfWeekDisplay} vs ${seasonDisplay} Average`;
 
+            const timeSlotRange = matchedTimeSlot ? getTimeSlotRange(matchedTimeSlot, alignment.alignedTimeSlots, 15) : null;
+            const startIndex = timeSlotRange ? alignment.alignedTimeSlots.indexOf(timeSlotRange.startSlot) : -1;
+            const endIndex = timeSlotRange ? alignment.alignedTimeSlots.indexOf(timeSlotRange.endSlot) : -1;
+            const centerIndex = timeSlotRange ? alignment.alignedTimeSlots.indexOf(timeSlotRange.centerSlot) : -1;
+
+            if (!arrivalZonePluginRegistered) {
+                Chart.register(arrivalZonePlugin);
+                arrivalZonePluginRegistered = true;
+            }
+
             const ctx = document.getElementById('trafficChart').getContext('2d');
             trafficChart = new Chart(ctx, {
                 type: 'line',
+                plugins: [arrivalZonePlugin],
                 data: {
                     labels: alignment.alignedTimeSlots,
                     datasets: [
@@ -576,7 +664,12 @@
                                     }
                                 }
                             }
-                        }
+                        },
+                        arrivalZone: startIndex >= 0 && endIndex >= 0 && centerIndex >= 0 ? {
+                            startIndex,
+                            endIndex,
+                            centerIndex
+                        } : null
                     },
                     scales: {
                         y: {
