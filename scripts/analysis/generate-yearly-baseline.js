@@ -32,6 +32,34 @@ import CongestionData from '../../src/analysis/congestion/CongestionData.js';
 import logger from '../../src/utils/logger.js';
 import { getSeason, getDSTDates } from '../../src/utils/dst.js';
 
+function getUTCOffsetHours(airport, dateStr) {
+  const season = getSeason(dateStr, airport, dateStr.split('-')[0]);
+  const offsets = {
+    KORD: { winter: -6, summer: -5 },
+    KLGA: { winter: -5, summer: -4 },
+    KJFK: { winter: -5, summer: -4 },
+    KLAX: { winter: -8, summer: -7 },
+    KSFO: { winter: -8, summer: -7 },
+  };
+  const offset = offsets[airport] || { winter: -6, summer: -5 };
+  return season === 'summer' ? offset.summer : offset.winter;
+}
+
+function utcToLocalTimeSlot(utcTimestamp, airport, dateStr) {
+  const offsetHours = getUTCOffsetHours(airport, dateStr);
+  const offsetSeconds = offsetHours * 3600;
+  const localTimestamp = utcTimestamp + offsetSeconds;
+  const localDate = new Date(localTimestamp * 1000);
+  
+  const hour = localDate.getUTCHours();
+  const minute = localDate.getUTCMinutes();
+  const slotMinute = Math.floor(minute / 15) * 15;
+  
+  const hourStr = hour.toString().padStart(2, '0');
+  const minStr = slotMinute.toString().padStart(2, '0');
+  return `${hourStr}:${minStr}`;
+}
+
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -232,6 +260,8 @@ async function generateBaseline(airport, year, years, force, localOnly) {
 
   const summerTimeSlotData = {};
   const winterTimeSlotData = {};
+  const summerSeasonalTimeSlotData = {};
+  const winterSeasonalTimeSlotData = {};
   const summerL2Volumes = {
     morning: [],
     afternoon: [],
@@ -245,6 +275,8 @@ async function generateBaseline(airport, year, years, force, localOnly) {
   
   const summerHolidayVolumes = {};
   const winterHolidayVolumes = {};
+  const summerHolidayTimeSlotData = {};
+  const winterHolidayTimeSlotData = {};
   const summerDayOfWeekVolumes = {
     monday: { morning: [], afternoon: [], evening: [] },
     tuesday: { morning: [], afternoon: [], evening: [] },
@@ -263,6 +295,24 @@ async function generateBaseline(airport, year, years, force, localOnly) {
     saturday: { morning: [], afternoon: [], evening: [] },
     sunday: { morning: [], afternoon: [], evening: [] },
   };
+  const summerDayOfWeekTimeSlotData = {
+    monday: {},
+    tuesday: {},
+    wednesday: {},
+    thursday: {},
+    friday: {},
+    saturday: {},
+    sunday: {},
+  };
+  const winterDayOfWeekTimeSlotData = {
+    monday: {},
+    tuesday: {},
+    wednesday: {},
+    thursday: {},
+    friday: {},
+    saturday: {},
+    sunday: {},
+  };
   
   let processedDays = 0;
   let skippedDays = 0;
@@ -274,6 +324,7 @@ async function generateBaseline(airport, year, years, force, localOnly) {
       const [dateYear] = date.split('-').map(Number);
       const season = getSeason(date, airport, dateYear);
       const timeSlotData = season === 'summer' ? summerTimeSlotData : winterTimeSlotData;
+      const seasonalTimeSlotData = season === 'summer' ? summerSeasonalTimeSlotData : winterSeasonalTimeSlotData;
       const volumesData = season === 'summer' ? summerL2Volumes : winterL2Volumes;
       
       const l2Data = await l2StatsData.load(airport, date);
@@ -360,11 +411,39 @@ async function generateBaseline(airport, year, years, force, localOnly) {
         }
       }
       
+      const seasonalVolumesBySlot = {};
+      for (const [slot, slotData] of Object.entries(bySlot)) {
+        const aircraft = slotData.aircraft || [];
+        for (const ac of aircraft) {
+          if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc) {
+            const touchdownTime = new Date(ac.touchdown.utc).getTime() / 1000;
+            const timeFrom50nm = ac.milestones.timeFrom50nm;
+            const passing50nmTime = touchdownTime - timeFrom50nm;
+            const passing50nmSlot = utcToLocalTimeSlot(passing50nmTime, airport, date);
+            
+            if (!seasonalVolumesBySlot[passing50nmSlot]) {
+              seasonalVolumesBySlot[passing50nmSlot] = 0;
+            }
+            seasonalVolumesBySlot[passing50nmSlot]++;
+          }
+        }
+      }
+      
+      for (const [slot, count] of Object.entries(seasonalVolumesBySlot)) {
+        if (!seasonalTimeSlotData[slot]) {
+          seasonalTimeSlotData[slot] = {
+            counts: [],
+          };
+        }
+        seasonalTimeSlotData[slot].counts.push(count);
+      }
+      
       const holidayCategory = getHolidayCategory(date);
       const dayOfWeek = getDayOfWeek(date);
       
       if (holidayCategory) {
         const holidayVolumes = season === 'summer' ? summerHolidayVolumes : winterHolidayVolumes;
+        const holidayTimeSlotData = season === 'summer' ? summerHolidayTimeSlotData : winterHolidayTimeSlotData;
         const categoryKey = `${holidayCategory.category}_${holidayCategory.offset}`;
         
         if (!holidayVolumes[categoryKey]) {
@@ -373,6 +452,10 @@ async function generateBaseline(airport, year, years, force, localOnly) {
             afternoon: [],
             evening: [],
           };
+        }
+        
+        if (!holidayTimeSlotData[categoryKey]) {
+          holidayTimeSlotData[categoryKey] = {};
         }
         
         if (l2Data.volumes) {
@@ -386,8 +469,36 @@ async function generateBaseline(airport, year, years, force, localOnly) {
             holidayVolumes[categoryKey].evening.push(l2Data.volumes.evening);
           }
         }
+        
+        const volumesBySlot = {};
+        for (const [slot, slotData] of Object.entries(bySlot)) {
+          const aircraft = slotData.aircraft || [];
+          for (const ac of aircraft) {
+            if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc) {
+              const touchdownTime = new Date(ac.touchdown.utc).getTime() / 1000;
+              const timeFrom50nm = ac.milestones.timeFrom50nm;
+              const passing50nmTime = touchdownTime - timeFrom50nm;
+              const passing50nmSlot = utcToLocalTimeSlot(passing50nmTime, airport, date);
+              
+              if (!volumesBySlot[passing50nmSlot]) {
+                volumesBySlot[passing50nmSlot] = 0;
+              }
+              volumesBySlot[passing50nmSlot]++;
+            }
+          }
+        }
+        
+        for (const [slot, count] of Object.entries(volumesBySlot)) {
+          if (!holidayTimeSlotData[categoryKey][slot]) {
+            holidayTimeSlotData[categoryKey][slot] = {
+              counts: [],
+            };
+          }
+          holidayTimeSlotData[categoryKey][slot].counts.push(count);
+        }
       } else {
         const dayOfWeekVolumes = season === 'summer' ? summerDayOfWeekVolumes : winterDayOfWeekVolumes;
+        const dayOfWeekTimeSlotData = season === 'summer' ? summerDayOfWeekTimeSlotData : winterDayOfWeekTimeSlotData;
         
         if (dayOfWeekVolumes[dayOfWeek] && l2Data.volumes) {
           if (l2Data.volumes.morning !== undefined) {
@@ -398,6 +509,35 @@ async function generateBaseline(airport, year, years, force, localOnly) {
           }
           if (l2Data.volumes.evening !== undefined) {
             dayOfWeekVolumes[dayOfWeek].evening.push(l2Data.volumes.evening);
+          }
+        }
+        
+        if (dayOfWeekTimeSlotData[dayOfWeek]) {
+          const volumesBySlot = {};
+          for (const [slot, slotData] of Object.entries(bySlot)) {
+            const aircraft = slotData.aircraft || [];
+            for (const ac of aircraft) {
+              if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc) {
+                const touchdownTime = new Date(ac.touchdown.utc).getTime() / 1000;
+                const timeFrom50nm = ac.milestones.timeFrom50nm;
+                const passing50nmTime = touchdownTime - timeFrom50nm;
+                const passing50nmSlot = utcToLocalTimeSlot(passing50nmTime, airport, date);
+                
+                if (!volumesBySlot[passing50nmSlot]) {
+                  volumesBySlot[passing50nmSlot] = 0;
+                }
+                volumesBySlot[passing50nmSlot]++;
+              }
+            }
+          }
+          
+          for (const [slot, count] of Object.entries(volumesBySlot)) {
+            if (!dayOfWeekTimeSlotData[dayOfWeek][slot]) {
+              dayOfWeekTimeSlotData[dayOfWeek][slot] = {
+                counts: [],
+              };
+            }
+            dayOfWeekTimeSlotData[dayOfWeek][slot].counts.push(count);
           }
         }
       }
@@ -457,10 +597,12 @@ async function generateBaseline(airport, year, years, force, localOnly) {
     summer: {
       byTimeSlotLocal: {},
       l2Volumes: {},
+      seasonalTimeSlots: {},
     },
     winter: {
       byTimeSlotLocal: {},
       l2Volumes: {},
+      seasonalTimeSlots: {},
     },
   };
 
@@ -539,6 +681,28 @@ async function generateBaseline(airport, year, years, force, localOnly) {
   baseline.summer.holidayVolumes = aggregateHolidayVolumes(summerHolidayVolumes);
   baseline.winter.holidayVolumes = aggregateHolidayVolumes(winterHolidayVolumes);
   
+  function aggregateHolidayTimeSlots(holidayTimeSlotData) {
+    const result = {};
+    for (const [categoryKey, timeSlotData] of Object.entries(holidayTimeSlotData)) {
+      result[categoryKey] = {};
+      for (const [slot, data] of Object.entries(timeSlotData)) {
+        const avgCount = data.counts.length > 0
+          ? data.counts.reduce((a, b) => a + b, 0) / data.counts.length
+          : 0;
+        result[categoryKey][slot] = {
+          averageCount: Math.round(avgCount * 100) / 100,
+          sampleSize: {
+            days: data.counts.length,
+          },
+        };
+      }
+    }
+    return result;
+  }
+  
+  baseline.summer.holidayTimeSlots = aggregateHolidayTimeSlots(summerHolidayTimeSlotData);
+  baseline.winter.holidayTimeSlots = aggregateHolidayTimeSlots(winterHolidayTimeSlotData);
+  
   function aggregateDayOfWeekVolumes(dayOfWeekVolumes) {
     const result = {};
     for (const [day, volumesData] of Object.entries(dayOfWeekVolumes)) {
@@ -549,6 +713,47 @@ async function generateBaseline(airport, year, years, force, localOnly) {
   
   baseline.summer.dayOfWeekVolumes = aggregateDayOfWeekVolumes(summerDayOfWeekVolumes);
   baseline.winter.dayOfWeekVolumes = aggregateDayOfWeekVolumes(winterDayOfWeekVolumes);
+  
+  function aggregateDayOfWeekTimeSlots(dayOfWeekTimeSlotData) {
+    const result = {};
+    for (const [day, timeSlotData] of Object.entries(dayOfWeekTimeSlotData)) {
+      result[day] = {};
+      for (const [slot, data] of Object.entries(timeSlotData)) {
+        const avgCount = data.counts.length > 0
+          ? data.counts.reduce((a, b) => a + b, 0) / data.counts.length
+          : 0;
+        result[day][slot] = {
+          averageCount: Math.round(avgCount * 100) / 100,
+          sampleSize: {
+            days: data.counts.length,
+          },
+        };
+      }
+    }
+    return result;
+  }
+  
+  baseline.summer.dayOfWeekTimeSlots = aggregateDayOfWeekTimeSlots(summerDayOfWeekTimeSlotData);
+  baseline.winter.dayOfWeekTimeSlots = aggregateDayOfWeekTimeSlots(winterDayOfWeekTimeSlotData);
+  
+  function aggregateTimeSlots(timeSlotData) {
+    const result = {};
+    for (const [slot, data] of Object.entries(timeSlotData)) {
+      const avgCount = data.counts.length > 0
+        ? data.counts.reduce((a, b) => a + b, 0) / data.counts.length
+        : 0;
+      result[slot] = {
+        averageCount: Math.round(avgCount * 100) / 100,
+        sampleSize: {
+          days: data.counts.length,
+        },
+      };
+    }
+    return result;
+  }
+  
+  baseline.summer.seasonalTimeSlots = aggregateTimeSlots(summerSeasonalTimeSlotData);
+  baseline.winter.seasonalTimeSlots = aggregateTimeSlots(winterSeasonalTimeSlotData);
 
   const baselineDir = path.dirname(baselinePath);
   if (!fs.existsSync(baselineDir)) {
@@ -624,4 +829,5 @@ async function main() {
 }
 
 main();
+
 
