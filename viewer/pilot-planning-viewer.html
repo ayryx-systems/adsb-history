@@ -187,7 +187,7 @@
                         <span class="info-value" id="dayOfWeek">-</span>
                     </div>
                     <div class="info-row">
-                        <span class="info-label">Expected Aircraft Count:</span>
+                        <span class="info-label">Expected Aircraft (50nm threshold):</span>
                         <span class="info-value" id="expectedCount">-</span>
                     </div>
                     <div class="info-row">
@@ -205,7 +205,7 @@
                 </div>
                 
                 <div class="chart-container">
-                    <h3>Historical Traffic Pattern</h3>
+                    <h3 id="chartTitle">Historical Traffic Pattern</h3>
                     <div class="chart-wrapper">
                         <canvas id="trafficChart"></canvas>
                     </div>
@@ -384,6 +384,38 @@
             return nearestSlot;
         }
 
+        function getSeasonalAverageData(seasonalData) {
+            if (!seasonalData || !seasonalData.seasonalTimeSlots) {
+                return null;
+            }
+            
+            const timeSlots = Object.keys(seasonalData.seasonalTimeSlots).sort();
+            const counts = timeSlots.map(ts => seasonalData.seasonalTimeSlots[ts].averageCount || 0);
+            const sampleSizes = timeSlots.map(ts => seasonalData.seasonalTimeSlots[ts].sampleSize?.days || 0);
+            
+            return { timeSlots, counts, sampleSizes };
+        }
+
+        function alignTimeSlots(dayTimeSlots, seasonalTimeSlots) {
+            const allTimeSlots = [...new Set([...dayTimeSlots, ...seasonalTimeSlots])].sort();
+            
+            const dayData = new Map();
+            dayTimeSlots.forEach((ts, idx) => {
+                dayData.set(ts, idx);
+            });
+            
+            const seasonalData = new Map();
+            seasonalTimeSlots.forEach((ts, idx) => {
+                seasonalData.set(ts, idx);
+            });
+            
+            return {
+                alignedTimeSlots: allTimeSlots,
+                dayIndices: allTimeSlots.map(ts => dayData.get(ts)),
+                seasonalIndices: allTimeSlots.map(ts => seasonalData.get(ts))
+            };
+        }
+
         function updateChart(airportCode, date, time) {
             if (!currentBaselineData) {
                 console.error('No baseline data loaded');
@@ -392,44 +424,103 @@
 
             const dayOfWeek = getDayOfWeekName(date);
             const timeSlot = getTimeSlotKey(time);
+            const dayOfWeekDisplay = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
             
             const dayData = currentBaselineData.summer?.dayOfWeekTimeSlots?.[dayOfWeek];
+            const seasonalData = currentBaselineData.summer;
+            
             if (!dayData) {
                 console.error(`No data found for ${dayOfWeek}`);
                 return;
             }
+            
+            if (!seasonalData) {
+                console.error('No seasonal data found');
+                return;
+            }
 
-            const timeSlots = Object.keys(dayData).sort();
-            const counts = timeSlots.map(ts => dayData[ts].averageCount || 0);
-            const sampleSizes = timeSlots.map(ts => dayData[ts].sampleSize?.days || 0);
+            const dayTimeSlots = Object.keys(dayData).sort();
+            const dayCounts = dayTimeSlots.map(ts => dayData[ts].averageCount || 0);
+            const daySampleSizes = dayTimeSlots.map(ts => dayData[ts].sampleSize?.days || 0);
 
-            const matchedTimeSlot = findNearestTimeSlot(timeSlots, timeSlot);
-            const currentTimeSlotIndex = matchedTimeSlot ? timeSlots.indexOf(matchedTimeSlot) : -1;
-            const currentCount = currentTimeSlotIndex >= 0 ? counts[currentTimeSlotIndex] : null;
-            const currentSampleSize = currentTimeSlotIndex >= 0 ? sampleSizes[currentTimeSlotIndex] : null;
+            const seasonalAvg = getSeasonalAverageData(seasonalData);
+            if (!seasonalAvg) {
+                console.error('Could not get seasonal average data');
+                return;
+            }
+
+            const alignment = alignTimeSlots(dayTimeSlots, seasonalAvg.timeSlots);
+            
+            const alignedDayCounts = alignment.alignedTimeSlots.map((ts, idx) => {
+                const dayIdx = alignment.dayIndices[idx];
+                return dayIdx !== undefined ? dayCounts[dayIdx] : null;
+            });
+            
+            const alignedSeasonalCounts = alignment.alignedTimeSlots.map((ts, idx) => {
+                const seasonalIdx = alignment.seasonalIndices[idx];
+                return seasonalIdx !== undefined ? seasonalAvg.counts[seasonalIdx] : null;
+            });
+
+            const matchedTimeSlot = findNearestTimeSlot(dayTimeSlots, timeSlot);
+            const currentTimeSlotIndex = matchedTimeSlot ? alignment.alignedTimeSlots.indexOf(matchedTimeSlot) : -1;
+            const currentDayCount = currentTimeSlotIndex >= 0 ? alignedDayCounts[currentTimeSlotIndex] : null;
+            const currentSeasonalCount = currentTimeSlotIndex >= 0 ? alignedSeasonalCounts[currentTimeSlotIndex] : null;
+            const currentSampleSize = matchedTimeSlot && dayTimeSlots.includes(matchedTimeSlot)
+                ? daySampleSizes[dayTimeSlots.indexOf(matchedTimeSlot)] : null;
 
             if (trafficChart) {
                 trafficChart.destroy();
             }
 
+            document.getElementById('chartTitle').textContent = `Aircraft Passing 50nm Threshold - ${dayOfWeekDisplay} vs Seasonal Average`;
+
             const ctx = document.getElementById('trafficChart').getContext('2d');
             trafficChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: timeSlots,
-                    datasets: [{
-                        label: 'Average Aircraft Count',
-                        data: counts,
-                        borderColor: '#1976d2',
-                        backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: currentTimeSlotIndex >= 0 ? (idx) => idx === currentTimeSlotIndex ? 8 : 3 : 3,
-                        pointBackgroundColor: currentTimeSlotIndex >= 0 ? (ctx) => ctx.dataIndex === currentTimeSlotIndex ? '#ff5722' : '#1976d2' : '#1976d2',
-                        pointBorderColor: currentTimeSlotIndex >= 0 ? (ctx) => ctx.dataIndex === currentTimeSlotIndex ? '#d84315' : '#1976d2' : '#1976d2',
-                        pointBorderWidth: currentTimeSlotIndex >= 0 ? (ctx) => ctx.dataIndex === currentTimeSlotIndex ? 3 : 1 : 1
-                    }]
+                    labels: alignment.alignedTimeSlots,
+                    datasets: [
+                        {
+                            label: `${dayOfWeekDisplay} Average`,
+                            data: alignedDayCounts,
+                            borderColor: '#1976d2',
+                            backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                            borderWidth: 2.5,
+                            fill: false,
+                            tension: 0.4,
+                            pointRadius: currentTimeSlotIndex >= 0 ? (ctx) => {
+                                if (alignedDayCounts[ctx.dataIndex] === null) return 0;
+                                return ctx.dataIndex === currentTimeSlotIndex ? 8 : 3;
+                            } : (ctx) => alignedDayCounts[ctx.dataIndex] === null ? 0 : 3,
+                            pointBackgroundColor: currentTimeSlotIndex >= 0 ? (ctx) => {
+                                if (alignedDayCounts[ctx.dataIndex] === null) return 'transparent';
+                                return ctx.dataIndex === currentTimeSlotIndex ? '#ff5722' : '#1976d2';
+                            } : (ctx) => alignedDayCounts[ctx.dataIndex] === null ? 'transparent' : '#1976d2',
+                            pointBorderColor: currentTimeSlotIndex >= 0 ? (ctx) => {
+                                if (alignedDayCounts[ctx.dataIndex] === null) return 'transparent';
+                                return ctx.dataIndex === currentTimeSlotIndex ? '#d84315' : '#1976d2';
+                            } : (ctx) => alignedDayCounts[ctx.dataIndex] === null ? 'transparent' : '#1976d2',
+                            pointBorderWidth: currentTimeSlotIndex >= 0 ? (ctx) => {
+                                if (alignedDayCounts[ctx.dataIndex] === null) return 0;
+                                return ctx.dataIndex === currentTimeSlotIndex ? 3 : 1;
+                            } : (ctx) => alignedDayCounts[ctx.dataIndex] === null ? 0 : 1,
+                            spanGaps: true
+                        },
+                        {
+                            label: 'Summer Seasonal Average',
+                            data: alignedSeasonalCounts,
+                            borderColor: '#66bb6a',
+                            backgroundColor: 'rgba(102, 187, 106, 0.1)',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            fill: false,
+                            tension: 0.4,
+                            pointRadius: (ctx) => alignedSeasonalCounts[ctx.dataIndex] !== null ? 2 : 0,
+                            pointBackgroundColor: (ctx) => alignedSeasonalCounts[ctx.dataIndex] !== null ? '#66bb6a' : 'transparent',
+                            pointBorderColor: (ctx) => alignedSeasonalCounts[ctx.dataIndex] !== null ? '#66bb6a' : 'transparent',
+                            spanGaps: true
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
@@ -443,9 +534,20 @@
                             mode: 'index',
                             intersect: false,
                             callbacks: {
-                                afterLabel: (context) => {
-                                    const index = context.dataIndex;
-                                    return `Sample: ${sampleSizes[index]} days`;
+                                label: (context) => {
+                                    const value = context.parsed.y;
+                                    if (value === null) return null;
+                                    const label = `${context.dataset.label}: ${value.toFixed(1)} aircraft`;
+                                    
+                                    if (context.datasetIndex === 0) {
+                                        const dayIdx = alignment.dayIndices[context.dataIndex];
+                                        const sampleSize = dayIdx !== undefined ? daySampleSizes[dayIdx] : null;
+                                        return sampleSize ? `${label} (${sampleSize} days)` : label;
+                                    } else {
+                                        const seasonalIdx = alignment.seasonalIndices[context.dataIndex];
+                                        const sampleSize = seasonalIdx !== undefined ? seasonalAvg.sampleSizes[seasonalIdx] : null;
+                                        return sampleSize ? `${label} (${sampleSize} days)` : label;
+                                    }
                                 }
                             }
                         }
@@ -455,7 +557,7 @@
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'Average Aircraft Count'
+                                text: 'Aircraft Passing 50nm Threshold (Average per Day)'
                             }
                         },
                         x: {
@@ -473,9 +575,11 @@
             });
 
             const infoPanel = document.getElementById('infoPanel');
-            if (currentCount !== null) {
-                document.getElementById('dayOfWeek').textContent = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
-                document.getElementById('expectedCount').textContent = currentCount.toFixed(1) + ' aircraft';
+            if (currentDayCount !== null) {
+                document.getElementById('dayOfWeek').textContent = dayOfWeekDisplay;
+                const countText = currentDayCount.toFixed(1);
+                const seasonalText = currentSeasonalCount !== null ? ` (Seasonal avg: ${currentSeasonalCount.toFixed(1)})` : '';
+                document.getElementById('expectedCount').textContent = countText + ' aircraft' + seasonalText;
                 const timeSlotDisplay = matchedTimeSlot === timeSlot ? timeSlot : `${matchedTimeSlot} (nearest to ${timeSlot})`;
                 document.getElementById('timeSlot').textContent = timeSlotDisplay;
                 document.getElementById('sampleSize').textContent = `${currentSampleSize} days`;
