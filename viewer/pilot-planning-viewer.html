@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pilot Planning Viewer - Traffic Analysis</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+            color: white;
+            padding: 24px 32px;
+        }
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        .controls {
+            padding: 24px 32px;
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            align-items: end;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        input, select {
+            padding: 10px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #1976d2;
+        }
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            min-height: 600px;
+        }
+        .chart-section {
+            padding: 24px 32px;
+            border-right: 1px solid #e0e0e0;
+        }
+        .map-section {
+            padding: 0;
+            position: relative;
+        }
+        #airportMap {
+            width: 100%;
+            height: 600px;
+        }
+        .chart-container {
+            margin-bottom: 32px;
+        }
+        .chart-container h3 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+        .chart-wrapper {
+            position: relative;
+            height: 400px;
+        }
+        .info-panel {
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 24px;
+        }
+        .info-panel h4 {
+            font-size: 14px;
+            color: #1976d2;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 14px;
+        }
+        .info-row:last-child {
+            border-bottom: none;
+        }
+        .info-label {
+            color: #666;
+            font-weight: 500;
+        }
+        .info-value {
+            color: #333;
+            font-weight: 600;
+        }
+        .highlight {
+            background: #e3f2fd;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        @media (max-width: 1200px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+            .chart-section {
+                border-right: none;
+                border-bottom: 1px solid #e0e0e0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Pilot Planning Viewer</h1>
+            <p>Plan your arrival by analyzing historical traffic patterns</p>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="airportSelect">Destination Airport</label>
+                <select id="airportSelect">
+                    <option value="KORD" selected>KORD - Chicago O'Hare</option>
+                    <option value="KLAX">KLAX - Los Angeles</option>
+                    <option value="KSFO">KSFO - San Francisco</option>
+                    <option value="KLGA">KLGA - LaGuardia</option>
+                    <option value="KJFK">KJFK - JFK</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="arrivalDate">Arrival Date</label>
+                <input type="date" id="arrivalDate">
+            </div>
+            
+            <div class="control-group">
+                <label for="arrivalTime">Arrival Time (Local)</label>
+                <input type="time" id="arrivalTime">
+            </div>
+        </div>
+        
+        <div class="content">
+            <div class="chart-section">
+                <div class="info-panel" id="infoPanel" style="display: none;">
+                    <h4>Traffic Forecast</h4>
+                    <div class="info-row">
+                        <span class="info-label">Day of Week:</span>
+                        <span class="info-value" id="dayOfWeek">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Expected Aircraft Count:</span>
+                        <span class="info-value" id="expectedCount">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Time Slot:</span>
+                        <span class="info-value" id="timeSlot">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Sample Size:</span>
+                        <span class="info-value" id="sampleSize">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Data Period:</span>
+                        <span class="info-value" id="dataPeriod">-</span>
+                    </div>
+                </div>
+                
+                <div class="chart-container">
+                    <h3>Historical Traffic Pattern</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="trafficChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="map-section">
+                <div id="airportMap"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const airportData = {
+            KORD: {
+                name: "Chicago O'Hare International",
+                code: "KORD",
+                position: [41.9786, -87.9048],
+                runways: [
+                    { name: "4L", threshold: [41.9786, -87.9048], heading: 40 },
+                    { name: "4R", threshold: [41.9800, -87.9020], heading: 40 },
+                    { name: "9L", threshold: [41.9850, -87.9200], heading: 90 },
+                    { name: "9C", threshold: [41.9870, -87.9150], heading: 90 },
+                    { name: "9R", threshold: [41.9890, -87.9100], heading: 90 },
+                    { name: "10L", threshold: [41.9920, -87.9050], heading: 100 },
+                    { name: "10C", threshold: [41.9940, -87.9000], heading: 100 },
+                    { name: "10R", threshold: [41.9960, -87.8950], heading: 100 }
+                ]
+            },
+            KLAX: {
+                name: "Los Angeles International",
+                code: "KLAX",
+                position: [33.9416, -118.4085],
+                runways: [
+                    { name: "24R", threshold: [33.9416, -118.4085], heading: 243 },
+                    { name: "24L", threshold: [33.9493, -118.4071], heading: 243 },
+                    { name: "25R", threshold: [33.9364, -118.4159], heading: 253 },
+                    { name: "25L", threshold: [33.9441, -118.4145], heading: 253 }
+                ]
+            },
+            KSFO: {
+                name: "San Francisco International",
+                code: "KSFO",
+                position: [37.6213, -122.3790],
+                runways: [
+                    { name: "28R", threshold: [37.6213, -122.3790], heading: 283 },
+                    { name: "28L", threshold: [37.6158, -122.3575], heading: 283 },
+                    { name: "01R", threshold: [37.6067, -122.3582], heading: 13 },
+                    { name: "01L", threshold: [37.6122, -122.3797], heading: 13 }
+                ]
+            },
+            KLGA: {
+                name: "LaGuardia Airport",
+                code: "KLGA",
+                position: [40.7769, -73.8740],
+                runways: [
+                    { name: "04", threshold: [40.7769, -73.8740], heading: 40 },
+                    { name: "13", threshold: [40.7753, -73.8694], heading: 130 }
+                ]
+            },
+            KJFK: {
+                name: "John F. Kennedy International",
+                code: "KJFK",
+                position: [40.6398, -73.7789],
+                runways: [
+                    { name: "22L", threshold: [40.6398, -73.7789], heading: 223 }
+                ]
+            }
+        };
+
+        let trafficChart = null;
+        let airportMap = null;
+        let currentBaselineData = null;
+
+        function initializeMap(airportCode) {
+            const airport = airportData[airportCode];
+            if (!airport) return;
+
+            if (airportMap) {
+                airportMap.remove();
+            }
+
+            airportMap = L.map('airportMap').setView(airport.position, 13);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(airportMap);
+
+            L.marker(airport.position)
+                .addTo(airportMap)
+                .bindPopup(`<b>${airport.code}</b><br>${airport.name}`)
+                .openPopup();
+
+            airport.runways.forEach(runway => {
+                const [lat, lon] = runway.threshold;
+                L.circleMarker([lat, lon], {
+                    radius: 6,
+                    fillColor: '#1976d2',
+                    color: '#1565c0',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.8
+                })
+                .addTo(airportMap)
+                .bindPopup(`Runway ${runway.name}`);
+            });
+        }
+
+        function getDayOfWeekName(date) {
+            const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+            return days[date.getDay()];
+        }
+
+        function formatTimeSlot(timeStr) {
+            return timeStr;
+        }
+
+        function roundToNearestQuarterHour(date) {
+            const minutes = date.getMinutes();
+            const roundedMinutes = Math.round(minutes / 15) * 15;
+            const roundedDate = new Date(date);
+            roundedDate.setMinutes(roundedMinutes);
+            roundedDate.setSeconds(0);
+            roundedDate.setMilliseconds(0);
+            return roundedDate;
+        }
+
+        function formatTime(date) {
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            return `${hours}:${minutes}`;
+        }
+
+        function getTimeSlotKey(date) {
+            return formatTime(date);
+        }
+
+        async function loadBaselineData(airportCode) {
+            try {
+                const response = await fetch(`cache/${airportCode}/2024-2025/yearly-baseline.json`);
+                if (!response.ok) {
+                    throw new Error(`Failed to load data for ${airportCode}`);
+                }
+                const data = await response.json();
+                currentBaselineData = data;
+                return data;
+            } catch (error) {
+                console.error('Error loading baseline data:', error);
+                return null;
+            }
+        }
+
+        function findNearestTimeSlot(timeSlots, targetSlot) {
+            if (timeSlots.includes(targetSlot)) {
+                return targetSlot;
+            }
+            
+            const [targetHours, targetMinutes] = targetSlot.split(':').map(Number);
+            const targetMinutesTotal = targetHours * 60 + targetMinutes;
+            
+            let nearestSlot = null;
+            let minDiff = Infinity;
+            
+            timeSlots.forEach(slot => {
+                const [slotHours, slotMinutes] = slot.split(':').map(Number);
+                const slotMinutesTotal = slotHours * 60 + slotMinutes;
+                const diff = Math.abs(slotMinutesTotal - targetMinutesTotal);
+                
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    nearestSlot = slot;
+                }
+            });
+            
+            return nearestSlot;
+        }
+
+        function updateChart(airportCode, date, time) {
+            if (!currentBaselineData) {
+                console.error('No baseline data loaded');
+                return;
+            }
+
+            const dayOfWeek = getDayOfWeekName(date);
+            const timeSlot = getTimeSlotKey(time);
+            
+            const dayData = currentBaselineData.summer?.dayOfWeekTimeSlots?.[dayOfWeek];
+            if (!dayData) {
+                console.error(`No data found for ${dayOfWeek}`);
+                return;
+            }
+
+            const timeSlots = Object.keys(dayData).sort();
+            const counts = timeSlots.map(ts => dayData[ts].averageCount || 0);
+            const sampleSizes = timeSlots.map(ts => dayData[ts].sampleSize?.days || 0);
+
+            const matchedTimeSlot = findNearestTimeSlot(timeSlots, timeSlot);
+            const currentTimeSlotIndex = matchedTimeSlot ? timeSlots.indexOf(matchedTimeSlot) : -1;
+            const currentCount = currentTimeSlotIndex >= 0 ? counts[currentTimeSlotIndex] : null;
+            const currentSampleSize = currentTimeSlotIndex >= 0 ? sampleSizes[currentTimeSlotIndex] : null;
+
+            if (trafficChart) {
+                trafficChart.destroy();
+            }
+
+            const ctx = document.getElementById('trafficChart').getContext('2d');
+            trafficChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: timeSlots,
+                    datasets: [{
+                        label: 'Average Aircraft Count',
+                        data: counts,
+                        borderColor: '#1976d2',
+                        backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: currentTimeSlotIndex >= 0 ? (idx) => idx === currentTimeSlotIndex ? 8 : 3 : 3,
+                        pointBackgroundColor: currentTimeSlotIndex >= 0 ? (ctx) => ctx.dataIndex === currentTimeSlotIndex ? '#ff5722' : '#1976d2' : '#1976d2',
+                        pointBorderColor: currentTimeSlotIndex >= 0 ? (ctx) => ctx.dataIndex === currentTimeSlotIndex ? '#d84315' : '#1976d2' : '#1976d2',
+                        pointBorderWidth: currentTimeSlotIndex >= 0 ? (ctx) => ctx.dataIndex === currentTimeSlotIndex ? 3 : 1 : 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                afterLabel: (context) => {
+                                    const index = context.dataIndex;
+                                    return `Sample: ${sampleSizes[index]} days`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Average Aircraft Count'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Time (Local)'
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+
+            const infoPanel = document.getElementById('infoPanel');
+            if (currentCount !== null) {
+                document.getElementById('dayOfWeek').textContent = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
+                document.getElementById('expectedCount').textContent = currentCount.toFixed(1) + ' aircraft';
+                const timeSlotDisplay = matchedTimeSlot === timeSlot ? timeSlot : `${matchedTimeSlot} (nearest to ${timeSlot})`;
+                document.getElementById('timeSlot').textContent = timeSlotDisplay;
+                document.getElementById('sampleSize').textContent = `${currentSampleSize} days`;
+                document.getElementById('dataPeriod').textContent = currentBaselineData.yearRange || '2024-2025';
+                infoPanel.style.display = 'block';
+            } else {
+                infoPanel.style.display = 'none';
+            }
+        }
+
+        function setDefaultTime() {
+            const now = new Date();
+            const sixHoursLater = new Date(now.getTime() + 6 * 60 * 60 * 1000);
+            const rounded = roundToNearestQuarterHour(sixHoursLater);
+            
+            const dateInput = document.getElementById('arrivalDate');
+            const timeInput = document.getElementById('arrivalTime');
+            
+            dateInput.value = rounded.toISOString().split('T')[0];
+            timeInput.value = formatTime(rounded);
+        }
+
+        async function updateView() {
+            const airportCode = document.getElementById('airportSelect').value;
+            const dateStr = document.getElementById('arrivalDate').value;
+            const timeStr = document.getElementById('arrivalTime').value;
+
+            if (!dateStr || !timeStr) {
+                return;
+            }
+
+            const [year, month, day] = dateStr.split('-').map(Number);
+            const [hours, minutes] = timeStr.split(':').map(Number);
+            const date = new Date(year, month - 1, day, hours, minutes);
+
+            initializeMap(airportCode);
+            
+            if (!currentBaselineData || currentBaselineData.airport !== airportCode) {
+                await loadBaselineData(airportCode);
+            }
+            
+            updateChart(airportCode, date, date);
+        }
+
+        document.getElementById('airportSelect').addEventListener('change', updateView);
+        document.getElementById('arrivalDate').addEventListener('change', updateView);
+        document.getElementById('arrivalTime').addEventListener('change', updateView);
+
+        setDefaultTime();
+        updateView();
+    </script>
+</body>
+</html>
