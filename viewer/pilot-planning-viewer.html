@@ -384,7 +384,36 @@
             return nearestSlot;
         }
 
-        function getSeasonalAverageData(seasonalData) {
+        function getSeason(date, airportCode, baselineData) {
+            if (!baselineData || !baselineData.dstDatesByYear) {
+                return 'summer';
+            }
+            
+            const dateObj = date instanceof Date ? date : new Date(date);
+            const year = dateObj.getFullYear();
+            const dstDates = baselineData.dstDatesByYear[year.toString()];
+            
+            if (!dstDates) {
+                return 'summer';
+            }
+            
+            const [dstStartYear, dstStartMonth, dstStartDay] = dstDates.start.split('-').map(Number);
+            const [dstEndYear, dstEndMonth, dstEndDay] = dstDates.end.split('-').map(Number);
+            const dstStart = new Date(dstStartYear, dstStartMonth - 1, dstStartDay);
+            const dstEnd = new Date(dstEndYear, dstEndMonth - 1, dstEndDay);
+            
+            const dateOnly = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
+            const dstStartOnly = new Date(dstStart.getFullYear(), dstStart.getMonth(), dstStart.getDate());
+            const dstEndOnly = new Date(dstEnd.getFullYear(), dstEnd.getMonth(), dstEnd.getDate());
+            
+            if (dateOnly >= dstStartOnly && dateOnly < dstEndOnly) {
+                return 'summer';
+            }
+            return 'winter';
+        }
+
+        function getSeasonalAverageData(baselineData, season) {
+            const seasonalData = baselineData[season];
             if (!seasonalData || !seasonalData.seasonalTimeSlots) {
                 return null;
             }
@@ -393,7 +422,7 @@
             const counts = timeSlots.map(ts => seasonalData.seasonalTimeSlots[ts].averageCount || 0);
             const sampleSizes = timeSlots.map(ts => seasonalData.seasonalTimeSlots[ts].sampleSize?.days || 0);
             
-            return { timeSlots, counts, sampleSizes };
+            return { timeSlots, counts, sampleSizes, season };
         }
 
         function alignTimeSlots(dayTimeSlots, seasonalTimeSlots) {
@@ -426,16 +455,13 @@
             const timeSlot = getTimeSlotKey(time);
             const dayOfWeekDisplay = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
             
-            const dayData = currentBaselineData.summer?.dayOfWeekTimeSlots?.[dayOfWeek];
-            const seasonalData = currentBaselineData.summer;
+            const season = getSeason(date, airportCode, currentBaselineData);
+            const seasonDisplay = season.charAt(0).toUpperCase() + season.slice(1);
+            
+            const dayData = currentBaselineData[season]?.dayOfWeekTimeSlots?.[dayOfWeek];
             
             if (!dayData) {
-                console.error(`No data found for ${dayOfWeek}`);
-                return;
-            }
-            
-            if (!seasonalData) {
-                console.error('No seasonal data found');
+                console.error(`No data found for ${dayOfWeek} in ${season}`);
                 return;
             }
 
@@ -443,9 +469,9 @@
             const dayCounts = dayTimeSlots.map(ts => dayData[ts].averageCount || 0);
             const daySampleSizes = dayTimeSlots.map(ts => dayData[ts].sampleSize?.days || 0);
 
-            const seasonalAvg = getSeasonalAverageData(seasonalData);
+            const seasonalAvg = getSeasonalAverageData(currentBaselineData, season);
             if (!seasonalAvg) {
-                console.error('Could not get seasonal average data');
+                console.error(`Could not get ${season} seasonal average data`);
                 return;
             }
 
@@ -472,7 +498,7 @@
                 trafficChart.destroy();
             }
 
-            document.getElementById('chartTitle').textContent = `Aircraft Passing 50nm Threshold - ${dayOfWeekDisplay} vs Seasonal Average`;
+            document.getElementById('chartTitle').textContent = `Aircraft Passing 50nm Threshold - ${dayOfWeekDisplay} vs ${seasonDisplay} Average`;
 
             const ctx = document.getElementById('trafficChart').getContext('2d');
             trafficChart = new Chart(ctx, {
@@ -507,7 +533,7 @@
                             spanGaps: true
                         },
                         {
-                            label: 'Summer Seasonal Average',
+                            label: `${seasonDisplay} Seasonal Average`,
                             data: alignedSeasonalCounts,
                             borderColor: '#66bb6a',
                             backgroundColor: 'rgba(102, 187, 106, 0.1)',
@@ -576,9 +602,9 @@
 
             const infoPanel = document.getElementById('infoPanel');
             if (currentDayCount !== null) {
-                document.getElementById('dayOfWeek').textContent = dayOfWeekDisplay;
+                document.getElementById('dayOfWeek').textContent = `${dayOfWeekDisplay} (${seasonDisplay})`;
                 const countText = currentDayCount.toFixed(1);
-                const seasonalText = currentSeasonalCount !== null ? ` (Seasonal avg: ${currentSeasonalCount.toFixed(1)})` : '';
+                const seasonalText = currentSeasonalCount !== null ? ` (${seasonDisplay} avg: ${currentSeasonalCount.toFixed(1)})` : '';
                 document.getElementById('expectedCount').textContent = countText + ' aircraft' + seasonalText;
                 const timeSlotDisplay = matchedTimeSlot === timeSlot ? timeSlot : `${matchedTimeSlot} (nearest to ${timeSlot})`;
                 document.getElementById('timeSlot').textContent = timeSlotDisplay;
