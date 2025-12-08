@@ -138,6 +138,133 @@
             padding: 2px 6px;
             border-radius: 4px;
         }
+        .matched-days {
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 6px;
+            margin-top: 24px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .matched-days h4 {
+            font-size: 14px;
+            color: #1976d2;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+        .matched-day {
+            padding: 10px;
+            margin-bottom: 8px;
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .matched-day:hover {
+            border-color: #1976d2;
+            background: #f0f7ff;
+        }
+        .matched-day.selected {
+            border-color: #1976d2;
+            background: #e3f2fd;
+        }
+        .matched-day-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .matched-day-date {
+            font-weight: 600;
+            color: #333;
+        }
+        .matched-day-score {
+            font-size: 12px;
+            color: #666;
+            background: #e0e0e0;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        .matched-day-details {
+            font-size: 12px;
+            color: #666;
+        }
+        .trace-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+        .trace-modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .trace-modal-content {
+            background: white;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 1200px;
+            max-height: 90vh;
+            margin: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        .trace-modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .trace-modal-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+        .trace-modal-close {
+            background: none;
+            border: none;
+            font-size: 28px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .trace-modal-close:hover {
+            color: #000;
+        }
+        .trace-modal-body {
+            padding: 20px;
+            flex: 1;
+            overflow: auto;
+        }
+        #traceMap {
+            width: 100%;
+            height: 600px;
+            border-radius: 4px;
+        }
+        .trace-loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .trace-error {
+            padding: 20px;
+            color: #d32f2f;
+            background: #ffebee;
+            border-radius: 4px;
+        }
         @media (max-width: 1200px) {
             .content {
                 grid-template-columns: 1fr;
@@ -177,6 +304,27 @@
                 <label for="arrivalTime">Arrival Time (Local)</label>
                 <input type="time" id="arrivalTime">
             </div>
+            
+            <div class="control-group">
+                <label for="weatherScenario">Weather Scenario</label>
+                <select id="weatherScenario">
+                    <option value="clear">Clear (>3 miles)</option>
+                    <option value="reduced">Reduced Visibility (1-3 miles)</option>
+                    <option value="low">Low Visibility (<1 mile)</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+            
+            <div class="control-group" id="customWeatherGroup" style="display: none;">
+                <label for="customVisibility">Visibility (miles)</label>
+                <input type="number" id="customVisibility" min="0" max="10" step="0.1" value="2.0">
+            </div>
+            
+            <div class="control-group">
+                <button id="findSimilarDays" style="padding: 10px 20px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                    Find Similar Days
+                </button>
+            </div>
         </div>
         
         <div class="content">
@@ -211,10 +359,34 @@
                         <canvas id="trafficChart"></canvas>
                     </div>
                 </div>
+                
+                <div class="matched-days" id="matchedDays" style="display: none;">
+                    <h4>Similar Historical Days</h4>
+                    <div id="matchedDaysList"></div>
+                </div>
             </div>
             
             <div class="map-section">
-                <div id="airportMap"></div>
+                <div id="scatterChartContainer" style="padding: 24px;">
+                    <h3 id="scatterChartTitle" style="font-size: 18px; color: #333; margin-bottom: 16px; font-weight: 600;">Traffic Density - Select a Matched Day</h3>
+                    <div class="chart-wrapper" style="position: relative; height: 500px;">
+                        <canvas id="scatterChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="trace-modal" id="traceModal">
+        <div class="trace-modal-content">
+            <div class="trace-modal-header">
+                <div class="trace-modal-title" id="traceModalTitle">Flight Trace</div>
+                <button class="trace-modal-close" onclick="closeTraceModal()">&times;</button>
+            </div>
+            <div class="trace-modal-body">
+                <div id="traceLoading" class="trace-loading" style="display: none;">Loading trace...</div>
+                <div id="traceError" class="trace-error" style="display: none;"></div>
+                <div id="traceMap"></div>
             </div>
         </div>
     </div>
@@ -278,15 +450,23 @@
         };
 
         let trafficChart = null;
-        let airportMap = null;
+        let scatterChart = null;
         let currentBaselineData = null;
+        let currentWeatherPatterns = null;
+        let selectedMatchedDay = null;
         let arrivalZonePluginRegistered = false;
+        let traceMap = null;
+        let traceMapLayer = null;
 
         const arrivalZonePlugin = {
             id: 'arrivalZone',
             afterDraw: (chart) => {
                 const zoneData = chart.options.plugins?.arrivalZone;
                 if (!zoneData || zoneData.startIndex < 0 || zoneData.endIndex < 0) {
+                    return;
+                }
+
+                if (chart.config.type !== 'line') {
                     return;
                 }
 
@@ -300,6 +480,10 @@
                 const centerX = xScale.getPixelForValue(centerIndex);
                 const topY = chartArea.top;
                 const bottomY = chartArea.bottom;
+
+                if (!isFinite(startX) || !isFinite(endX) || !isFinite(centerX) || !isFinite(topY) || !isFinite(bottomY)) {
+                    return;
+                }
 
                 ctx.save();
                 
@@ -330,44 +514,19 @@
             }
         };
 
-        function initializeMap(airportCode) {
-            const airport = airportData[airportCode];
-            if (!airport) return;
-
-            if (airportMap) {
-                airportMap.remove();
-            }
-
-            airportMap = L.map('airportMap').setView(airport.position, 13);
-
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap contributors',
-                maxZoom: 19
-            }).addTo(airportMap);
-
-            L.marker(airport.position)
-                .addTo(airportMap)
-                .bindPopup(`<b>${airport.code}</b><br>${airport.name}`)
-                .openPopup();
-
-            airport.runways.forEach(runway => {
-                const [lat, lon] = runway.threshold;
-                L.circleMarker([lat, lon], {
-                    radius: 6,
-                    fillColor: '#1976d2',
-                    color: '#1565c0',
-                    weight: 2,
-                    opacity: 1,
-                    fillOpacity: 0.8
-                })
-                .addTo(airportMap)
-                .bindPopup(`Runway ${runway.name}`);
-            });
-        }
 
         function getDayOfWeekName(date) {
             const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-            return days[date.getDay()];
+            let dateObj;
+            if (typeof date === 'string') {
+                const [year, month, day] = date.split('-').map(Number);
+                dateObj = new Date(year, month - 1, day);
+            } else if (date instanceof Date) {
+                dateObj = date;
+            } else {
+                dateObj = new Date(date);
+            }
+            return days[dateObj.getDay()];
         }
 
         function formatTimeSlot(timeStr) {
@@ -384,14 +543,20 @@
             return roundedDate;
         }
 
-        function formatTime(date) {
-            const hours = date.getHours().toString().padStart(2, '0');
-            const minutes = date.getMinutes().toString().padStart(2, '0');
-            return `${hours}:${minutes}`;
+        function formatTime(dateOrTimeStr) {
+            if (typeof dateOrTimeStr === 'string') {
+                return dateOrTimeStr;
+            }
+            if (dateOrTimeStr instanceof Date) {
+                const hours = dateOrTimeStr.getHours().toString().padStart(2, '0');
+                const minutes = dateOrTimeStr.getMinutes().toString().padStart(2, '0');
+                return `${hours}:${minutes}`;
+            }
+            return String(dateOrTimeStr);
         }
 
-        function getTimeSlotKey(date) {
-            return formatTime(date);
+        function getTimeSlotKey(dateOrTimeStr) {
+            return formatTime(dateOrTimeStr);
         }
 
         async function loadBaselineData(airportCode) {
@@ -406,6 +571,451 @@
             } catch (error) {
                 console.error('Error loading baseline data:', error);
                 return null;
+            }
+        }
+
+        async function loadWeatherPatterns(airportCode) {
+            try {
+                const response = await fetch(`cache/${airportCode}/2024-2025/weather-patterns.json`);
+                if (!response.ok) {
+                    throw new Error(`Failed to load weather patterns for ${airportCode}`);
+                }
+                const data = await response.json();
+                currentWeatherPatterns = data;
+                return data;
+            } catch (error) {
+                console.error('Error loading weather patterns:', error);
+                return null;
+            }
+        }
+
+        function findMatchingDays(weatherScenario, arrivalTime, customVisibility) {
+            if (!currentWeatherPatterns || !currentWeatherPatterns.patterns) {
+                return [];
+            }
+
+            const patterns = currentWeatherPatterns.patterns;
+            const [arrivalHour, arrivalMin] = arrivalTime.split(':').map(Number);
+            const arrivalSlot = `${String(arrivalHour).padStart(2, '0')}:${String(Math.floor(arrivalMin / 15) * 15).padStart(2, '0')}`;
+            
+            let targetCategory = weatherScenario;
+            if (weatherScenario === 'custom') {
+                const vis = parseFloat(customVisibility) || 3;
+                if (vis < 1) {
+                    targetCategory = 'low';
+                } else if (vis < 3) {
+                    targetCategory = 'reduced';
+                } else {
+                    targetCategory = 'clear';
+                }
+            }
+
+            const categoryPatterns = patterns.visibility[targetCategory];
+            if (!categoryPatterns) {
+                return [];
+            }
+
+            const timeSlotPatterns = categoryPatterns.byTimeSlot[arrivalSlot];
+            if (!timeSlotPatterns || !timeSlotPatterns.days) {
+                return [];
+            }
+
+            const matches = timeSlotPatterns.days.map(date => {
+                const event = patterns.events.find(e => e.date === date);
+                return {
+                    date,
+                    score: 100,
+                    event: event || null,
+                    visibility: targetCategory,
+                };
+            });
+
+            matches.sort((a, b) => {
+                if (a.event && !b.event) return -1;
+                if (!a.event && b.event) return 1;
+                return a.date.localeCompare(b.date);
+            });
+
+            return matches.slice(0, 10);
+        }
+
+        function displayMatchedDays(matches) {
+            const container = document.getElementById('matchedDays');
+            const list = document.getElementById('matchedDaysList');
+            
+            if (matches.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'block';
+            list.innerHTML = '';
+
+            matches.forEach(match => {
+                const dayDiv = document.createElement('div');
+                dayDiv.className = 'matched-day';
+                if (selectedMatchedDay === match.date) {
+                    dayDiv.classList.add('selected');
+                }
+                
+                const eventInfo = match.event 
+                    ? `${match.event.type} (${match.event.startTime}-${match.event.endTime}, ${match.event.visibility.min}mi)`
+                    : 'Clear conditions';
+                
+                dayDiv.innerHTML = `
+                    <div class="matched-day-header">
+                        <span class="matched-day-date">${match.date}</span>
+                        <span class="matched-day-score">Match</span>
+                    </div>
+                    <div class="matched-day-details">${eventInfo}</div>
+                `;
+                
+                dayDiv.addEventListener('click', () => {
+                    selectedMatchedDay = match.date;
+                    document.querySelectorAll('.matched-day').forEach(el => el.classList.remove('selected'));
+                    dayDiv.classList.add('selected');
+                    loadMatchedDayData(match.date);
+                });
+                
+                list.appendChild(dayDiv);
+            });
+        }
+
+        async function loadMatchedDayData(date) {
+            const airportCode = document.getElementById('airportSelect').value;
+            const [year, month, day] = date.split('-');
+            try {
+                const response = await fetch(`cache/${airportCode}/${year}/${month}/l2-stats-${day}.json`);
+                if (!response.ok) {
+                    console.warn(`L2 stats not available for ${date}`);
+                    if (scatterChart) {
+                        scatterChart.destroy();
+                        scatterChart = null;
+                    }
+                    document.getElementById('scatterChartTitle').textContent = `No data available for ${date}`;
+                    return;
+                }
+                const dayData = await response.json();
+                renderScatterChart(dayData, date);
+            } catch (error) {
+                console.warn(`Error loading matched day data for ${date}:`, error.message);
+                if (scatterChart) {
+                    scatterChart.destroy();
+                    scatterChart = null;
+                }
+                document.getElementById('scatterChartTitle').textContent = `Error loading data for ${date}`;
+            }
+        }
+
+        function getUTCOffsetHoursForDate(airport, dateStr) {
+            const season = getSeason(dateStr, airport, dateStr.split('-')[0]);
+            const offsets = {
+                KORD: { winter: -6, summer: -5 },
+                KLGA: { winter: -5, summer: -4 },
+                KJFK: { winter: -5, summer: -4 },
+                KLAX: { winter: -8, summer: -7 },
+                KSFO: { winter: -8, summer: -7 },
+            };
+            const offset = offsets[airport] || { winter: -6, summer: -5 };
+            return season === 'summer' ? offset.summer : offset.winter;
+        }
+
+        function convertUTCToLocalTime(utcDate, dateStr, airport, year) {
+            const offsetHours = getUTCOffsetHoursForDate(airport, dateStr);
+            const offsetMs = offsetHours * 60 * 60 * 1000;
+            const localTime = new Date(utcDate.getTime() + offsetMs);
+            return localTime;
+        }
+
+        const aircraftCategories = {
+            small: {
+                name: 'Small/Light',
+                types: ['C208', 'C25A', 'C25B', 'C310', 'C525', 'C550', 'C560', 'C56X', 'C680', 'C68A', 'C700', 'C750', 'BE20', 'BE40', 'BE9L', 'PC12', 'SF50', 'LJ31', 'LJ35', 'LJ45', 'LJ60', 'CL30', 'CL35', 'CL60', 'E545', 'E550', 'E55P', 'FA20', 'FA50', 'FA7X', 'FA8X', 'F2TH', 'F900', 'G280', 'GA5C', 'GA6C', 'GALX', 'GL5T', 'GL7T', 'GLEX', 'GLF4', 'GLF5', 'GLF6', 'H25B', 'HA4T', 'HDJT', 'B350']
+            },
+            regional: {
+                name: 'Regional',
+                types: ['CRJ2', 'CRJ7', 'CRJ9', 'E135', 'E145', 'E170', 'E190', 'E35L', 'E45X', 'E75L', 'E75S', 'BCS1', 'BCS3']
+            },
+            narrowbody: {
+                name: 'Narrow-body',
+                types: ['A20N', 'A21N', 'A319', 'A320', 'A321', 'B712', 'B734', 'B737', 'B738', 'B739', 'B38M', 'B39M', 'B752', 'B753']
+            },
+            widebody: {
+                name: 'Wide-body',
+                types: ['A306', 'A332', 'A333', 'A339', 'A343', 'A346', 'A359', 'A35K', 'B762', 'B763', 'B772', 'B77L', 'B77W', 'B788', 'B789', 'B78X', 'B744', 'B748', 'MD11']
+            },
+            other: {
+                name: 'Other',
+                types: ['AN12', 'C27J', 'UNKNOWN']
+            }
+        };
+
+        function getAircraftCategory(type) {
+            if (!type) return 'other';
+            for (const [category, data] of Object.entries(aircraftCategories)) {
+                if (data.types.includes(type)) {
+                    return category;
+                }
+            }
+            return 'other';
+        }
+
+        function renderScatterChart(dayData, date) {
+            if (!dayData.overall || !dayData.overall.byTouchdownTimeSlotLocal) {
+                return;
+            }
+
+            const airportCode = document.getElementById('airportSelect').value;
+            const [year] = date.split('-');
+            const timeSlots = dayData.overall.byTouchdownTimeSlotLocal;
+            const allArrivals = [];
+
+            for (const [slot, slotData] of Object.entries(timeSlots)) {
+                const aircraft = slotData.aircraft || [];
+                
+                for (const ac of aircraft) {
+                    if (ac.milestones?.timeFrom50nm !== undefined && ac.touchdown?.utc) {
+                        const touchdownTimeUTC = new Date(ac.touchdown.utc);
+                        const timeFrom50nmRaw = ac.milestones.timeFrom50nm;
+                        const durationMinutes = timeFrom50nmRaw / 60;
+                        
+                        const touchdownTimeLocal = convertUTCToLocalTime(touchdownTimeUTC, date, airportCode, year);
+                        
+                        const localHours = touchdownTimeLocal.getUTCHours();
+                        const localMinutes = touchdownTimeLocal.getUTCMinutes();
+                        const localSeconds = touchdownTimeLocal.getUTCSeconds();
+                        const hoursSinceMidnight = localHours + localMinutes / 60 + localSeconds / 3600;
+                        
+                        const category = getAircraftCategory(ac.type || 'UNKNOWN');
+                        
+                        allArrivals.push({
+                            x: hoursSinceMidnight,
+                            y: durationMinutes,
+                            icao: ac.icao,
+                            type: ac.type || 'UNKNOWN',
+                            category: category,
+                            touchdownTime: touchdownTimeUTC
+                        });
+                    }
+                }
+            }
+
+            if (allArrivals.length === 0) {
+                if (scatterChart) {
+                    scatterChart.destroy();
+                    scatterChart = null;
+                }
+                document.getElementById('scatterChartTitle').textContent = 'No arrival data available for this day';
+                return;
+            }
+
+            const colors = {
+                small: 'rgba(201, 203, 207, 1)',
+                regional: 'rgba(54, 162, 235, 1)',
+                narrowbody: 'rgba(255, 159, 64, 1)',
+                widebody: 'rgba(75, 192, 192, 1)',
+                other: 'rgba(153, 102, 255, 1)'
+            };
+
+            const categoryOrder = ['narrowbody', 'widebody', 'regional', 'small', 'other'];
+            const datasets = [];
+            const categoryData = {};
+
+            categoryOrder.forEach(category => {
+                categoryData[category] = allArrivals.filter(arr => arr.category === category);
+                if (categoryData[category].length > 0) {
+                    const scatterData = categoryData[category].map(arrival => ({
+                        x: arrival.x,
+                        y: arrival.y,
+                        icao: arrival.icao,
+                        type: arrival.type,
+                        touchdownTime: arrival.touchdownTime
+                    }));
+                    
+                    datasets.push({
+                        label: `${aircraftCategories[category].name} (${categoryData[category].length})`,
+                        data: scatterData,
+                        backgroundColor: colors[category].replace('0.6)', '0.6)'),
+                        borderColor: colors[category],
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        category: category,
+                        categoryData: categoryData[category]
+                    });
+                }
+            });
+
+            function getSeasonalBaseline(baselineData, dateStr, airport, year) {
+                if (!baselineData) {
+                    return null;
+                }
+                
+                if (typeof dateStr !== 'string') {
+                    console.error('getSeasonalBaseline: dateStr must be a string, got:', typeof dateStr, dateStr);
+                    return null;
+                }
+                
+                const season = getSeason(dateStr, airport, year);
+                const seasonData = baselineData[season];
+                
+                if (!seasonData) {
+                    return null;
+                }
+                
+                const result = {
+                    season: season,
+                };
+                
+                if (seasonData.seasonalTimeSlots) {
+                    result.byTimeSlot = seasonData.seasonalTimeSlots;
+                } else if (seasonData.byTimeSlotLocal) {
+                    result.byTimeSlot = seasonData.byTimeSlotLocal;
+                }
+                
+                if (seasonData.l2Volumes) {
+                    result.l2Volumes = seasonData.l2Volumes;
+                }
+                
+                return result;
+            }
+
+            const seasonalBaseline = getSeasonalBaseline(currentBaselineData, date, airportCode, year);
+            
+            if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
+                const baselineLineData = [];
+                const baselineSlots = Object.keys(seasonalBaseline.byTimeSlot).sort();
+                
+                baselineSlots.forEach(slot => {
+                    const baseline = seasonalBaseline.byTimeSlot[slot];
+                    if (baseline && baseline.medianTimeFrom50nm) {
+                        const [hours, minutes] = slot.split(':').map(Number);
+                        const hourDecimal = hours + minutes / 60;
+                        const durationMinutes = baseline.medianTimeFrom50nm / 60;
+                        baselineLineData.push({ 
+                            x: hourDecimal, 
+                            y: durationMinutes,
+                            slot: slot
+                        });
+                    }
+                });
+                
+                if (baselineLineData.length > 0) {
+                    const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
+                    datasets.push({
+                        label: seasonLabel,
+                        data: baselineLineData,
+                        type: 'line',
+                        borderColor: 'rgba(0, 0, 0, 1)',
+                        backgroundColor: 'rgba(0, 0, 0, 0.1)',
+                        borderWidth: 2,
+                        borderDash: [10, 5],
+                        pointRadius: 2,
+                        pointHoverRadius: 4,
+                        fill: false,
+                        tension: 0.1,
+                        showLine: true
+                    });
+                }
+            }
+
+            if (scatterChart) {
+                scatterChart.destroy();
+            }
+
+            document.getElementById('scatterChartTitle').textContent = `Traffic Density - ${date} (${allArrivals.length} arrivals)`;
+
+            const ctx = document.getElementById('scatterChart').getContext('2d');
+            scatterChart = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            min: 0,
+                            max: 24,
+                            title: {
+                                display: true,
+                                text: 'Touchdown Time (Local Hours)'
+                            },
+                            ticks: {
+                                stepSize: 2
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Time from 50nm to Touchdown (Minutes)'
+                            },
+                            beginAtZero: true
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: () => '',
+                                label: (context) => {
+                                    const point = context.raw;
+                                    if (!point || point.x === undefined || point.y === undefined) return '';
+                                    const dataset = context.dataset;
+                                    
+                                    if (dataset.type === 'line' && (dataset.label === 'Summer Average' || dataset.label === 'Winter Average')) {
+                                        const hours = Math.floor(point.x);
+                                        const minutes = Math.floor((point.x - hours) * 60);
+                                        return `${dataset.label}: ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')} - ${point.y.toFixed(1)} min`;
+                                    }
+                                    
+                                    const hours = Math.floor(point.x);
+                                    const minutes = Math.floor((point.x - hours) * 60);
+                                    const icao = point.icao || 'N/A';
+                                    const type = point.type || 'UNKNOWN';
+                                    return `${icao} (${type}) - ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')} - ${point.y.toFixed(1)} min`;
+                                }
+                            }
+                        }
+                    },
+                    onClick: function(event, elements) {
+                        if (elements.length > 0) {
+                            const element = elements[0];
+                            const datasetIndex = element.datasetIndex;
+                            const dataIndex = element.index;
+                            const chartDatasets = this.data.datasets;
+                            const dataset = chartDatasets[datasetIndex];
+                            
+                            if (dataset && dataset.categoryData && dataset.categoryData[dataIndex]) {
+                                const arrival = dataset.categoryData[dataIndex];
+                                if (arrival && arrival.touchdownTime) {
+                                    showTraceMap(arrival.icao, arrival.type, arrival.touchdownTime, date);
+                                }
+                            } else if (dataset && dataset.type === 'line') {
+                                return;
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        async function loadMatchedDayData(date) {
+            const airportCode = document.getElementById('airportSelect').value;
+            const [year, month, day] = date.split('-');
+            try {
+                const response = await fetch(`cache/${airportCode}/${year}/${month}/l2-stats-${day}.json`);
+                if (!response.ok) {
+                    console.warn(`L2 stats not available for ${date}`);
+                    return;
+                }
+                const dayData = await response.json();
+                renderScatterChart(dayData, date);
+            } catch (error) {
+                console.warn(`Error loading matched day data for ${date}:`, error.message);
             }
         }
 
@@ -461,14 +1071,18 @@
             return { startSlot, endSlot, centerSlot };
         }
 
-        function getSeason(date, airportCode, baselineData) {
-            if (!baselineData || !baselineData.dstDatesByYear) {
+        function getSeason(dateStr, airport, year) {
+            if (!currentBaselineData || !currentBaselineData.dstDatesByYear) {
                 return 'summer';
             }
             
-            const dateObj = date instanceof Date ? date : new Date(date);
-            const year = dateObj.getFullYear();
-            const dstDates = baselineData.dstDatesByYear[year.toString()];
+            if (typeof dateStr !== 'string') {
+                console.error('getSeason: dateStr must be a string, got:', typeof dateStr, dateStr);
+                return 'summer';
+            }
+            
+            const yearStr = typeof year === 'string' ? year : year.toString();
+            const dstDates = currentBaselineData.dstDatesByYear[yearStr];
             
             if (!dstDates) {
                 return 'summer';
@@ -479,7 +1093,8 @@
             const dstStart = new Date(dstStartYear, dstStartMonth - 1, dstStartDay);
             const dstEnd = new Date(dstEndYear, dstEndMonth - 1, dstEndDay);
             
-            const dateOnly = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
+            const [dateYear, dateMonth, dateDay] = dateStr.split('-').map(Number);
+            const dateOnly = new Date(dateYear, dateMonth - 1, dateDay);
             const dstStartOnly = new Date(dstStart.getFullYear(), dstStart.getMonth(), dstStart.getDate());
             const dstEndOnly = new Date(dstEnd.getFullYear(), dstEnd.getMonth(), dstEnd.getDate());
             
@@ -528,11 +1143,13 @@
                 return;
             }
 
-            const dayOfWeek = getDayOfWeekName(date);
+            const dateStr = typeof date === 'string' ? date : (date instanceof Date ? date.toISOString().split('T')[0] : String(date));
+            const dayOfWeek = getDayOfWeekName(dateStr);
             const timeSlot = getTimeSlotKey(time);
             const dayOfWeekDisplay = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
             
-            const season = getSeason(date, airportCode, currentBaselineData);
+            const [year] = dateStr.split('-');
+            const season = getSeason(dateStr, airportCode, year);
             const seasonDisplay = season.charAt(0).toUpperCase() + season.slice(1);
             
             const dayData = currentBaselineData[season]?.dayOfWeekTimeSlots?.[dayOfWeek];
@@ -734,18 +1351,217 @@
             const [hours, minutes] = timeStr.split(':').map(Number);
             const date = new Date(year, month - 1, day, hours, minutes);
 
-            initializeMap(airportCode);
-            
             if (!currentBaselineData || currentBaselineData.airport !== airportCode) {
                 await loadBaselineData(airportCode);
             }
             
-            updateChart(airportCode, date, date);
+            if (!currentWeatherPatterns || currentWeatherPatterns.airport !== airportCode) {
+                await loadWeatherPatterns(airportCode);
+            }
+            
+            updateChart(airportCode, dateStr, timeStr);
         }
 
         document.getElementById('airportSelect').addEventListener('change', updateView);
         document.getElementById('arrivalDate').addEventListener('change', updateView);
         document.getElementById('arrivalTime').addEventListener('change', updateView);
+        document.getElementById('weatherScenario').addEventListener('change', (e) => {
+            const customGroup = document.getElementById('customWeatherGroup');
+            customGroup.style.display = e.target.value === 'custom' ? 'flex' : 'none';
+        });
+        document.getElementById('findSimilarDays').addEventListener('click', async () => {
+            const airportCode = document.getElementById('airportSelect').value;
+            const arrivalTime = document.getElementById('arrivalTime').value;
+            const weatherScenario = document.getElementById('weatherScenario').value;
+            const customVisibility = document.getElementById('customVisibility').value;
+
+            if (!arrivalTime) {
+                alert('Please select an arrival time');
+                return;
+            }
+
+            if (!currentWeatherPatterns || currentWeatherPatterns.airport !== airportCode) {
+                await loadWeatherPatterns(airportCode);
+            }
+
+            const matches = findMatchingDays(weatherScenario, arrivalTime, customVisibility);
+            if (matches.length === 0) {
+                alert('No matching historical days found for this weather scenario and arrival time.');
+            }
+            displayMatchedDays(matches);
+        });
+
+        function getTracePath(icao, timestamp, fallbackToOldFormat = false, useUTCDate = true) {
+            const airport = document.getElementById('airportSelect').value;
+            let dateObj;
+            if (timestamp instanceof Date) {
+                dateObj = timestamp;
+            } else if (typeof timestamp === 'number') {
+                dateObj = new Date(timestamp > 4102444800 ? timestamp : timestamp * 1000);
+            } else {
+                dateObj = new Date(timestamp);
+            }
+            
+            let year, month, day;
+            if (useUTCDate) {
+                year = dateObj.getUTCFullYear();
+                month = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+                day = String(dateObj.getUTCDate()).padStart(2, '0');
+            } else {
+                year = document.getElementById('arrivalDate').value.split('-')[0];
+                month = document.getElementById('arrivalDate').value.split('-')[1];
+                day = document.getElementById('arrivalDate').value.split('-')[2];
+            }
+            
+            if (fallbackToOldFormat) {
+                return `cache/traces/${airport}/${year}/${month}/${day}/${icao}.json`;
+            }
+            
+            const timestampSeconds = Math.floor(dateObj.getTime() / 1000);
+            return `cache/traces/${airport}/${year}/${month}/${day}/${icao}-${timestampSeconds}.json`;
+        }
+
+        function closeTraceModal() {
+            const modal = document.getElementById('traceModal');
+            modal.classList.remove('active');
+            if (traceMap) {
+                traceMap.remove();
+                traceMap = null;
+                traceMapLayer = null;
+            }
+        }
+
+        function showTraceMap(icao, aircraftType, timestamp, dateStr) {
+            const modal = document.getElementById('traceModal');
+            const loading = document.getElementById('traceLoading');
+            const error = document.getElementById('traceError');
+            const mapContainer = document.getElementById('traceMap');
+            
+            modal.classList.add('active');
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            mapContainer.innerHTML = '';
+            
+            const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+            const dateDisplay = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+            
+            document.getElementById('traceModalTitle').textContent = `Flight Trace: ${icao} (${aircraftType}) - ${dateDisplay}`;
+            
+            const tracePath = getTracePath(icao, timestamp, false, true);
+            
+            fetch(tracePath)
+                .then(response => {
+                    if (!response.ok) {
+                        const fallbackPath = getTracePath(icao, timestamp, true, true);
+                        return fetch(fallbackPath).then(fallbackResponse => {
+                            if (!fallbackResponse.ok) {
+                                throw new Error(`Trace not found: ${response.status}`);
+                            }
+                            return fallbackResponse.json();
+                        });
+                    }
+                    return response.json();
+                })
+                .then(traceData => {
+                    loading.style.display = 'none';
+                    renderTraceMap(traceData);
+                })
+                .catch(err => {
+                    loading.style.display = 'none';
+                    error.style.display = 'block';
+                    error.textContent = `Failed to load trace: ${err.message}`;
+                });
+        }
+
+        function renderTraceMap(traceData) {
+            if (!traceData.points || traceData.points.length === 0) {
+                document.getElementById('traceError').style.display = 'block';
+                document.getElementById('traceError').textContent = 'No trace points available';
+                return;
+            }
+
+            const points = traceData.points;
+            const latlngs = points.map(p => [p[0], p[1]]);
+            
+            traceMap = L.map('traceMap');
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(traceMap);
+            
+            const bounds = L.latLngBounds(latlngs);
+            
+            const minAlt = traceData.metadata?.minAlt || 0;
+            const maxAlt = traceData.metadata?.maxAlt || 40000;
+            
+            function getAltitudeColor(alt) {
+                if (minAlt === maxAlt) return '#0066cc';
+                const ratio = (alt - minAlt) / (maxAlt - minAlt);
+                const r = Math.round(ratio * 255);
+                const b = Math.round((1 - ratio) * 255);
+                return `rgb(${r}, 0, ${b})`;
+            }
+            
+            const segments = [];
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i + 1];
+                const color = getAltitudeColor(p1[2]);
+                segments.push({
+                    latlngs: [[p1[0], p1[1]], [p2[0], p2[1]]],
+                    color: color,
+                    alt: p1[2],
+                    track: p1[4],
+                    timestamp: p1[3]
+                });
+            }
+            
+            traceMapLayer = L.layerGroup();
+            
+            const arrowInterval = Math.max(1, Math.floor(segments.length / 50));
+            
+            segments.forEach((segment, index) => {
+                const polyline = L.polyline(segment.latlngs, {
+                    color: segment.color,
+                    weight: 3,
+                    opacity: 0.7
+                });
+                
+                if (index % arrowInterval === 0 && segment.track !== null && segment.track !== undefined) {
+                    const midpoint = [
+                        (segment.latlngs[0][0] + segment.latlngs[1][0]) / 2,
+                        (segment.latlngs[0][1] + segment.latlngs[1][1]) / 2
+                    ];
+                    
+                    const arrowSize = 16;
+                    const svg = `
+                        <svg width="${arrowSize}" height="${arrowSize}" viewBox="0 0 16 16">
+                            <path d="M 8 2 L 12 8 L 10 8 L 10 14 L 6 14 L 6 8 L 4 8 Z" 
+                                  fill="${segment.color}" 
+                                  stroke="white" 
+                                  stroke-width="1.5" 
+                                  stroke-linejoin="round"
+                                  transform="rotate(${segment.track} 8 8)"/>
+                        </svg>
+                    `;
+                    
+                    const icon = L.divIcon({
+                        html: svg,
+                        className: 'arrow-icon',
+                        iconSize: [arrowSize, arrowSize],
+                        iconAnchor: [arrowSize / 2, arrowSize / 2]
+                    });
+                    
+                    L.marker(midpoint, { icon: icon }).addTo(traceMapLayer);
+                }
+                
+                polyline.addTo(traceMapLayer);
+            });
+            
+            traceMapLayer.addTo(traceMap);
+            traceMap.fitBounds(bounds, { padding: [20, 20] });
+        }
 
         setDefaultTime();
         updateView();
