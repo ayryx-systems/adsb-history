@@ -364,6 +364,46 @@ node scripts/analysis/generate-yearly-baseline.js --airport KORD --year 2025
 
 **When to run**: After processing a full year of data (or when you want to update the baseline with new data). The baseline is used by the viewer to show how each day compares to the yearly average.
 
+### Phase 3f: Generate Weather Patterns (Optional)
+
+Generate searchable weather pattern index from historical METAR data. Used by the pilot planning viewer to find historical days with similar weather conditions.
+
+**Prerequisites**:
+
+- METAR data from weather download scripts (stored in `cache/metar/AIRPORT/AIRPORT_YYYY.json`)
+
+**Output**:
+
+- **Local cache**: `./cache/AIRPORT/YYYY/weather-patterns.json` or `./cache/AIRPORT/YYYY-YYYY/weather-patterns.json` (multi-year)
+- Contains:
+  - Visibility patterns by category (clear >3mi, reduced 1-3mi, low <1mi)
+  - Visibility patterns by time slot
+  - Weather events (fog, storms) with timing and severity
+
+**Timezone**: Weather patterns use **local time slots**, matching baseline and L2 stats data.
+
+#### Local
+
+```bash
+# Generate patterns for a year
+node scripts/analysis/generate-weather-patterns.js --airport KORD --year 2024
+
+# Generate patterns for multiple years
+node scripts/analysis/generate-weather-patterns.js --airport KORD --years 2024 2025
+
+# Force regeneration even if patterns exist
+node scripts/analysis/generate-weather-patterns.js --airport KORD --year 2024 --force
+```
+
+#### EC2
+
+```bash
+# Same script, run on EC2 instance
+node scripts/analysis/generate-weather-patterns.js --airport KORD --years 2024 2025
+```
+
+**When to run**: After downloading METAR data for a year. The weather patterns are used by the pilot planning viewer to match expected weather conditions with historical days.
+
 ### Running Complete Analysis Pipeline
 
 Run analysis phases (2, 3a, 3b, 3c, and 3d) for a date range in one command. This script processes each day sequentially, running:
@@ -423,6 +463,8 @@ L2 Statistics (S3) ~100KB/day per airport
 Congestion Statistics (S3) ~50KB/day per airport
     ↓ (Phase 3e: Yearly Baseline - Optional, Local time slots)
 Yearly Baseline (Local Cache)
+    ↓ (Phase 3f: Weather Patterns - Optional, Local time slots)
+Weather Patterns (Local Cache)
 ```
 
 **Important**: Phase 2.5 (Extraction) **must be completed** before Phase 3a. Once extraction is done for a date range, you never need to download raw tar files again. Downstream scripts will fail if extracted traces don't exist.
@@ -435,6 +477,7 @@ The system uses a clean separation between UTC and local time:
 - **L2 Statistics**: Local time slots (converted from L1, primary data source for viewer)
 - **Congestion Statistics**: Local time slots (generated from flight traces)
 - **Baseline**: Local time slots (aggregated from L2 + congestion)
+- **Weather Patterns**: Local time slots (indexed from METAR data)
 - **Weather Data**: Loaded separately from METAR files, converted to local time slots in viewer
 
 **Viewer**: Uses only local time data:
@@ -442,6 +485,7 @@ The system uses a clean separation between UTC and local time:
 - L2 statistics (`byTouchdownTimeSlotLocal`)
 - Congestion data (`byTimeSlotLocal`)
 - Baseline data (`byTimeSlotLocal`)
+- Weather patterns (`byTimeSlotLocal` for visibility patterns)
 - Weather data (converted from UTC METAR timestamps to local time slots)
 
 All time slot fields are explicitly named with `Local` suffix to avoid confusion. The viewer performs no timezone conversions - it only displays local time data.
