@@ -368,7 +368,7 @@
             
             <div class="map-section">
                 <div id="scatterChartContainer" style="padding: 24px;">
-                    <h3 id="scatterChartTitle" style="font-size: 18px; color: #333; margin-bottom: 16px; font-weight: 600;">Traffic Density - Select a Matched Day</h3>
+                    <h3 id="scatterChartTitle" style="font-size: 18px; color: #333; margin-bottom: 16px; font-weight: 600;">Approach Timings - Select a Matched Day</h3>
                     <div class="chart-wrapper" style="position: relative; height: 500px;">
                         <canvas id="scatterChart"></canvas>
                     </div>
@@ -922,7 +922,7 @@
                 scatterChart.destroy();
             }
 
-            document.getElementById('scatterChartTitle').textContent = `Traffic Density - ${date} (${allArrivals.length} arrivals)`;
+            document.getElementById('scatterChartTitle').textContent = `Approach Timings - ${date} (${allArrivals.length} arrivals)`;
 
             const ctx = document.getElementById('scatterChart').getContext('2d');
             scatterChart = new Chart(ctx, {
