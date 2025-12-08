@@ -326,7 +326,8 @@ node scripts/analysis/generate-l1-stats.js --airport KLGA --date 2025-11-08
 
 Generate yearly baseline data for comparing daily statistics against yearly averages. This creates aggregated baseline data used by the viewer to show how each day compares to the yearly average.
 
-**Input**: 
+**Input**:
+
 - Daily L2 statistics from Phase 3c (all days for a year)
 - Daily congestion statistics from Phase 3d (all days for a year)
 
@@ -437,6 +438,7 @@ The system uses a clean separation between UTC and local time:
 - **Weather Data**: Loaded separately from METAR files, converted to local time slots in viewer
 
 **Viewer**: Uses only local time data:
+
 - L2 statistics (`byTouchdownTimeSlotLocal`)
 - Congestion data (`byTimeSlotLocal`)
 - Baseline data (`byTimeSlotLocal`)
@@ -603,6 +605,63 @@ The trace file contains complete trace data in JSON format:
 **HTML Visualization:**
 
 The HTML file is a standalone file that can be opened directly in any web browser. The map automatically fits to show the entire flight path.
+
+## Viewer
+
+The viewer provides an interactive web interface to visualize flight statistics, congestion data, and weather information for processed airports.
+
+### Running the Viewer
+
+From the project root directory (`adsb-history/`):
+
+```bash
+npm run serve-viewer
+```
+
+The viewer will start on port 8080 by default. There are two viewer pages available:
+
+**Standard Viewer:**
+
+```
+http://localhost:8080/
+```
+
+or
+
+```
+http://localhost:8080/stats-viewer.html
+```
+
+**Pilot Planning Viewer:**
+
+```
+http://localhost:8080/pilot-planning-viewer.html
+```
+
+### Custom Port
+
+To use a different port, set the `PORT` environment variable:
+
+```bash
+PORT=8081 npm run serve-viewer
+```
+
+### Requirements
+
+The viewer serves files from:
+
+- `viewer/` directory (HTML, JavaScript, CSS files)
+- `cache/` directory (processed statistics and trace data)
+
+Make sure you have run the analysis pipeline (Phases 3a-3d) to generate the statistics files that the viewer displays. The viewer loads data from `./cache/AIRPORT/YYYY/MM/` directories.
+
+### Troubleshooting
+
+If you see a "Port already in use" error, use a different port:
+
+```bash
+PORT=8081 npm run serve-viewer
+```
 
 ## Configuration
 
