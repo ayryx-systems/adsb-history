@@ -418,6 +418,9 @@
                 
                 <div class="matched-days" id="matchedDays" style="display: none;">
                     <h4>Similar Historical Days</h4>
+                    <div id="matchedDaysExplanation" style="font-size: 12px; color: #666; margin-bottom: 12px; font-style: italic;">
+                        Days are matched based on weather conditions at your selected arrival time slot. A day may have different weather at other times.
+                    </div>
                     <div id="matchedDaysList"></div>
                 </div>
             </div>
@@ -427,6 +430,12 @@
                     <h3 id="scatterChartTitle" style="font-size: 18px; color: #333; margin-bottom: 16px; font-weight: 600;">Approach Timings - Select a Matched Day</h3>
                     <div class="chart-wrapper" style="position: relative; height: 500px;">
                         <canvas id="scatterChart"></canvas>
+                    </div>
+                    <div id="visibilityChartContainer" style="margin-top: 32px; display: none;">
+                        <h3 id="visibilityChartTitle" style="font-size: 18px; color: #333; margin-bottom: 16px; font-weight: 600;">Visibility Over Time</h3>
+                        <div class="chart-wrapper" style="position: relative; height: 300px;">
+                            <canvas id="visibilityChart"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -507,6 +516,7 @@
 
         let trafficChart = null;
         let scatterChart = null;
+        let visibilityChart = null;
         let currentBaselineData = null;
         let currentWeatherPatterns = null;
         let selectedMatchedDay = null;
@@ -646,24 +656,136 @@
             }
         }
 
-        function findMatchingDays(weatherScenario, arrivalTime, customVisibility) {
+        function categorizeVisibility(visibilitySm) {
+            if (visibilitySm === null || visibilitySm === undefined || isNaN(visibilitySm)) {
+                return 'unknown';
+            }
+            if (visibilitySm < 1) {
+                return 'low';
+            }
+            if (visibilitySm < 3) {
+                return 'reduced';
+            }
+            return 'clear';
+        }
+
+        async function getVisibilityAtTimeSlot(date, timeSlot, airportCode) {
+            const [year] = date.split('-');
+            try {
+                const metarPath = `cache/metar/${airportCode}/${airportCode}_${year}.json`;
+                const response = await fetch(metarPath);
+                if (!response.ok) {
+                    return null;
+                }
+                const metarData = await response.json();
+                if (!metarData || !metarData.records) {
+                    return null;
+                }
+
+                const season = getSeason(date, airportCode, year);
+                const offsets = {
+                    KORD: { winter: -6, summer: -5 },
+                    KLGA: { winter: -5, summer: -4 },
+                    KJFK: { winter: -5, summer: -4 },
+                    KLAX: { winter: -8, summer: -7 },
+                    KSFO: { winter: -8, summer: -7 },
+                };
+                const offset = offsets[airportCode] || { winter: -6, summer: -5 };
+                const offsetHours = season === 'summer' ? offset.summer : offset.winter;
+
+                const [slotHour, slotMin] = timeSlot.split(':').map(Number);
+                const visibilities = [];
+
+                for (const record of metarData.records) {
+                    if (!record.valid || record.visibility_sm_v === null || record.visibility_sm_v === undefined) {
+                        continue;
+                    }
+
+                    let recordDate;
+                    if (typeof record.valid === 'string') {
+                        let dateStr = record.valid;
+                        if (!dateStr.includes('T')) {
+                            dateStr = dateStr.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})$/, '$1T$2');
+                        }
+                        if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-', 10)) {
+                            dateStr += 'Z';
+                        }
+                        recordDate = new Date(dateStr);
+                    } else {
+                        recordDate = new Date(record.valid);
+                    }
+
+                    if (isNaN(recordDate.getTime())) continue;
+
+                    const utcTimestamp = recordDate.getTime();
+                    const localTimestamp = utcTimestamp + offsetHours * 3600 * 1000;
+                    const localDateObj = new Date(localTimestamp);
+                    const recordLocalDateStr = localDateObj.toISOString().split('T')[0];
+
+                    if (recordLocalDateStr !== date) {
+                        continue;
+                    }
+
+                    const localHours = localDateObj.getUTCHours();
+                    const localMinutes = localDateObj.getUTCMinutes();
+                    const recordSlotMin = Math.floor(localMinutes / 15) * 15;
+                    const recordSlot = `${String(localHours).padStart(2, '0')}:${String(recordSlotMin).padStart(2, '0')}`;
+
+                    if (recordSlot === timeSlot) {
+                        visibilities.push(record.visibility_sm_v);
+                    }
+                }
+
+                if (visibilities.length === 0) {
+                    return null;
+                }
+
+                return visibilities.reduce((a, b) => a + b, 0) / visibilities.length;
+            } catch (error) {
+                console.warn(`Error loading visibility for ${date} at ${timeSlot}:`, error);
+                return null;
+            }
+        }
+
+        async function findMatchingDays(weatherScenario, arrivalTime, customVisibility) {
             if (!currentWeatherPatterns || !currentWeatherPatterns.patterns) {
                 return [];
             }
 
+            const airportCode = document.getElementById('airportSelect').value;
             const patterns = currentWeatherPatterns.patterns;
             const [arrivalHour, arrivalMin] = arrivalTime.split(':').map(Number);
             const arrivalSlot = `${String(arrivalHour).padStart(2, '0')}:${String(Math.floor(arrivalMin / 15) * 15).padStart(2, '0')}`;
             
             let targetCategory = weatherScenario;
+            let targetVisibilityMin = null;
+            let targetVisibilityMax = null;
+            
             if (weatherScenario === 'custom') {
                 const vis = parseFloat(customVisibility) || 3;
                 if (vis < 1) {
                     targetCategory = 'low';
+                    targetVisibilityMin = 0;
+                    targetVisibilityMax = 1;
                 } else if (vis < 3) {
                     targetCategory = 'reduced';
+                    targetVisibilityMin = 1;
+                    targetVisibilityMax = 3;
                 } else {
                     targetCategory = 'clear';
+                    targetVisibilityMin = 3;
+                    targetVisibilityMax = Infinity;
+                }
+            } else {
+                if (targetCategory === 'clear') {
+                    targetVisibilityMin = 3;
+                    targetVisibilityMax = Infinity;
+                } else if (targetCategory === 'reduced') {
+                    targetVisibilityMin = 1;
+                    targetVisibilityMax = 3;
+                } else if (targetCategory === 'low') {
+                    targetVisibilityMin = 0;
+                    targetVisibilityMax = 1;
                 }
             }
 
@@ -677,15 +799,35 @@
                 return [];
             }
 
-            const matches = timeSlotPatterns.days.map(date => {
+            const matches = [];
+            for (const date of timeSlotPatterns.days) {
+                const actualVisibility = await getVisibilityAtTimeSlot(date, arrivalSlot, airportCode);
+                
+                if (actualVisibility === null) {
+                    continue;
+                }
+
+                const actualCategory = categorizeVisibility(actualVisibility);
+                if (actualCategory !== targetCategory) {
+                    continue;
+                }
+
+                if (targetVisibilityMin !== null && targetVisibilityMax !== null) {
+                    if (actualVisibility < targetVisibilityMin || actualVisibility >= targetVisibilityMax) {
+                        continue;
+                    }
+                }
+
                 const event = patterns.events.find(e => e.date === date);
-                return {
+                matches.push({
                     date,
                     score: 100,
                     event: event || null,
-                    visibility: targetCategory,
-                };
-            });
+                    visibility: actualVisibility,
+                    visibilityCategory: actualCategory,
+                    timeSlot: arrivalSlot,
+                });
+            }
 
             matches.sort((a, b) => {
                 if (a.event && !b.event) return -1;
@@ -708,6 +850,10 @@
             container.style.display = 'block';
             list.innerHTML = '';
 
+            const arrivalTime = document.getElementById('arrivalTime').value;
+            const [arrivalHour, arrivalMin] = arrivalTime.split(':').map(Number);
+            const arrivalSlot = `${String(arrivalHour).padStart(2, '0')}:${String(Math.floor(arrivalMin / 15) * 15).padStart(2, '0')}`;
+
             matches.forEach(match => {
                 const dayDiv = document.createElement('div');
                 dayDiv.className = 'matched-day';
@@ -719,12 +865,21 @@
                     ? `${match.event.type} (${match.event.startTime}-${match.event.endTime}, ${match.event.visibility.min}mi)`
                     : 'Clear conditions';
                 
+                const visibilityInfo = match.visibility !== null && match.visibility !== undefined
+                    ? `${match.visibility.toFixed(1)} mi at ${match.timeSlot || arrivalSlot}`
+                    : 'Unknown';
+                
                 dayDiv.innerHTML = `
                     <div class="matched-day-header">
                         <span class="matched-day-date">${match.date}</span>
                         <span class="matched-day-score">Match</span>
                     </div>
-                    <div class="matched-day-details">${eventInfo}</div>
+                    <div class="matched-day-details">
+                        <div>${eventInfo}</div>
+                        <div style="font-size: 11px; color: #888; margin-top: 4px;">
+                            Visibility: ${visibilityInfo} (matched at ${match.timeSlot || arrivalSlot})
+                        </div>
+                    </div>
                 `;
                 
                 dayDiv.addEventListener('click', () => {
@@ -738,8 +893,232 @@
             });
         }
 
+        async function loadVisibilityData(date, airportCode) {
+            const [year] = date.split('-');
+            try {
+                const metarPath = `cache/metar/${airportCode}/${airportCode}_${year}.json`;
+                const response = await fetch(metarPath);
+                if (!response.ok) {
+                    return null;
+                }
+                const metarData = await response.json();
+                if (!metarData || !metarData.records) {
+                    return null;
+                }
+
+                const season = getSeason(date, airportCode, year);
+                const offsets = {
+                    KORD: { winter: -6, summer: -5 },
+                    KLGA: { winter: -5, summer: -4 },
+                    KJFK: { winter: -5, summer: -4 },
+                    KLAX: { winter: -8, summer: -7 },
+                    KSFO: { winter: -8, summer: -7 },
+                };
+                const offset = offsets[airportCode] || { winter: -6, summer: -5 };
+                const offsetHours = season === 'summer' ? offset.summer : offset.winter;
+
+                const visibilityBySlot = {};
+
+                for (const record of metarData.records) {
+                    if (!record.valid || record.visibility_sm_v === null || record.visibility_sm_v === undefined) {
+                        continue;
+                    }
+
+                    let recordDate;
+                    if (typeof record.valid === 'string') {
+                        let dateStr = record.valid;
+                        if (!dateStr.includes('T')) {
+                            dateStr = dateStr.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})$/, '$1T$2');
+                        }
+                        if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-', 10)) {
+                            dateStr += 'Z';
+                        }
+                        recordDate = new Date(dateStr);
+                    } else {
+                        recordDate = new Date(record.valid);
+                    }
+
+                    if (isNaN(recordDate.getTime())) continue;
+
+                    const utcTimestamp = recordDate.getTime();
+                    const localTimestamp = utcTimestamp + offsetHours * 3600 * 1000;
+                    const localDateObj = new Date(localTimestamp);
+                    const recordLocalDateStr = localDateObj.toISOString().split('T')[0];
+
+                    if (recordLocalDateStr !== date) {
+                        continue;
+                    }
+
+                    const localHours = localDateObj.getUTCHours();
+                    const localMinutes = localDateObj.getUTCMinutes();
+                    const slotMin = Math.floor(localMinutes / 15) * 15;
+                    const slot = `${String(localHours).padStart(2, '0')}:${String(slotMin).padStart(2, '0')}`;
+
+                    if (!visibilityBySlot[slot]) {
+                        visibilityBySlot[slot] = [];
+                    }
+                    visibilityBySlot[slot].push(record.visibility_sm_v);
+                }
+
+                const processed = {};
+                for (let hour = 0; hour < 24; hour++) {
+                    for (let minute = 0; minute < 60; minute += 15) {
+                        const slot = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                        const visibilities = visibilityBySlot[slot];
+                        if (visibilities && visibilities.length > 0) {
+                            processed[slot] = visibilities.reduce((a, b) => a + b, 0) / visibilities.length;
+                        } else {
+                            processed[slot] = null;
+                        }
+                    }
+                }
+
+                return processed;
+            } catch (error) {
+                console.warn(`Error loading visibility data for ${date}:`, error);
+                return null;
+            }
+        }
+
+        function renderVisibilityChart(visibilityData, date, arrivalTimeSlot) {
+            const container = document.getElementById('visibilityChartContainer');
+            if (!visibilityData) {
+                container.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'block';
+            document.getElementById('visibilityChartTitle').textContent = `Visibility Over Time - ${date}`;
+
+            const timeSlots = Object.keys(visibilityData).sort();
+            const visibilities = timeSlots.map(slot => visibilityData[slot]);
+
+            const arrivalSlotIndex = timeSlots.indexOf(arrivalTimeSlot);
+
+            if (visibilityChart) {
+                visibilityChart.destroy();
+            }
+
+            const ctx = document.getElementById('visibilityChart').getContext('2d');
+            
+            const chartData = {
+                labels: timeSlots,
+                datasets: [{
+                    label: 'Visibility (miles)',
+                    data: visibilities.map((v, i) => ({ x: i, y: v })),
+                    borderColor: '#1976d2',
+                    backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: (ctx) => {
+                        const index = ctx.parsed.x;
+                        if (arrivalSlotIndex >= 0 && index === arrivalSlotIndex) {
+                            return 6;
+                        }
+                        return visibilities[index] !== null ? 2 : 0;
+                    },
+                    pointBackgroundColor: (ctx) => {
+                        const index = ctx.parsed.x;
+                        if (arrivalSlotIndex >= 0 && index === arrivalSlotIndex) {
+                            return '#ff5722';
+                        }
+                        return visibilities[index] !== null ? '#1976d2' : 'transparent';
+                    },
+                    pointBorderColor: (ctx) => {
+                        const index = ctx.parsed.x;
+                        if (arrivalSlotIndex >= 0 && index === arrivalSlotIndex) {
+                            return '#d84315';
+                        }
+                        return visibilities[index] !== null ? '#1976d2' : 'transparent';
+                    },
+                    pointBorderWidth: (ctx) => {
+                        const index = ctx.parsed.x;
+                        if (arrivalSlotIndex >= 0 && index === arrivalSlotIndex) {
+                            return 3;
+                        }
+                        return visibilities[index] !== null ? 1 : 0;
+                    },
+                    spanGaps: false
+                }]
+            };
+            
+            visibilityChart = new Chart(ctx, {
+                type: 'line',
+                data: chartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: (context) => {
+                                    const index = context[0].parsed.x;
+                                    return timeSlots[index] || '';
+                                },
+                                label: (context) => {
+                                    const value = context.parsed.y;
+                                    if (value === null) return 'No data';
+                                    return `Visibility: ${value.toFixed(1)} miles`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Visibility (miles)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toFixed(1);
+                                }
+                            }
+                        },
+                        x: {
+                            type: 'linear',
+                            min: 0,
+                            max: timeSlots.length - 1,
+                            title: {
+                                display: true,
+                                text: 'Time (Local)'
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                maxTicksLimit: 25,
+                                stepSize: 4,
+                                callback: function(value, index) {
+                                    const slotIndex = Math.round(value);
+                                    if (slotIndex >= 0 && slotIndex < timeSlots.length && slotIndex % 4 === 0) {
+                                        return timeSlots[slotIndex];
+                                    }
+                                    return '';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+        }
+
         async function loadMatchedDayData(date) {
             const airportCode = document.getElementById('airportSelect').value;
+            const arrivalTime = document.getElementById('arrivalTime').value;
+            const [arrivalHour, arrivalMin] = arrivalTime.split(':').map(Number);
+            const arrivalSlot = `${String(arrivalHour).padStart(2, '0')}:${String(Math.floor(arrivalMin / 15) * 15).padStart(2, '0')}`;
+            
             const [year, month, day] = date.split('-');
             try {
                 const response = await fetch(`cache/${airportCode}/${year}/${month}/l2-stats-${day}.json`);
@@ -750,10 +1129,14 @@
                         scatterChart = null;
                     }
                     document.getElementById('scatterChartTitle').textContent = `No data available for ${date}`;
+                    document.getElementById('visibilityChartContainer').style.display = 'none';
                     return;
                 }
                 const dayData = await response.json();
                 renderScatterChart(dayData, date);
+                
+                const visibilityData = await loadVisibilityData(date, airportCode);
+                renderVisibilityChart(visibilityData, date, arrivalSlot);
             } catch (error) {
                 console.warn(`Error loading matched day data for ${date}:`, error.message);
                 if (scatterChart) {
@@ -761,6 +1144,7 @@
                     scatterChart = null;
                 }
                 document.getElementById('scatterChartTitle').textContent = `Error loading data for ${date}`;
+                document.getElementById('visibilityChartContainer').style.display = 'none';
             }
         }
 
@@ -1060,21 +1444,6 @@
             });
         }
 
-        async function loadMatchedDayData(date) {
-            const airportCode = document.getElementById('airportSelect').value;
-            const [year, month, day] = date.split('-');
-            try {
-                const response = await fetch(`cache/${airportCode}/${year}/${month}/l2-stats-${day}.json`);
-                if (!response.ok) {
-                    console.warn(`L2 stats not available for ${date}`);
-                    return;
-                }
-                const dayData = await response.json();
-                renderScatterChart(dayData, date);
-            } catch (error) {
-                console.warn(`Error loading matched day data for ${date}:`, error.message);
-            }
-        }
 
         function findNearestTimeSlot(timeSlots, targetSlot) {
             if (timeSlots.includes(targetSlot)) {
@@ -1108,24 +1477,24 @@
         }
 
         function getTimeSlotRange(centerSlot, allTimeSlots, rangeMinutes = 15) {
-            const [centerHours, centerMinutes] = centerSlot.split(':').map(Number);
-            const centerMinutesTotal = centerHours * 60 + centerMinutes;
+            if (!allTimeSlots || allTimeSlots.length === 0) {
+                return { startSlot: centerSlot, endSlot: centerSlot, centerSlot };
+            }
             
-            const startMinutesTotal = centerMinutesTotal - rangeMinutes;
-            const endMinutesTotal = centerMinutesTotal + rangeMinutes;
+            const centerIndex = allTimeSlots.indexOf(centerSlot);
+            if (centerIndex === -1) {
+                return { startSlot: centerSlot, endSlot: centerSlot, centerSlot };
+            }
             
-            const startHours = Math.floor(startMinutesTotal / 60);
-            const startMins = ((startMinutesTotal % 60) + 60) % 60;
-            const startSlotStr = formatTimeSlot(startHours, startMins);
+            const slotsPerRange = Math.ceil(rangeMinutes / 15);
+            let startIndex = Math.max(0, centerIndex - slotsPerRange);
+            let endIndex = Math.min(allTimeSlots.length - 1, centerIndex + slotsPerRange);
             
-            const endHours = Math.floor(endMinutesTotal / 60);
-            const endMins = endMinutesTotal % 60;
-            const endSlotStr = formatTimeSlot(endHours, endMins);
-            
-            const startSlot = findNearestTimeSlot(allTimeSlots, startSlotStr);
-            const endSlot = findNearestTimeSlot(allTimeSlots, endSlotStr);
-            
-            return { startSlot, endSlot, centerSlot };
+            return { 
+                startSlot: allTimeSlots[startIndex], 
+                endSlot: allTimeSlots[endIndex], 
+                centerSlot 
+            };
         }
 
         function getSeason(dateStr, airport, year) {
@@ -1533,7 +1902,7 @@
                 await loadWeatherPatterns(airportCode);
             }
 
-            const matches = findMatchingDays(weatherScenario, arrivalTime, customVisibility);
+            const matches = await findMatchingDays(weatherScenario, arrivalTime, customVisibility);
             if (matches.length === 0) {
                 alert('No matching historical days found for this weather scenario and arrival time.');
             }
