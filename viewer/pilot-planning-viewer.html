@@ -628,7 +628,7 @@
 
         async function loadBaselineData(airportCode) {
             try {
-                const response = await fetch(`cache/${airportCode}/2024-2025/yearly-baseline.json`);
+                const response = await fetch(`cache/${airportCode}/overall/baseline.json`);
                 if (!response.ok) {
                     throw new Error(`Failed to load data for ${airportCode}`);
                 }

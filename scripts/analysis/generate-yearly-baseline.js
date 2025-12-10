@@ -148,10 +148,9 @@ function getDaysInYears(years) {
 
 function getBaselinePath(airport, year, years) {
   if (years && years.length > 1) {
-    const yearRange = `${years[0]}-${years[years.length - 1]}`;
-    return path.join(process.cwd(), 'cache', airport, yearRange, 'yearly-baseline.json');
+    return path.join(process.cwd(), 'cache', airport, 'overall', 'baseline.json');
   }
-  return path.join(process.cwd(), 'cache', airport, year, 'yearly-baseline.json');
+  return path.join(process.cwd(), 'cache', airport, 'overall', 'baseline.json');
 }
 
 function getNthWeekday(year, month, weekday, n) {

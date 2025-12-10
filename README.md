@@ -333,7 +333,7 @@ Generate yearly baseline data for comparing daily statistics against yearly aver
 
 **Output**:
 
-- **Local cache**: `./cache/AIRPORT/YYYY/yearly-baseline.json` (yearly averages per time slot)
+- **Local cache**: `./cache/AIRPORT/overall/baseline.json` (multi-year averages per time slot)
 - Contains:
   - Average arrival counts per time slot across the year
   - Median time from 50nm per time slot (aggregated across all days)

@@ -764,8 +764,7 @@
 
         function getBaselinePath() {
             const airport = document.getElementById('airportSelect').value;
-            const year = document.getElementById('yearSelect').value;
-            return `cache/${airport}/${year}/yearly-baseline.json`;
+            return `cache/${airport}/overall/baseline.json`;
         }
 
         function getSecondSundayInMarch(year) {
@@ -932,37 +931,23 @@
                     const seasonData = baselineData[season];
                     
                     if (!seasonData || !seasonData.holidayTimeSlots || !seasonData.dayOfWeekTimeSlots) {
-                        const multiYearPaths = [
-                            `cache/${airport}/${year}-${year + 1}/yearly-baseline.json`,
-                            `cache/${airport}/${year - 1}-${year}/yearly-baseline.json`,
-                        ];
-                        
-                        for (const multiYearPath of multiYearPaths) {
-                            const multiYearResponse = await fetch(multiYearPath);
-                            if (multiYearResponse.ok) {
-                                const multiYearData = await multiYearResponse.json();
-                                const multiYearSeasonData = multiYearData[season];
-                                if (multiYearSeasonData && multiYearSeasonData.holidayTimeSlots && multiYearSeasonData.dayOfWeekTimeSlots) {
-                                    console.log('Using multi-year baseline:', multiYearPath);
-                                    baselineData = multiYearData;
-                                    break;
-                                }
+                        const overallPath = `cache/${airport}/overall/baseline.json`;
+                        const overallResponse = await fetch(overallPath);
+                        if (overallResponse.ok) {
+                            const overallData = await overallResponse.json();
+                            const overallSeasonData = overallData[season];
+                            if (overallSeasonData && overallSeasonData.holidayTimeSlots && overallSeasonData.dayOfWeekTimeSlots) {
+                                console.log('Using overall baseline:', overallPath);
+                                baselineData = overallData;
                             }
                         }
                     }
                 } else {
-                    const multiYearPaths = [
-                        `cache/${airport}/${year}-${year + 1}/yearly-baseline.json`,
-                        `cache/${airport}/${year - 1}-${year}/yearly-baseline.json`,
-                    ];
-                    
-                    for (const multiYearPath of multiYearPaths) {
-                        const multiYearResponse = await fetch(multiYearPath);
-                        if (multiYearResponse.ok) {
-                            console.log('Using multi-year baseline:', multiYearPath);
-                            baselineData = await multiYearResponse.json();
-                            break;
-                        }
+                    const overallPath = `cache/${airport}/overall/baseline.json`;
+                    const overallResponse = await fetch(overallPath);
+                    if (overallResponse.ok) {
+                        console.log('Using overall baseline:', overallPath);
+                        baselineData = await overallResponse.json();
                     }
                     
                     if (!baselineData) {
