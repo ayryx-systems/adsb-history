@@ -103,26 +103,88 @@
     {
       "icao": "KJFK",
       "name": "John F. Kennedy International",
-      "enabled": false,
+      "enabled": true,
       "coordinates": {
-        "lat": 40.6398,
-        "lon": -73.7789
+        "lat": 40.6399,
+        "lon": -73.7787
       },
       "elevation_ft": 13,
       "analysis_radius_nm": 150,
       "timezone": "America/New_York",
       "runways": [
         {
+          "name": "4L",
+          "heading": 40,
+          "threshold": {
+            "lat": 40.6220,
+            "lon": -73.7856
+          },
+          "length_ft": 12079
+        },
+        {
+          "name": "4R",
+          "heading": 40,
+          "threshold": {
+            "lat": 40.6254,
+            "lon": -73.7703
+          },
+          "length_ft": 8400
+        },
+        {
+          "name": "13L",
+          "heading": 130,
+          "threshold": {
+            "lat": 40.6578,
+            "lon": -73.7902
+          },
+          "length_ft": 10000
+        },
+        {
+          "name": "13R",
+          "heading": 130,
+          "threshold": {
+            "lat": 40.6483,
+            "lon": -73.8167
+          },
+          "length_ft": 14511
+        },
+        {
           "name": "22L",
-          "heading": 223,
+          "heading": 220,
+          "threshold": {
+            "lat": 40.6452,
+            "lon": -73.7549
+          },
+          "length_ft": 8400
+        },
+        {
+          "name": "22R",
+          "heading": 220,
+          "threshold": {
+            "lat": 40.6505,
+            "lon": -73.7633
+          },
+          "length_ft": 12079
+        },
+        {
+          "name": "31L",
+          "heading": 310,
+          "threshold": {
+            "lat": 40.6281,
+            "lon": -73.7717
+          },
+          "length_ft": 14511
+        },
+        {
+          "name": "31R",
+          "heading": 310,
           "threshold": {
             "lat": 40.6398,
             "lon": -73.7789
           },
-          "length_ft": 11351
+          "length_ft": 10000
         }
-      ],
-      "notes": "Disabled by default - enable when ready to process"
+      ]
     },
     {
       "icao": "KLGA",
