@@ -858,6 +858,7 @@
             const seasonData = baselineData[season];
             
             if (!seasonData) {
+                console.warn('No seasonData found for season:', season, 'Available seasons:', Object.keys(baselineData));
                 return null;
             }
             
@@ -865,15 +866,18 @@
                 season: season,
             };
             
-            if (seasonData.seasonalTimeSlots) {
-                result.byTimeSlot = seasonData.seasonalTimeSlots;
-            } else if (seasonData.byTimeSlotLocal) {
+            if (seasonData.byTimeSlotLocal) {
                 result.byTimeSlot = seasonData.byTimeSlotLocal;
+            } else if (seasonData.seasonalTimeSlots) {
+                result.byTimeSlot = seasonData.seasonalTimeSlots;
+            } else {
+                console.warn('No byTimeSlot data found in seasonData. Available keys:', Object.keys(seasonData));
             }
             
             if (seasonData.l2Volumes) {
                 result.l2Volumes = seasonData.l2Volumes;
             }
+            
             
             return result;
         }
@@ -951,14 +955,30 @@
                     }
                     
                     if (!baselineData) {
-                        console.warn(`Failed to load baseline data: ${response.status}`);
+                        console.warn(`Failed to load baseline data from ${baselinePath}: ${response.status}`);
                         return null;
+                    }
+                }
+                
+                if (baselineData) {
+                    const season = getSeason(`${year}-01-01`, airport, year.toString());
+                    const seasonData = baselineData[season];
+                    if (seasonData && seasonData.byTimeSlotLocal) {
+                        const sampleSlot = Object.keys(seasonData.byTimeSlotLocal)[0];
+                        if (sampleSlot) {
+                            const sampleData = seasonData.byTimeSlotLocal[sampleSlot];
+                            console.log('Baseline data structure sample:', {
+                                hasAverageEntries: 'averageEntries' in sampleData,
+                                hasMedianTimeFrom50nm: 'medianTimeFrom50nm' in sampleData,
+                                keys: Object.keys(sampleData)
+                            });
+                        }
                     }
                 }
                 
                 return baselineData;
             } catch (error) {
-                console.warn(`Error loading baseline data: ${error.message}`);
+                console.warn(`Error loading baseline data: ${error.message}`, error);
                 return null;
             }
         }
@@ -2026,7 +2046,7 @@
                 
                 baselineSlots.forEach(slot => {
                     const baseline = seasonalBaseline.byTimeSlot[slot];
-                    if (baseline && baseline.medianTimeFrom50nm) {
+                    if (baseline && baseline.medianTimeFrom50nm !== null && baseline.medianTimeFrom50nm !== undefined) {
                         const [hours, minutes] = slot.split(':').map(Number);
                         const hourDecimal = hours + minutes / 60;
                         const durationMinutes = baseline.medianTimeFrom50nm / 60;
@@ -2054,7 +2074,22 @@
                         tension: 0.1,
                         showLine: true
                     });
+                } else {
+                    const sampleSlot = baselineSlots[0];
+                    const sampleBaseline = seasonalBaseline.byTimeSlot[sampleSlot];
+                    console.warn('Baseline data found but medianTimeFrom50nm property missing for scatter chart', {
+                        sampleSlot: sampleSlot,
+                        sampleBaseline: sampleBaseline,
+                        baselineKeys: sampleBaseline ? Object.keys(sampleBaseline) : null,
+                        totalSlots: baselineSlots.length
+                    });
                 }
+            } else {
+                console.warn('No seasonal baseline data available for scatter chart:', {
+                    hasBaselineData: !!currentBaselineData,
+                    hasSeasonalBaseline: !!seasonalBaseline,
+                    hasByTimeSlot: !!(seasonalBaseline && seasonalBaseline.byTimeSlot)
+                });
             }
             
             const goAroundData = [];
@@ -3034,20 +3069,42 @@
             if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
                 const baselineEntries = slots.map(slot => {
                     const baseline = seasonalBaseline.byTimeSlot[slot];
-                    return baseline && baseline.averageEntries !== null ? baseline.averageEntries : null;
+                    if (baseline && baseline.averageEntries !== null && baseline.averageEntries !== undefined) {
+                        return baseline.averageEntries;
+                    }
+                    return null;
                 });
 
-                const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
-                datasets.push({
-                    label: seasonLabel,
-                    data: baselineEntries,
-                    borderColor: 'rgba(0, 0, 0, 1)',
-                    backgroundColor: 'rgba(0, 0, 0, 0.1)',
-                    borderWidth: 2,
-                    borderDash: [10, 5],
-                    pointRadius: 2,
-                    fill: false,
-                    tension: 0.1
+                const hasAnyEntries = baselineEntries.some(val => val !== null);
+                if (hasAnyEntries) {
+                    const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
+                    datasets.push({
+                        label: seasonLabel,
+                        data: baselineEntries,
+                        borderColor: 'rgba(0, 0, 0, 1)',
+                        backgroundColor: 'rgba(0, 0, 0, 0.1)',
+                        borderWidth: 2,
+                        borderDash: [10, 5],
+                        pointRadius: 2,
+                        fill: false,
+                        tension: 0.1
+                    });
+                } else {
+                    const sampleSlot = slots[0];
+                    const sampleBaseline = seasonalBaseline.byTimeSlot[sampleSlot];
+                    console.warn('Baseline data found but averageEntries property missing for entries chart', {
+                        sampleSlot: sampleSlot,
+                        sampleBaseline: sampleBaseline,
+                        baselineKeys: sampleBaseline ? Object.keys(sampleBaseline) : null,
+                        availableSlots: Object.keys(seasonalBaseline.byTimeSlot).slice(0, 5),
+                        requestedSlots: slots.slice(0, 5)
+                    });
+                }
+            } else {
+                console.warn('No seasonal baseline data available for entries chart:', {
+                    hasBaselineData: !!currentBaselineData,
+                    hasSeasonalBaseline: !!seasonalBaseline,
+                    hasByTimeSlot: !!(seasonalBaseline && seasonalBaseline.byTimeSlot)
                 });
             }
 
