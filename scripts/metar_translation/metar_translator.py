@@ -36,6 +36,46 @@ def is_trace_token(s: Optional[str]) -> bool:
     return isinstance(s, str) and s.strip() == "T"
 
 
+def convert_visibility_sm_to_km(visibility_sm: Optional[float]) -> Optional[float]:
+    """
+    Convert visibility from statute miles to kilometers.
+    Normalizes unlimited visibility values (10SM, P6SM, 10KM) to 10km.
+    
+    Conversion: 1 SM = 1.60934 km
+    Unlimited normalization:
+    - >= 10 SM → 10 km (METAR "10SM" unlimited)
+    - Exactly 6 SM → 10 km (TAF "P6SM" unlimited)
+    - All other values convert normally
+    """
+    if visibility_sm is None:
+        return None
+    
+    # Normalize unlimited values before conversion
+    # >= 10 SM is definitely unlimited (METAR "10SM")
+    if visibility_sm >= 10.0:
+        return 10.0
+    
+    # Exactly 6 SM is likely TAF "P6SM" (unlimited)
+    # Use a small tolerance to handle floating point precision
+    if visibility_sm >= 5.95 and visibility_sm <= 6.05:
+        return 10.0
+    
+    # Convert SM to KM for all other values
+    visibility_km = visibility_sm * 1.60934
+    return round(visibility_km, 2)
+
+
+def convert_inhg_to_mmhg(altim_inhg: Optional[float]) -> Optional[float]:
+    """
+    Convert altimeter pressure from inches of mercury to millimeters of mercury.
+    Conversion: 1 inHg = 25.4 mmHg
+    """
+    if altim_inhg is None:
+        return None
+    
+    return round(altim_inhg * 25.4, 2)
+
+
 def parse_numeric_field(raw: Optional[str], cast=float) -> Tuple[Optional[Any], bool]:
     """
     Convert numeric-like fields.
@@ -146,6 +186,16 @@ def row_to_record(row: Dict[str, str], csv_fieldnames: List[str]) -> Dict[str, A
             rec[f"{outname}_raw"] = row.get(col)
             rec[f"{outname}_v"] = v
             rec[f"{outname}_is_trace"] = trace
+
+    # Convert visibility from SM to KM and normalize unlimited values
+    if "visibility_sm_v" in rec:
+        rec["visibility_km_v"] = convert_visibility_sm_to_km(rec["visibility_sm_v"])
+        rec["visibility_km_is_trace"] = rec.get("visibility_sm_is_trace", False)
+
+    # Convert altimeter from inHg to mmHg
+    if "altim_inHg_v" in rec:
+        rec["altim_mmHg_v"] = convert_inhg_to_mmhg(rec["altim_inHg_v"])
+        rec["altim_mmHg_is_trace"] = rec.get("altim_inHg_is_trace", False)
 
     # Clouds: structured
     cloud_groups = []
