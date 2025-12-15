@@ -526,7 +526,7 @@
             </div>
 
             <div class="chart-container">
-                <h3>Altimeter Pressure by Time Slot</h3>
+                <h3>Pressure by Time Slot</h3>
                 <div class="chart-wrapper">
                     <canvas id="pressureChart"></canvas>
                 </div>
@@ -1178,11 +1178,15 @@
                 }
                 
                 if (record.tmpf_F_v !== null && record.tmpf_F_v !== undefined) {
-                    slotData.temperature.push(record.tmpf_F_v);
+                    const tempC = (record.tmpf_F_v - 32) * 5 / 9;
+                    slotData.temperature.push(tempC);
                 }
                 
-                if (record.altim_inHg_v !== null && record.altim_inHg_v !== undefined) {
-                    slotData.pressure.push(record.altim_inHg_v);
+                if (record.mslp_hPa_v !== null && record.mslp_hPa_v !== undefined) {
+                    slotData.pressure.push(record.mslp_hPa_v);
+                } else if (record.altim_inHg_v !== null && record.altim_inHg_v !== undefined) {
+                    const pressureHPa = record.altim_inHg_v * 33.8639;
+                    slotData.pressure.push(pressureHPa);
                 }
             }
             
@@ -2879,7 +2883,7 @@
                 data: {
                     labels: dualLabelsTemp,
                     datasets: [{
-                        label: 'Temperature (°F)',
+                        label: 'Temperature (°C)',
                         data: temperature,
                         borderColor: 'rgba(244, 67, 54, 1)',
                         backgroundColor: 'rgba(244, 67, 54, 0.2)',
@@ -2893,7 +2897,7 @@
                     maintainAspectRatio: false,
                     scales: {
                         y: {
-                            title: { display: true, text: 'Temperature (°F)' }
+                            title: { display: true, text: 'Temperature (°C)' }
                         },
                         x: {
                             ticks: {
@@ -2926,7 +2930,7 @@
                 data: {
                     labels: dualLabelsPressure,
                     datasets: [{
-                        label: 'Altimeter Pressure (inHg)',
+                        label: 'Pressure (hPa)',
                         data: pressure,
                         borderColor: 'rgba(121, 85, 72, 1)',
                         backgroundColor: 'rgba(121, 85, 72, 0.2)',
@@ -2940,7 +2944,7 @@
                     maintainAspectRatio: false,
                     scales: {
                         y: {
-                            title: { display: true, text: 'Pressure (inHg)' }
+                            title: { display: true, text: 'Pressure (hPa)' }
                         },
                         x: {
                             ticks: {
