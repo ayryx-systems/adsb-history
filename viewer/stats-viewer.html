@@ -3107,6 +3107,67 @@
                     hasByTimeSlot: !!(seasonalBaseline && seasonalBaseline.byTimeSlot)
                 });
             }
+            
+            if (currentBaselineData && seasonalBaseline) {
+                const season = seasonalBaseline.season;
+                const seasonData = currentBaselineData[season];
+                
+                if (seasonData && seasonData.dayOfWeekTimeSlots) {
+                    const dayOfWeek = getDayOfWeekLowercase(dateStr);
+                    const dayTimeSlots = seasonData.dayOfWeekTimeSlots[dayOfWeek];
+                    
+                    if (dayTimeSlots && Object.keys(dayTimeSlots).length > 0) {
+                        const dayColors = [
+                            'rgba(75, 192, 192, 1)',
+                            'rgba(54, 162, 235, 1)',
+                            'rgba(153, 102, 255, 1)',
+                            'rgba(255, 159, 64, 1)',
+                            'rgba(255, 99, 132, 1)',
+                            'rgba(201, 203, 207, 1)',
+                            'rgba(76, 175, 80, 1)',
+                        ];
+                        
+                        const dayOrder = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+                        const dayIndex = dayOrder.indexOf(dayOfWeek);
+                        const color = dayColors[dayIndex % dayColors.length];
+                        
+                        const dayBaselineEntries = slots.map(slot => {
+                            const baseline = dayTimeSlots[slot];
+                            if (baseline && baseline.averageCount !== null && baseline.averageCount !== undefined) {
+                                const seasonalBaselineSlot = seasonalBaseline.byTimeSlot[slot];
+                                const seasonalEntries = seasonalBaselineSlot && seasonalBaselineSlot.averageEntries;
+                                const seasonalCount = seasonalBaselineSlot && seasonalBaselineSlot.averageCount;
+                                
+                                if (seasonalEntries !== null && seasonalEntries !== undefined && 
+                                    seasonalCount !== null && seasonalCount !== undefined && seasonalCount > 0) {
+                                    const ratio = baseline.averageCount / seasonalCount;
+                                    return seasonalEntries * ratio;
+                                }
+                                return null;
+                            }
+                            return null;
+                        });
+                        
+                        const hasAnyDayEntries = dayBaselineEntries.some(val => val !== null);
+                        if (hasAnyDayEntries) {
+                            const dayLabel = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
+                            const seasonLabel = season === 'summer' ? 'Summer' : 'Winter';
+                            datasets.push({
+                                label: `${seasonLabel} ${dayLabel} Avg`,
+                                data: dayBaselineEntries,
+                                type: 'line',
+                                borderColor: color,
+                                backgroundColor: color.replace('1)', '0.1)'),
+                                borderWidth: 1.5,
+                                borderDash: [6, 3],
+                                pointRadius: 2,
+                                fill: false,
+                                tension: 0.1
+                            });
+                        }
+                    }
+                }
+            }
 
             const dualLabelsEntries = formatDualTimeLabels(slots, dateStr, airport, year);
             charts['entries'] = new Chart(document.getElementById('entriesChart'), {
