@@ -5,6 +5,7 @@ import zlib from 'zlib';
 import { promisify } from 'util';
 import { pipeline } from 'stream/promises';
 import logger from '../utils/logger.js';
+import { logDiskSpace } from '../utils/diskSpace.js';
 
 const gunzip = promisify(zlib.gunzip);
 
@@ -33,6 +34,8 @@ class DataExtractor {
       destination: extractDir,
     });
 
+    logDiskSpace(extractDir);
+
     // Ensure extract directory exists
     if (!fs.existsSync(extractDir)) {
       fs.mkdirSync(extractDir, { recursive: true, mode: 0o755 });
@@ -54,12 +57,29 @@ class DataExtractor {
         source: path.basename(tarPath),
         destination: extractDir,
       });
+      
+      logDiskSpace(extractDir);
 
       return extractDir;
     } catch (error) {
+      logDiskSpace(extractDir);
+      
+      if (error.code === 'ENOSPC') {
+        logger.error('No space left on device during tar extraction', {
+          source: tarPath,
+          destination: extractDir,
+          error: error.message,
+        });
+        throw new Error(
+          `No space left on device while extracting ${path.basename(tarPath)}. ` +
+          `Check disk space and cleanup old files. Original error: ${error.message}`
+        );
+      }
+      
       logger.error('Failed to extract tar', {
         source: tarPath,
         error: error.message,
+        errorCode: error.code,
       });
       throw error;
     }

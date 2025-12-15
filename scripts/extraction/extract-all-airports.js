@@ -10,6 +10,7 @@ import ExtractedTraceData from '../../src/extraction/ExtractedTraceData.js';
 import GroundAircraftData from '../../src/processing/GroundAircraftData.js';
 import logger from '../../src/utils/logger.js';
 import { describeAwsError } from '../../src/utils/awsErrorUtils.js';
+import { logDiskSpace } from '../../src/utils/diskSpace.js';
 
 dotenv.config();
 
@@ -207,6 +208,8 @@ async function processDateForAirport(airport, date, extractor, dataStore, ground
 
   let tarPath;
   try {
+    logDiskSpace(process.env.TEMP_DIR || './temp');
+    
     tarPath = await extractor.extractTracesForAirport(airport.icao, date);
     
     if (!tarPath) {
@@ -219,17 +222,26 @@ async function processDateForAirport(airport, date, extractor, dataStore, ground
     const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
 
     safelyRemoveLocalFile(tarPath, airport.icao, date);
+    
+    logDiskSpace(process.env.TEMP_DIR || './temp');
 
     return { date, airport: airport.icao, sizeMB, skipped: false };
   } catch (error) {
+    logDiskSpace(process.env.TEMP_DIR || './temp');
+    
     const errorDetails = describeAwsError(error);
+    const errorMessage = error.code === 'ENOSPC' 
+      ? `No space left on device: ${errorDetails}`
+      : errorDetails;
+    
     logger.error('Failed to extract traces', {
       airport: airport.icao,
       date,
-      error: errorDetails,
+      error: errorMessage,
+      errorCode: error.code,
       stack: error.stack,
     });
-    return { date, airport: airport.icao, error: errorDetails };
+    return { date, airport: airport.icao, error: errorMessage };
   } finally {
     if (tarPath) {
       safelyRemoveLocalFile(tarPath, airport.icao, date);

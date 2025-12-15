@@ -391,6 +391,13 @@ echo "  Checking for credentials files:"
 ls -la ~/.aws/ 2>/dev/null || echo "    ~/.aws/ does not exist"
 echo ""
 
+# Check disk space before starting
+echo "=========================================="
+echo "Checking disk space before extraction"
+echo "=========================================="
+df -h /opt/adsb-processing || df -h /
+echo ""
+
 # Run processing
 echo "=========================================="
 echo "Starting extraction: $START_DATE to $END_DATE"
@@ -406,6 +413,12 @@ echo "Exit code: \$EXIT_CODE"
 echo "End time: \$(date)"
 echo "=========================================="
 
+# Check disk space after extraction
+echo ""
+echo "Final disk space check:"
+df -h /opt/adsb-processing || df -h /
+echo ""
+
 # Self-terminate the instance
 if [ \$EXIT_CODE -eq 0 ]; then
   echo "✓ Success! Self-terminating instance..."
@@ -414,6 +427,12 @@ if [ \$EXIT_CODE -eq 0 ]; then
 else
   echo "✗ Extraction failed. Instance will remain running for debugging."
   echo "Check logs at /var/log/user-data.log"
+  echo ""
+  echo "To investigate:"
+  echo "  1. SSH into the instance"
+  echo "  2. Check disk space: df -h"
+  echo "  3. Check for errors: tail -f /var/log/user-data.log"
+  echo "  4. Check temp directory: du -sh /opt/adsb-processing/*"
 fi
 EOF
 
@@ -459,7 +478,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
     --security-group-ids "$SG_ID" \
     "${KEY_NAME_PARAM[@]}" \
     --user-data file:///tmp/user-data.sh \
-    --block-device-mappings "[{\"DeviceName\":\"/dev/xvda\",\"Ebs\":{\"VolumeSize\":50,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
+    --block-device-mappings "[{\"DeviceName\":\"/dev/xvda\",\"Ebs\":{\"VolumeSize\":100,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=adsb-extractor-$START_DATE-to-$END_DATE},{Key=Purpose,Value=trace-extraction},{Key=AutoTerminate,Value=true}]" \
     --query 'Instances[0].InstanceId' \
     --output text)

@@ -4,6 +4,7 @@ import tar from 'tar';
 import TraceReader from '../processing/TraceReader.js';
 import GroundAircraftData from '../processing/GroundAircraftData.js';
 import logger from '../utils/logger.js';
+import { checkDiskSpace, logDiskSpace } from '../utils/diskSpace.js';
 
 class TraceExtractor {
   constructor(config = {}) {
@@ -77,13 +78,49 @@ class TraceExtractor {
       return null;
     }
 
-    logger.info('Step 2: Downloading raw tar from S3', { date });
+    logger.info('Step 2: Checking disk space', { date });
+    logDiskSpace(this.tempDir);
+    
+    const diskCheck = checkDiskSpace(this.tempDir, 30);
+    if (!diskCheck.hasSpace) {
+      throw new Error(
+        `Insufficient disk space: ${diskCheck.availableGB}GB available, ` +
+        `but ${diskCheck.requiredGB}GB required. ` +
+        `Total: ${diskCheck.totalGB}GB, Used: ${diskCheck.usedGB}GB (${diskCheck.percentUsed}%)`
+      );
+    }
+
+    logger.info('Step 3: Downloading raw tar from S3', { date });
     const rawTarPath = await this.traceReader.downloadTarFromS3(date);
 
-    logger.info('Step 3: Extracting raw tar', { date });
-    const rawExtractDir = await this.traceReader.extractTar(rawTarPath);
+    logger.info('Step 4: Checking disk space before extraction', { date });
+    logDiskSpace(this.tempDir);
+    
+    const preExtractCheck = checkDiskSpace(this.tempDir, 25);
+    if (!preExtractCheck.hasSpace) {
+      throw new Error(
+        `Insufficient disk space before extraction: ${preExtractCheck.availableGB}GB available, ` +
+        `but ${preExtractCheck.requiredGB}GB required. ` +
+        `Total: ${preExtractCheck.totalGB}GB, Used: ${preExtractCheck.usedGB}GB (${preExtractCheck.percentUsed}%)`
+      );
+    }
 
-    logger.info('Step 4: Creating extracted tar with filtered traces', {
+    logger.info('Step 5: Extracting raw tar', { date });
+    let rawExtractDir;
+    try {
+      rawExtractDir = await this.traceReader.extractTar(rawTarPath);
+    } catch (error) {
+      if (error.code === 'ENOSPC') {
+        logDiskSpace(this.tempDir);
+        throw new Error(
+          `No space left on device during tar extraction. ` +
+          `Check disk space and cleanup old files. Original error: ${error.message}`
+        );
+      }
+      throw error;
+    }
+
+    logger.info('Step 6: Creating extracted tar with filtered traces', {
       airport,
       date,
       aircraftCount: allAircraftIds.length,
@@ -146,7 +183,7 @@ class TraceExtractor {
       expectedCount,
     });
 
-    logger.info('Step 5: Creating tar archive', { airport, date });
+    logger.info('Step 7: Creating tar archive', { airport, date });
     
     await tar.create(
       {
