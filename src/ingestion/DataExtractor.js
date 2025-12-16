@@ -34,12 +34,12 @@ class DataExtractor {
       destination: extractDir,
     });
 
-    logDiskSpace(extractDir);
-
     // Ensure extract directory exists
     if (!fs.existsSync(extractDir)) {
       fs.mkdirSync(extractDir, { recursive: true, mode: 0o755 });
     }
+
+    logDiskSpace(extractDir);
 
     try {
       await tar.extract({
