@@ -367,9 +367,10 @@ async function generateBaseline(airport, year, years, force, localOnly) {
         }
       }
 
-      // Load congestion data for this date
+      // Load congestion data for this date (used for both seasonal and day-of-week aggregation)
+      let congestionStats = null;
       try {
-        const congestionStats = await congestionData.load(airport, date);
+        congestionStats = await congestionData.load(airport, date);
         if (congestionStats && congestionStats.byTimeSlotLocal) {
           for (const [slot, slotData] of Object.entries(congestionStats.byTimeSlotLocal)) {
             if (!timeSlotData[slot]) {
@@ -495,48 +496,67 @@ async function generateBaseline(airport, year, years, force, localOnly) {
           }
           holidayTimeSlotData[categoryKey][slot].counts.push(count);
         }
-      } else {
-        const dayOfWeekVolumes = season === 'summer' ? summerDayOfWeekVolumes : winterDayOfWeekVolumes;
-        const dayOfWeekTimeSlotData = season === 'summer' ? summerDayOfWeekTimeSlotData : winterDayOfWeekTimeSlotData;
-        
-        if (dayOfWeekVolumes[dayOfWeek] && l2Data.volumes) {
-          if (l2Data.volumes.morning !== undefined) {
-            dayOfWeekVolumes[dayOfWeek].morning.push(l2Data.volumes.morning);
-          }
-          if (l2Data.volumes.afternoon !== undefined) {
-            dayOfWeekVolumes[dayOfWeek].afternoon.push(l2Data.volumes.afternoon);
-          }
-          if (l2Data.volumes.evening !== undefined) {
-            dayOfWeekVolumes[dayOfWeek].evening.push(l2Data.volumes.evening);
+      }
+      
+      const dayOfWeekVolumes = season === 'summer' ? summerDayOfWeekVolumes : winterDayOfWeekVolumes;
+      const dayOfWeekTimeSlotData = season === 'summer' ? summerDayOfWeekTimeSlotData : winterDayOfWeekTimeSlotData;
+      
+      if (dayOfWeekVolumes[dayOfWeek] && l2Data.volumes) {
+        if (l2Data.volumes.morning !== undefined) {
+          dayOfWeekVolumes[dayOfWeek].morning.push(l2Data.volumes.morning);
+        }
+        if (l2Data.volumes.afternoon !== undefined) {
+          dayOfWeekVolumes[dayOfWeek].afternoon.push(l2Data.volumes.afternoon);
+        }
+        if (l2Data.volumes.evening !== undefined) {
+          dayOfWeekVolumes[dayOfWeek].evening.push(l2Data.volumes.evening);
+        }
+      }
+      
+      if (dayOfWeekTimeSlotData[dayOfWeek]) {
+        const volumesBySlot = {};
+        for (const [slot, slotData] of Object.entries(bySlot)) {
+          const aircraft = slotData.aircraft || [];
+          for (const ac of aircraft) {
+            if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc) {
+              const touchdownTime = new Date(ac.touchdown.utc).getTime() / 1000;
+              const timeFrom50nm = ac.milestones.timeFrom50nm;
+              const passing50nmTime = touchdownTime - timeFrom50nm;
+              const passing50nmSlot = utcToLocalTimeSlot(passing50nmTime, airport, date);
+              
+              if (!volumesBySlot[passing50nmSlot]) {
+                volumesBySlot[passing50nmSlot] = 0;
+              }
+              volumesBySlot[passing50nmSlot]++;
+            }
           }
         }
         
-        if (dayOfWeekTimeSlotData[dayOfWeek]) {
-          const volumesBySlot = {};
-          for (const [slot, slotData] of Object.entries(bySlot)) {
-            const aircraft = slotData.aircraft || [];
-            for (const ac of aircraft) {
-              if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc) {
-                const touchdownTime = new Date(ac.touchdown.utc).getTime() / 1000;
-                const timeFrom50nm = ac.milestones.timeFrom50nm;
-                const passing50nmTime = touchdownTime - timeFrom50nm;
-                const passing50nmSlot = utcToLocalTimeSlot(passing50nmTime, airport, date);
-                
-                if (!volumesBySlot[passing50nmSlot]) {
-                  volumesBySlot[passing50nmSlot] = 0;
-                }
-                volumesBySlot[passing50nmSlot]++;
-              }
-            }
+        for (const [slot, count] of Object.entries(volumesBySlot)) {
+          if (!dayOfWeekTimeSlotData[dayOfWeek][slot]) {
+            dayOfWeekTimeSlotData[dayOfWeek][slot] = {
+              counts: [],
+              entries: [],
+            };
           }
-          
-          for (const [slot, count] of Object.entries(volumesBySlot)) {
+          dayOfWeekTimeSlotData[dayOfWeek][slot].counts.push(count);
+        }
+
+        // Add entries data from congestion stats for this day-of-week (reuse already loaded data)
+        if (congestionStats && congestionStats.byTimeSlotLocal) {
+          for (const [slot, slotData] of Object.entries(congestionStats.byTimeSlotLocal)) {
             if (!dayOfWeekTimeSlotData[dayOfWeek][slot]) {
               dayOfWeekTimeSlotData[dayOfWeek][slot] = {
                 counts: [],
+                entries: [],
               };
             }
-            dayOfWeekTimeSlotData[dayOfWeek][slot].counts.push(count);
+            if (slotData.entries !== undefined && slotData.entries !== null) {
+              if (!dayOfWeekTimeSlotData[dayOfWeek][slot].entries) {
+                dayOfWeekTimeSlotData[dayOfWeek][slot].entries = [];
+              }
+              dayOfWeekTimeSlotData[dayOfWeek][slot].entries.push(slotData.entries);
+            }
           }
         }
       }
@@ -721,10 +741,17 @@ async function generateBaseline(airport, year, years, force, localOnly) {
         const avgCount = data.counts.length > 0
           ? data.counts.reduce((a, b) => a + b, 0) / data.counts.length
           : 0;
+        
+        const avgEntries = data.entries && data.entries.length > 0
+          ? data.entries.reduce((a, b) => a + b, 0) / data.entries.length
+          : null;
+        
         result[day][slot] = {
           averageCount: Math.round(avgCount * 100) / 100,
+          averageEntries: avgEntries !== null ? Math.round(avgEntries * 100) / 100 : null,
           sampleSize: {
             days: data.counts.length,
+            entries: data.entries ? data.entries.length : 0,
           },
         };
       }
