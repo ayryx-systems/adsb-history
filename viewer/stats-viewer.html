@@ -2774,7 +2774,73 @@
                 return weather && weather.windGust !== null ? weather.windGust : null;
             });
 
+            const windDir = slots.map(slot => {
+                const weather = weatherData[slot];
+                return weather && weather.windDir !== null ? weather.windDir : null;
+            });
+
             const dualLabelsWind = formatDualTimeLabels(slots, dateStr, airport, year);
+            
+            const windDirectionPlugin = {
+                id: 'windDirectionArrows',
+                afterDraw: (chart) => {
+                    const ctx = chart.ctx;
+                    const meta = chart.getDatasetMeta(0);
+                    
+                    if (!meta || !meta.data || meta.data.length === 0) return;
+                    
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(33, 150, 243, 0.8)';
+                    ctx.fillStyle = 'rgba(33, 150, 243, 0.8)';
+                    ctx.lineWidth = 1.5;
+                    
+                    const arrowLength = 15;
+                    const arrowHeadLength = 6;
+                    
+                    for (let i = 0; i < meta.data.length; i++) {
+                        const point = meta.data[i];
+                        const windDirection = windDir[i];
+                        const windSpeedValue = windSpeed[i];
+                        
+                        if (windDirection === null || windSpeedValue === null || windSpeedValue === 0) {
+                            continue;
+                        }
+                        
+                        const x = point.x;
+                        const y = point.y;
+                        
+                        const windDirRad = (windDirection * Math.PI) / 180;
+                        const canvasAngle = windDirRad + Math.PI / 2;
+                        
+                        const endX = x + Math.cos(canvasAngle) * arrowLength;
+                        const endY = y + Math.sin(canvasAngle) * arrowLength;
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(x, y);
+                        ctx.lineTo(endX, endY);
+                        ctx.stroke();
+                        
+                        const arrowHeadAngle1 = canvasAngle - Math.PI / 6;
+                        const arrowHeadAngle2 = canvasAngle + Math.PI / 6;
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(endX, endY);
+                        ctx.lineTo(
+                            endX + Math.cos(arrowHeadAngle1) * arrowHeadLength,
+                            endY + Math.sin(arrowHeadAngle1) * arrowHeadLength
+                        );
+                        ctx.lineTo(
+                            endX + Math.cos(arrowHeadAngle2) * arrowHeadLength,
+                            endY + Math.sin(arrowHeadAngle2) * arrowHeadLength
+                        );
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                    
+                    ctx.restore();
+                }
+            };
+            
             charts['windSpeed'] = new Chart(document.getElementById('windSpeedChart'), {
                 type: 'line',
                 data: {
@@ -2814,7 +2880,8 @@
                             }
                         }
                     }
-                }
+                },
+                plugins: [windDirectionPlugin]
             });
         }
 
