@@ -492,9 +492,28 @@ async function generateBaseline(airport, year, years, force, localOnly) {
           if (!holidayTimeSlotData[categoryKey][slot]) {
             holidayTimeSlotData[categoryKey][slot] = {
               counts: [],
+              entries: [],
             };
           }
           holidayTimeSlotData[categoryKey][slot].counts.push(count);
+        }
+
+        // Add entries data from congestion stats for this holiday (reuse already loaded data)
+        if (congestionStats && congestionStats.byTimeSlotLocal) {
+          for (const [slot, slotData] of Object.entries(congestionStats.byTimeSlotLocal)) {
+            if (!holidayTimeSlotData[categoryKey][slot]) {
+              holidayTimeSlotData[categoryKey][slot] = {
+                counts: [],
+                entries: [],
+              };
+            }
+            if (slotData.entries !== undefined && slotData.entries !== null) {
+              if (!holidayTimeSlotData[categoryKey][slot].entries) {
+                holidayTimeSlotData[categoryKey][slot].entries = [];
+              }
+              holidayTimeSlotData[categoryKey][slot].entries.push(slotData.entries);
+            }
+          }
         }
       }
       
@@ -708,10 +727,17 @@ async function generateBaseline(airport, year, years, force, localOnly) {
         const avgCount = data.counts.length > 0
           ? data.counts.reduce((a, b) => a + b, 0) / data.counts.length
           : 0;
+        
+        const avgEntries = data.entries && data.entries.length > 0
+          ? data.entries.reduce((a, b) => a + b, 0) / data.entries.length
+          : null;
+        
         result[categoryKey][slot] = {
           averageArrivals: Math.round(avgCount * 100) / 100,
+          averageEntries: avgEntries !== null ? Math.round(avgEntries * 100) / 100 : null,
           sampleSize: {
             days: data.counts.length,
+            entries: data.entries ? data.entries.length : 0,
           },
         };
       }

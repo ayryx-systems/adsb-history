@@ -1730,13 +1730,8 @@
                             
                             const holidayBaselineData = slots.map(slot => {
                                 const baseline = holidayTimeSlots[slot];
-                                if (baseline) {
-                                    if (baseline.averageEntries !== null && baseline.averageEntries !== undefined) {
-                                        return baseline.averageEntries;
-                                    }
-                                    if (baseline.averageArrivals !== null && baseline.averageArrivals !== undefined) {
-                                        return baseline.averageArrivals;
-                                    }
+                                if (baseline && baseline.averageEntries !== null && baseline.averageEntries !== undefined) {
+                                    return baseline.averageEntries;
                                 }
                                 return null;
                             });
