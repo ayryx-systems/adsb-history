@@ -1,6 +1,24 @@
 import logger from '../../utils/logger.js';
 import { getSeason } from '../../utils/dst.js';
 
+const SMALL_LIGHT_TYPES = [
+  'C208', 'C25A', 'C25B', 'C310', 'C525', 'C550', 'C560', 'C56X', 'C680', 'C68A', 'C700', 'C750',
+  'BE20', 'BE40', 'BE9L', 'PC12', 'SF50',
+  'LJ31', 'LJ35', 'LJ45', 'LJ60',
+  'CL30', 'CL35', 'CL60',
+  'E545', 'E550', 'E55P',
+  'FA20', 'FA50', 'FA7X', 'FA8X',
+  'F2TH', 'F900',
+  'G280', 'GA5C', 'GA6C', 'GALX', 'GL5T', 'GL7T', 'GLEX', 'GLF4', 'GLF5', 'GLF6',
+  'H25B', 'HA4T', 'HDJT',
+  'B350'
+];
+
+function isSmallLightAircraft(type) {
+  if (!type) return false;
+  return SMALL_LIGHT_TYPES.includes(type);
+}
+
 /**
  * Analyzes L1 statistics to convert UTC time slots to local time slots
  * 
@@ -301,8 +319,11 @@ class L2StatsAnalyzer {
           // Add aircraft to local slot
           byLocalTimeSlot[localSlot].aircraft.push(aircraft);
 
-          // Add milestones
-          if (aircraft.milestones) {
+          // Check if aircraft is Small/Light category (exclude from arrival timing calculations)
+          const isSmallLight = isSmallLightAircraft(aircraft.type);
+
+          // Add milestones (exclude Small/Light aircraft from arrival timing calculations)
+          if (aircraft.milestones && !isSmallLight) {
             if (aircraft.milestones.timeFrom100nm !== undefined && aircraft.milestones.timeFrom100nm !== null) {
               byLocalTimeSlot[localSlot].timeFrom100nm.push(aircraft.milestones.timeFrom100nm);
               overallMilestones.timeFrom100nm.push(aircraft.milestones.timeFrom100nm);
@@ -321,7 +342,8 @@ class L2StatsAnalyzer {
 
           // Count time-of-day volumes based on 50nm threshold passing time
           // This is more representative of traffic conditions than touchdown time
-          if (aircraft.milestones && aircraft.milestones.timeFrom50nm !== undefined && aircraft.milestones.timeFrom50nm !== null) {
+          // Exclude Small/Light aircraft from volume calculations
+          if (aircraft.milestones && aircraft.milestones.timeFrom50nm !== undefined && aircraft.milestones.timeFrom50nm !== null && !isSmallLight) {
             // Calculate when aircraft passed 50nm: touchdown time - timeFrom50nm
             const timeFrom50nmSeconds = aircraft.milestones.timeFrom50nm;
             const passing50nmTimestamp = utcTimestamp - timeFrom50nmSeconds;

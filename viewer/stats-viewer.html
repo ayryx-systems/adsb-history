@@ -1433,12 +1433,30 @@
 
         function filterTimeSlotData(timeSlot, selectedTypes) {
             if (!selectedTypes || selectedTypes.length === 0) {
-                return timeSlot;
+                const filteredAircraft = timeSlot.aircraft.filter(ac => {
+                    const category = getAircraftCategory(ac.type || 'UNKNOWN');
+                    return category !== 'small';
+                });
+                
+                const times100nm = filteredAircraft
+                    .map(ac => ac.milestones?.timeFrom100nm)
+                    .filter(t => t !== undefined);
+                
+                const times50nm = filteredAircraft
+                    .map(ac => ac.milestones?.timeFrom50nm)
+                    .filter(t => t !== undefined);
+                
+                return {
+                    count: filteredAircraft.length,
+                    stats100nm: calculateStats(times100nm),
+                    stats50nm: calculateStats(times50nm)
+                };
             }
 
-            const filteredAircraft = timeSlot.aircraft.filter(ac => 
-                selectedTypes.includes(ac.type)
-            );
+            const filteredAircraft = timeSlot.aircraft.filter(ac => {
+                const category = getAircraftCategory(ac.type || 'UNKNOWN');
+                return selectedTypes.includes(ac.type) && category !== 'small';
+            });
 
             if (filteredAircraft.length === 0) {
                 return null;
@@ -1460,17 +1478,18 @@
         }
 
         function getTimeSlotStats(timeSlot, milestone, selectedTypes) {
-            if (selectedTypes.length === 0) {
-                const aircraft = timeSlot.aircraft || [];
-                const times = aircraft
-                    .map(ac => ac.milestones?.[milestone])
-                    .filter(t => t !== undefined);
-                return calculateStats(times);
-            } else {
-                const filtered = filterTimeSlotData(timeSlot, selectedTypes);
-                if (!filtered) return calculateStats([]);
-                return milestone === 'timeFrom100nm' ? filtered.stats100nm : filtered.stats50nm;
-            }
+            const aircraft = timeSlot.aircraft || [];
+            const filteredAircraft = aircraft.filter(ac => {
+                const category = getAircraftCategory(ac.type || 'UNKNOWN');
+                if (category === 'small') return false;
+                if (selectedTypes.length > 0 && !selectedTypes.includes(ac.type)) return false;
+                return true;
+            });
+            
+            const times = filteredAircraft
+                .map(ac => ac.milestones?.[milestone])
+                .filter(t => t !== undefined);
+            return calculateStats(times);
         }
 
         function destroyChart(chartId) {
@@ -1600,7 +1619,8 @@
                 
                 const aircraft = slotData.aircraft || [];
                 for (const ac of aircraft) {
-                    if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc) {
+                    const category = getAircraftCategory(ac.type || 'UNKNOWN');
+                    if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc && category !== 'small') {
                         const touchdownTime = new Date(ac.touchdown.utc).getTime() / 1000;
                         const timeFrom50nm = ac.milestones.timeFrom50nm;
                         const passing50nmTime = touchdownTime - timeFrom50nm;
@@ -1976,6 +1996,11 @@
                 
                 for (const ac of aircraft) {
                     if (selectedTypes.length > 0 && !selectedTypes.includes(ac.type)) {
+                        continue;
+                    }
+                    
+                    const category = getAircraftCategory(ac.type || 'UNKNOWN');
+                    if (category === 'small') {
                         continue;
                     }
                     
@@ -2615,7 +2640,10 @@
                     const allTimes = [];
                     
                     categoryTypes.forEach(type => {
-                        const aircraft = slotData.aircraft.filter(ac => ac.type === type);
+                        const aircraft = slotData.aircraft.filter(ac => {
+                            const category = getAircraftCategory(ac.type || 'UNKNOWN');
+                            return ac.type === type && category !== 'small';
+                        });
                         aircraft.forEach(ac => {
                             if (ac.milestones?.timeFrom50nm !== undefined) {
                                 allTimes.push(ac.milestones.timeFrom50nm);

@@ -32,6 +32,24 @@ import CongestionData from '../../src/analysis/congestion/CongestionData.js';
 import logger from '../../src/utils/logger.js';
 import { getSeason, getDSTDates } from '../../src/utils/dst.js';
 
+const SMALL_LIGHT_TYPES = [
+  'C208', 'C25A', 'C25B', 'C310', 'C525', 'C550', 'C560', 'C56X', 'C680', 'C68A', 'C700', 'C750',
+  'BE20', 'BE40', 'BE9L', 'PC12', 'SF50',
+  'LJ31', 'LJ35', 'LJ45', 'LJ60',
+  'CL30', 'CL35', 'CL60',
+  'E545', 'E550', 'E55P',
+  'FA20', 'FA50', 'FA7X', 'FA8X',
+  'F2TH', 'F900',
+  'G280', 'GA5C', 'GA6C', 'GALX', 'GL5T', 'GL7T', 'GLEX', 'GLF4', 'GLF5', 'GLF6',
+  'H25B', 'HA4T', 'HDJT',
+  'B350'
+];
+
+function isSmallLightAircraft(type) {
+  if (!type) return false;
+  return SMALL_LIGHT_TYPES.includes(type);
+}
+
 function getUTCOffsetHours(airport, dateStr) {
   const season = getSeason(dateStr, airport, dateStr.split('-')[0]);
   const offsets = {
@@ -350,10 +368,12 @@ async function generateBaseline(airport, year, years, force, localOnly) {
 
         if (slotData.aircraft && Array.isArray(slotData.aircraft)) {
           const times50nm = slotData.aircraft
+            .filter(ac => !isSmallLightAircraft(ac.type))
             .map(ac => ac.milestones?.timeFrom50nm)
             .filter(t => t !== undefined && t !== null);
           
           const times100nm = slotData.aircraft
+            .filter(ac => !isSmallLightAircraft(ac.type))
             .map(ac => ac.milestones?.timeFrom100nm)
             .filter(t => t !== undefined && t !== null);
 
@@ -415,7 +435,7 @@ async function generateBaseline(airport, year, years, force, localOnly) {
       for (const [slot, slotData] of Object.entries(bySlot)) {
         const aircraft = slotData.aircraft || [];
         for (const ac of aircraft) {
-          if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc) {
+          if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc && !isSmallLightAircraft(ac.type)) {
             const touchdownTime = new Date(ac.touchdown.utc).getTime() / 1000;
             const timeFrom50nm = ac.milestones.timeFrom50nm;
             const passing50nmTime = touchdownTime - timeFrom50nm;
@@ -474,7 +494,7 @@ async function generateBaseline(airport, year, years, force, localOnly) {
         for (const [slot, slotData] of Object.entries(bySlot)) {
           const aircraft = slotData.aircraft || [];
           for (const ac of aircraft) {
-            if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc) {
+            if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc && !isSmallLightAircraft(ac.type)) {
               const touchdownTime = new Date(ac.touchdown.utc).getTime() / 1000;
               const timeFrom50nm = ac.milestones.timeFrom50nm;
               const passing50nmTime = touchdownTime - timeFrom50nm;
@@ -537,7 +557,7 @@ async function generateBaseline(airport, year, years, force, localOnly) {
         for (const [slot, slotData] of Object.entries(bySlot)) {
           const aircraft = slotData.aircraft || [];
           for (const ac of aircraft) {
-            if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc) {
+            if (ac.milestones && ac.milestones.timeFrom50nm !== undefined && ac.touchdown && ac.touchdown.utc && !isSmallLightAircraft(ac.type)) {
               const touchdownTime = new Date(ac.touchdown.utc).getTime() / 1000;
               const timeFrom50nm = ac.milestones.timeFrom50nm;
               const passing50nmTime = touchdownTime - timeFrom50nm;
