@@ -1545,7 +1545,7 @@
             if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
                 const baselineCounts = slots.map(slot => {
                     const baseline = seasonalBaseline.byTimeSlot[slot];
-                    return baseline ? baseline.averageCount : null;
+                    return baseline ? baseline.averageArrivals : null;
                 });
 
                 const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
@@ -1730,25 +1730,33 @@
                             
                             const holidayBaselineData = slots.map(slot => {
                                 const baseline = holidayTimeSlots[slot];
-                                if (baseline && baseline.averageEntries !== null && baseline.averageEntries !== undefined) {
-                                    return baseline.averageEntries;
+                                if (baseline) {
+                                    if (baseline.averageEntries !== null && baseline.averageEntries !== undefined) {
+                                        return baseline.averageEntries;
+                                    }
+                                    if (baseline.averageArrivals !== null && baseline.averageArrivals !== undefined) {
+                                        return baseline.averageArrivals;
+                                    }
                                 }
                                 return null;
                             });
                             
-                            datasets.push({
-                                label: holidayLabel,
-                                data: holidayBaselineData,
-                                type: 'line',
-                                borderColor: color,
-                                backgroundColor: color.replace('1)', '0.1)'),
-                                borderWidth: 1.5,
-                                borderDash: [4, 4],
-                                pointRadius: 2,
-                                fill: false,
-                                tension: 0.1,
-                                isBaseline: true
-                            });
+                            const hasAnyHolidayEntries = holidayBaselineData.some(val => val !== null);
+                            if (hasAnyHolidayEntries) {
+                                datasets.push({
+                                    label: holidayLabel,
+                                    data: holidayBaselineData,
+                                    type: 'line',
+                                    borderColor: color,
+                                    backgroundColor: color.replace('1)', '0.1)'),
+                                    borderWidth: 1.5,
+                                    borderDash: [4, 4],
+                                    pointRadius: 2,
+                                    fill: false,
+                                    tension: 0.1,
+                                    isBaseline: true
+                                });
+                            }
                         }
                     });
                 }

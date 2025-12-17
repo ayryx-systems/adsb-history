@@ -649,7 +649,7 @@ async function generateBaseline(airport, year, years, force, localOnly) {
         : null;
 
       result[slot] = {
-        averageCount: Math.round(avgCount * 100) / 100,
+        averageArrivals: Math.round(avgCount * 100) / 100,
         medianTimeFrom50nm: median50nm ? Math.round(median50nm * 100) / 100 : null,
         medianTimeFrom100nm: median100nm ? Math.round(median100nm * 100) / 100 : null,
         averageCongestion: avgCongestion !== null ? Math.round(avgCongestion * 100) / 100 : null,
@@ -709,7 +709,7 @@ async function generateBaseline(airport, year, years, force, localOnly) {
           ? data.counts.reduce((a, b) => a + b, 0) / data.counts.length
           : 0;
         result[categoryKey][slot] = {
-          averageCount: Math.round(avgCount * 100) / 100,
+          averageArrivals: Math.round(avgCount * 100) / 100,
           sampleSize: {
             days: data.counts.length,
           },
@@ -747,7 +747,7 @@ async function generateBaseline(airport, year, years, force, localOnly) {
           : null;
         
         result[day][slot] = {
-          averageCount: Math.round(avgCount * 100) / 100,
+          averageArrivals: Math.round(avgCount * 100) / 100,
           averageEntries: avgEntries !== null ? Math.round(avgEntries * 100) / 100 : null,
           sampleSize: {
             days: data.counts.length,
@@ -769,7 +769,7 @@ async function generateBaseline(airport, year, years, force, localOnly) {
         ? data.counts.reduce((a, b) => a + b, 0) / data.counts.length
         : 0;
       result[slot] = {
-        averageCount: Math.round(avgCount * 100) / 100,
+        averageArrivals: Math.round(avgCount * 100) / 100,
         sampleSize: {
           days: data.counts.length,
         },
