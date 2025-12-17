@@ -1498,11 +1498,8 @@
             const selectedTypes = getAircraftTypesForCategories(selectedCategories);
             renderArrivalCountChart(data, selectedTypes);
             
-            if (data.volumes) {
-                renderL2VolumesChart(data);
-            }
-            
             if (currentCongestionData) {
+                renderL2VolumesChart(data, currentCongestionData);
                 renderCongestionChart(data, currentCongestionData);
                 renderEntriesChart(data, currentCongestionData);
             }
@@ -1624,8 +1621,8 @@
             return volumesBySlot;
         }
 
-        function renderL2VolumesChart(data) {
-            if (!data || !data.volumes) {
+        function renderL2VolumesChart(data, congestionData) {
+            if (!data || !congestionData) {
                 return;
             }
 
@@ -1633,17 +1630,15 @@
             const airport = document.getElementById('airportSelect').value;
             const year = document.getElementById('yearSelect').value;
             
-            const todayVolumesBySlot = calculate50nmPassingVolumesBySlot(data, dateStr, airport, year);
+            const timeSlots = data.overall.byTouchdownTimeSlotLocal;
+            const slots = Object.keys(timeSlots).sort();
             
-            const allSlots = [];
-            for (let hour = 0; hour < 24; hour++) {
-                for (let minute = 0; minute < 60; minute += 15) {
-                    allSlots.push(`${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`);
-                }
-            }
+            const todayData = slots.map(slot => {
+                const congestionSlot = congestionData && congestionData.byTimeSlotLocal && congestionData.byTimeSlotLocal[slot];
+                return congestionSlot && congestionSlot.entries !== undefined ? congestionSlot.entries : 0;
+            });
             
-            const labels = formatDualTimeLabels(allSlots, dateStr, airport, year);
-            const todayData = allSlots.map(slot => todayVolumesBySlot[slot] || 0);
+            const labels = formatDualTimeLabels(slots, dateStr, airport, year);
 
             const datasets = [{
                 label: 'Today',
@@ -1656,25 +1651,31 @@
             const seasonalBaseline = getSeasonalBaseline(currentBaselineData, dateStr, airport, year);
             
             if (seasonalBaseline && seasonalBaseline.byTimeSlot) {
-                const baselineData = allSlots.map(slot => {
+                const baselineData = slots.map(slot => {
                     const baseline = seasonalBaseline.byTimeSlot[slot];
-                    return baseline ? baseline.averageCount : null;
+                    if (baseline && baseline.averageEntries !== null && baseline.averageEntries !== undefined) {
+                        return baseline.averageEntries;
+                    }
+                    return null;
                 });
 
-                const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
-                datasets.push({
-                    label: seasonLabel,
-                    data: baselineData,
-                    type: 'line',
-                    borderColor: 'rgba(255, 99, 132, 1)',
-                    backgroundColor: 'rgba(255, 99, 132, 0.1)',
-                    borderWidth: 2,
-                    borderDash: [5, 5],
-                    pointRadius: 2,
-                    fill: false,
-                    tension: 0.1,
-                    isBaseline: true
-                });
+                const hasAnyEntries = baselineData.some(val => val !== null);
+                if (hasAnyEntries) {
+                    const seasonLabel = seasonalBaseline.season === 'summer' ? 'Summer Average' : 'Winter Average';
+                    datasets.push({
+                        label: seasonLabel,
+                        data: baselineData,
+                        type: 'line',
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        pointRadius: 2,
+                        fill: false,
+                        tension: 0.1,
+                        isBaseline: true
+                    });
+                }
             }
 
             if (currentBaselineData && seasonalBaseline) {
@@ -1727,9 +1728,12 @@
                             const color = holidayColors[holidayColorIndex % holidayColors.length];
                             holidayColorIndex++;
                             
-                            const holidayBaselineData = allSlots.map(slot => {
+                            const holidayBaselineData = slots.map(slot => {
                                 const baseline = holidayTimeSlots[slot];
-                                return baseline ? baseline.averageCount : null;
+                                if (baseline && baseline.averageEntries !== null && baseline.averageEntries !== undefined) {
+                                    return baseline.averageEntries;
+                                }
+                                return null;
                             });
                             
                             datasets.push({
@@ -1770,9 +1774,12 @@
                             const dayLabel = day.charAt(0).toUpperCase() + day.slice(1);
                             const color = dayColors[index % dayColors.length];
                             
-                            const dayBaselineData = allSlots.map(slot => {
+                            const dayBaselineData = slots.map(slot => {
                                 const baseline = dayTimeSlots[slot];
-                                return baseline ? baseline.averageCount : null;
+                                if (baseline && baseline.averageEntries !== null && baseline.averageEntries !== undefined) {
+                                    return baseline.averageEntries;
+                                }
+                                return null;
                             });
                             
                             datasets.push({
