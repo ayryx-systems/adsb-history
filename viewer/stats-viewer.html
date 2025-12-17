@@ -425,20 +425,6 @@
             </div>
 
             <div class="chart-container">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h3 style="margin: 0;">Time-of-Day Volumes: Aircraft Passing 50nm Threshold (Local Time)</h3>
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal; font-size: 14px;">
-                        <input type="checkbox" id="showBaselinesToggle" checked style="cursor: pointer;">
-                        <span>Show Baselines</span>
-                    </label>
-                </div>
-                <div class="chart-wrapper" id="l2VolumesChartWrapper">
-                    <canvas id="l2VolumesChart"></canvas>
-                </div>
-                <small style="color: #666; display: block; margin-top: 10px;">Volumes are based on when aircraft pass the 50nm threshold, which is more representative of traffic conditions than actual landing times (which depend on runway availability).</small>
-            </div>
-
-            <div class="chart-container">
                 <h3>Aircraft on Approach (within 50nm landing in next 2 hours)</h3>
                 <div class="chart-wrapper">
                     <canvas id="congestionChart"></canvas>
@@ -530,6 +516,20 @@
                 <div class="chart-wrapper">
                     <canvas id="pressureChart"></canvas>
                 </div>
+            </div>
+
+            <div class="chart-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h3 style="margin: 0;">Time-of-Day Volumes: Aircraft Passing 50nm Threshold (Local Time)</h3>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal; font-size: 14px;">
+                        <input type="checkbox" id="showBaselinesToggle" checked style="cursor: pointer;">
+                        <span>Show Baselines</span>
+                    </label>
+                </div>
+                <div class="chart-wrapper" id="l2VolumesChartWrapper">
+                    <canvas id="l2VolumesChart"></canvas>
+                </div>
+                <small style="color: #666; display: block; margin-top: 10px;">Volumes are based on when aircraft pass the 50nm threshold, which is more representative of traffic conditions than actual landing times (which depend on runway availability).</small>
             </div>
         </div>
     </div>

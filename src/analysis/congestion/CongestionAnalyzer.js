@@ -139,6 +139,22 @@ class CongestionAnalyzer {
   }
 
   /**
+   * Get local date string (YYYY-MM-DD) from UTC timestamp
+   */
+  getLocalDateFromTimestamp(utcTimestamp, airportConfig, referenceDate) {
+    const offsetHours = this.getUTCOffsetHours(airportConfig, referenceDate);
+    const offsetSeconds = offsetHours * 3600;
+    const localTimestamp = utcTimestamp + offsetSeconds;
+    const localDateObj = new Date(localTimestamp * 1000);
+    
+    const year = localDateObj.getUTCFullYear();
+    const month = String(localDateObj.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(localDateObj.getUTCDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+  }
+
+  /**
    * Convert UTC timestamp to local time slot (HH:MM format)
    */
   utcToLocalTimeSlot(utcTimestamp, airportConfig, localDate) {
@@ -231,7 +247,11 @@ class CongestionAnalyzer {
       // Count entries in the local time slot where they occur
       // Convert UTC timestamp to local time slot
       const entryLocalSlot = this.utcToLocalTimeSlot(timeAt50nm, airportConfig, date);
-      if (timeSlots[entryLocalSlot]) {
+      
+      // Only count entries that occur on the current local date
+      // Check if the entry timestamp falls on the same local date as the date parameter
+      const entryLocalDate = this.getLocalDateFromTimestamp(timeAt50nm, airportConfig, date);
+      if (entryLocalDate === date && timeSlots[entryLocalSlot]) {
         timeSlots[entryLocalSlot].entries++;
       }
     }
