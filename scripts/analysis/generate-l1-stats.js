@@ -152,7 +152,8 @@ async function processDate(airport, date, force) {
     date,
   });
 
-  const stats = analyzer.analyze(summary.flights, airport, date);
+  const airportElevation_ft = summary.airportElevation_ft || null;
+  const stats = analyzer.analyze(summary.flights, airport, date, airportElevation_ft);
 
   // Save results
   logger.info('Saving L1 stats', {

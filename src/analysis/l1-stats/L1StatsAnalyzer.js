@@ -120,14 +120,50 @@ class L1StatsAnalyzer {
    * @param {Array} flights - Array of flight objects from summary data
    * @param {string} airport - Airport ICAO code
    * @param {string} date - Date in YYYY-MM-DD format
+   * @param {number} airportElevation_ft - Airport elevation in feet (optional, for AGL calculation)
    * @returns {object} L1 statistics object
    */
-  analyze(flights, airport, date) {
+  analyze(flights, airport, date, airportElevation_ft = null) {
     logger.debug('Starting L1 stats analysis', { airport, date, totalFlights: flights.length });
 
     // Filter for arrivals only
-    const arrivals = flights.filter(f => f.classification === 'arrival');
+    let arrivals = flights.filter(f => f.classification === 'arrival');
     logger.debug('Filtered arrivals', { arrivals: arrivals.length });
+
+    // Filter out arrivals where touchdown altitude AGL > 1000ft (flyovers, not actual landings)
+    const filteredArrivals = [];
+    let filteredCount = 0;
+    
+    for (const arrival of arrivals) {
+      if (!arrival.touchdown || !arrival.touchdown.timestamp) {
+        continue;
+      }
+
+      // Calculate AGL altitude
+      let altitudeAGL = null;
+      if (arrival.touchdown.altitudeAGL_ft !== undefined && arrival.touchdown.altitudeAGL_ft !== null) {
+        altitudeAGL = arrival.touchdown.altitudeAGL_ft;
+      } else if (arrival.touchdown.altitude_ft !== undefined && arrival.touchdown.altitude_ft !== null && airportElevation_ft !== null) {
+        altitudeAGL = arrival.touchdown.altitude_ft - airportElevation_ft;
+      }
+
+      // Skip if AGL > 1000ft (likely a flyover, not a landing)
+      if (altitudeAGL !== null && altitudeAGL > 1000) {
+        filteredCount++;
+        continue;
+      }
+
+      filteredArrivals.push(arrival);
+    }
+
+    arrivals = filteredArrivals;
+    
+    if (filteredCount > 0) {
+      logger.debug('Filtered out high-altitude arrivals', { 
+        filteredCount, 
+        remainingArrivals: arrivals.length 
+      });
+    }
 
     // Filter for go-arounds
     const goArounds = flights.filter(f => f.classification === 'go_around');
