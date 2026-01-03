@@ -404,6 +404,36 @@ node scripts/analysis/generate-weather-patterns.js --airport KORD --years 2024 2
 
 **When to run**: After downloading METAR data for a year. The weather patterns are used by the pilot planning viewer to match expected weather conditions with historical days.
 
+### Phase 3g: Generate Daily Weather Summary (Optional)
+
+Generate daily weather summary table for the stats viewer. Analyzes METAR data to flag days with specific weather conditions (visibility < 2 SM, visibility < 1 SM, ceiling < 500ft, fog, snow, rain, thunderstorms, strong winds >30kt) between 06:00-24:00 local time.
+
+**Prerequisites**:
+
+- METAR data from weather download scripts (stored in `cache/metar/AIRPORT/AIRPORT_YYYY.json`)
+
+**Output**:
+
+- **Local cache**: `./cache/AIRPORT/daily-weather-summary.json`
+- Contains daily flags for weather conditions, used by stats viewer to display a clickable table
+
+**Timezone**: Weather summary uses **local time slots** (06:00-24:00 local time).
+
+#### Local
+
+```bash
+# Generate summary for multiple years
+node scripts/analysis/generate-daily-weather-summary.js --airport KORD --years 2024,2025
+
+# Generate summary for a single year
+node scripts/analysis/generate-daily-weather-summary.js --airport KORD --years 2024
+
+# Force regeneration even if summary exists
+node scripts/analysis/generate-daily-weather-summary.js --airport KORD --years 2024,2025 --force
+```
+
+**When to run**: After downloading METAR data. The daily weather summary is used by the stats viewer to display a clickable table of all days, making it easy to identify and select days with different weather conditions.
+
 ### Running Complete Analysis Pipeline
 
 Run analysis phases (2, 3a, 3b, 3c, and 3d) for a date range in one command. This script processes each day sequentially, running:
@@ -465,6 +495,8 @@ Congestion Statistics (S3) ~50KB/day per airport
 Yearly Baseline (Local Cache)
     ↓ (Phase 3f: Weather Patterns - Optional, Local time slots)
 Weather Patterns (Local Cache)
+    ↓ (Phase 3g: Daily Weather Summary - Optional, Local time slots)
+Daily Weather Summary (Local Cache)
 ```
 
 **Important**: Phase 2.5 (Extraction) **must be completed** before Phase 3a. Once extraction is done for a date range, you never need to download raw tar files again. Downstream scripts will fail if extracted traces don't exist.
@@ -478,6 +510,7 @@ The system uses a clean separation between UTC and local time:
 - **Congestion Statistics**: Local time slots (generated from flight traces)
 - **Baseline**: Local time slots (aggregated from L2 + congestion)
 - **Weather Patterns**: Local time slots (indexed from METAR data)
+- **Daily Weather Summary**: Local time slots (daily flags from METAR data)
 - **Weather Data**: Loaded separately from METAR files, converted to local time slots in viewer
 
 **Viewer**: Uses only local time data:
@@ -486,6 +519,7 @@ The system uses a clean separation between UTC and local time:
 - Congestion data (`byTimeSlotLocal`)
 - Baseline data (`byTimeSlotLocal`)
 - Weather patterns (`byTimeSlotLocal` for visibility patterns)
+- Daily weather summary (daily flags for weather conditions)
 - Weather data (converted from UTC METAR timestamps to local time slots)
 
 All time slot fields are explicitly named with `Local` suffix to avoid confusion. The viewer performs no timezone conversions - it only displays local time data.
