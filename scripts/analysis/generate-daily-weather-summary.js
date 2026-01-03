@@ -314,7 +314,10 @@ async function generateDailyWeatherSummary(airport, years, force) {
     }
 
     const windSpeed = record.wind_spd_kt_v;
-    if (windSpeed !== null && windSpeed !== undefined && windSpeed > 30) {
+    const windGust = record.gust_kt_v;
+    
+    if ((windSpeed !== null && windSpeed !== undefined && windSpeed > 30) ||
+        (windGust !== null && windGust !== undefined && windGust > 30)) {
       summary.strongWinds = true;
     }
   }
