@@ -97,3 +97,29 @@ export function getDSTDates(airport, year) {
     end: getDSTEnd(airport, yearNum),
   };
 }
+
+const airportTimezones = {
+  KORD: { standard: -6, dst: -5 },
+  KLAX: { standard: -8, dst: -7 },
+  KJFK: { standard: -5, dst: -4 },
+  KLGA: { standard: -5, dst: -4 },
+  KSFO: { standard: -8, dst: -7 },
+  KATL: { standard: -5, dst: -4 },
+  KDFW: { standard: -6, dst: -5 },
+  KDEN: { standard: -7, dst: -6 },
+  KMIA: { standard: -5, dst: -4 },
+  KBOS: { standard: -5, dst: -4 },
+};
+
+/**
+ * Get UTC offset for an airport on a specific date
+ * @param {string} airport - Airport ICAO code
+ * @param {string} dateStr - Date string (YYYY-MM-DD)
+ * @returns {number} UTC offset in hours (negative for west of UTC)
+ */
+export function getUTCOffset(airport, dateStr) {
+  const tz = airportTimezones[airport] || { standard: -6, dst: -5 };
+  const year = parseInt(dateStr.split('-')[0], 10);
+  const season = getSeason(dateStr, airport, year);
+  return season === 'summer' ? tz.dst : tz.standard;
+}
