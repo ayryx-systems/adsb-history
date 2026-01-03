@@ -94,11 +94,27 @@ function parseArgs() {
 function parseMetarTimestamp(valid) {
   if (!valid) return null;
   try {
-    const date = typeof valid === 'string' ? new Date(valid) : valid;
-    if (isNaN(date.getTime())) {
-      return null;
+    let dateStr;
+    if (typeof valid === 'string') {
+      dateStr = valid;
+      if (!dateStr.includes('T')) {
+        dateStr = dateStr.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})$/, '$1T$2');
+      }
+      if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-', 10)) {
+        dateStr += 'Z';
+      }
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) {
+        return null;
+      }
+      return Math.floor(date.getTime() / 1000);
+    } else {
+      const date = new Date(valid);
+      if (isNaN(date.getTime())) {
+        return null;
+      }
+      return Math.floor(date.getTime() / 1000);
     }
-    return Math.floor(date.getTime() / 1000);
   } catch (error) {
     return null;
   }
@@ -110,6 +126,27 @@ function getDateStr(timestampMs) {
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
   const day = String(date.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function getLocalDateStr(timestampSeconds, offsetHours, utcHour) {
+  const utcDate = new Date(timestampSeconds * 1000);
+  const utcYear = utcDate.getUTCFullYear();
+  const utcMonth = utcDate.getUTCMonth();
+  const utcDay = utcDate.getUTCDate();
+  
+  let localHour = utcHour + offsetHours;
+  let dayAdjustment = 0;
+  
+  if (localHour < 0) {
+    localHour += 24;
+    dayAdjustment = -1;
+  } else if (localHour >= 24) {
+    localHour -= 24;
+    dayAdjustment = 1;
+  }
+  
+  const localDate = new Date(Date.UTC(utcYear, utcMonth, utcDay + dayAdjustment));
+  return localDate.toISOString().split('T')[0];
 }
 
 function calculateCloudCeiling(cloudGroups) {
@@ -205,11 +242,30 @@ async function generateDailyWeatherSummary(airport, years, force) {
     const timestamp = parseMetarTimestamp(record.valid);
     if (!timestamp) continue;
 
-    const dateStr = getDateStr(timestamp * 1000);
+    const utcDateStr = getDateStr(timestamp * 1000);
+    const offsetHours = getUTCOffsetHours(airport, utcDateStr);
     
-    if (!dailySummaries[dateStr]) {
-      dailySummaries[dateStr] = {
-        date: dateStr,
+    const utcDate = new Date(timestamp * 1000);
+    const utcHour = utcDate.getUTCHours();
+    const utcMinute = utcDate.getUTCMinutes();
+    
+    let localHour = utcHour + offsetHours;
+    
+    if (localHour < 0) {
+      localHour += 24;
+    } else if (localHour >= 24) {
+      localHour -= 24;
+    }
+
+    if (localHour < 6 || localHour >= 24) {
+      continue;
+    }
+
+    const localDateStr = getLocalDateStr(timestamp, offsetHours, utcHour);
+    
+    if (!dailySummaries[localDateStr]) {
+      dailySummaries[localDateStr] = {
+        date: localDateStr,
         visibilityBelow2: false,
         visibilityBelow1: false,
         ceilingBelow500: false,
@@ -221,17 +277,7 @@ async function generateDailyWeatherSummary(airport, years, force) {
       };
     }
 
-    const offsetHours = getUTCOffsetHours(airport, dateStr);
-    const offsetSeconds = offsetHours * 3600;
-    const localTimestamp = timestamp + offsetSeconds;
-    const localDate = new Date(localTimestamp * 1000);
-    const localHour = localDate.getUTCHours();
-
-    if (localHour < 6 || localHour >= 24) {
-      continue;
-    }
-
-    const summary = dailySummaries[dateStr];
+    const summary = dailySummaries[localDateStr];
 
     const visibilitySm = record.visibility_sm_v;
     if (visibilitySm !== null && visibilitySm !== undefined) {
