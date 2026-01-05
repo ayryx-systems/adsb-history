@@ -89,7 +89,17 @@ class FlightWeatherJoiner {
     if (!valid) return null;
 
     try {
-      const date = new Date(valid);
+      let dateStr = valid;
+      
+      // METAR times are UTC - ensure proper parsing by adding 'Z' or using 'T'
+      if (!dateStr.includes('T')) {
+        dateStr = dateStr.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})$/, '$1T$2');
+      }
+      if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-', 10)) {
+        dateStr += 'Z';
+      }
+      
+      const date = new Date(dateStr);
       if (isNaN(date.getTime())) {
         return null;
       }
