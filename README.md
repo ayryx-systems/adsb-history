@@ -434,6 +434,83 @@ node scripts/analysis/generate-daily-weather-summary.js --airport KORD --years 2
 
 **When to run**: After downloading METAR data. The daily weather summary is used by the stats viewer to display a clickable table of all days, making it easy to identify and select days with different weather conditions.
 
+### Phase 3h: Generate Arrival Prediction Files (For Pilot App)
+
+Generate arrival prediction indices used by the pilot app's arrival duration timeline. These files enable weather-based arrival duration predictions.
+
+**Prerequisites**:
+- L2 statistics from Phase 3c (all days for the years you want to include)
+- METAR data from weather download scripts (stored in `cache/metar/AIRPORT/AIRPORT_YYYY.json`)
+
+**Output**:
+- **Local cache**: `./cache/AIRPORT/overall/arrival-stats-index.json` (~50KB)
+- **Local cache**: `./cache/AIRPORT/overall/day-situation-index.json` (prerequisite for example-days-index)
+- **Local cache**: `./cache/AIRPORT/overall/example-days-index.json` (~100KB)
+
+**Files Generated**:
+1. **arrival-stats-index.json**: Pre-computed percentiles (P10, P25, P50, P75, P90) for each time slot + weather category combination
+2. **day-situation-index.json**: Index of days by weather conditions at specific time slots (required for example-days-index)
+3. **example-days-index.json**: Representative example days for each time slot + weather category (used for historical day drilldown)
+
+**Timezone**: All indices use **local time slots** (airport timezone, 15-minute intervals).
+
+#### Step 1: Generate Day Situation Index (Required for Example Days)
+
+```bash
+# Generate for multiple years
+node scripts/analysis/generate-day-situation-index.js --airport KLGA --years 2024,2025
+
+# Generate for a single year
+node scripts/analysis/generate-day-situation-index.js --airport KLGA --years 2024
+
+# Force regeneration even if index exists
+node scripts/analysis/generate-day-situation-index.js --airport KLGA --years 2024,2025 --force
+```
+
+#### Step 2: Generate Arrival Stats Index
+
+```bash
+# Generate for multiple years
+node scripts/analysis/generate-arrival-stats-index.js --airport KLGA --years 2024,2025
+
+# Generate for a single year
+node scripts/analysis/generate-arrival-stats-index.js --airport KLGA --years 2024
+
+# Force regeneration even if index exists
+node scripts/analysis/generate-arrival-stats-index.js --airport KLGA --years 2024,2025 --force
+```
+
+#### Step 3: Generate Example Days Index (Requires Day Situation Index)
+
+```bash
+# Generate for multiple years (requires day-situation-index.json from Step 1)
+node scripts/analysis/generate-example-days-index.js --airport KLGA --years 2024,2025
+
+# Generate for a single year
+node scripts/analysis/generate-example-days-index.js --airport KLGA --years 2024
+
+# Force regeneration even if index exists
+node scripts/analysis/generate-example-days-index.js --airport KLGA --years 2024,2025 --force
+```
+
+#### Step 4: Upload to S3
+
+After generating all files locally, upload them to S3 so the backend can access them:
+
+```bash
+# Upload all arrival prediction files at once
+node scripts/upload-baseline-to-s3.js --airport KLGA --all
+
+# Or upload individual files
+node scripts/upload-baseline-to-s3.js --airport KLGA --file arrival-stats-index.json
+node scripts/upload-baseline-to-s3.js --airport KLGA --file example-days-index.json
+node scripts/upload-baseline-to-s3.js --airport KLGA --file day-situation-index.json
+```
+
+**Note**: The upload script automatically strips the 'K' prefix from airport codes for S3 paths (e.g., `KLGA` → `baseline/LGA/overall/...`), matching the backend's expected format.
+
+**When to run**: After processing a full year (or multiple years) of L2 statistics and downloading METAR data. These indices are used by the pilot app to show arrival duration predictions based on historical weather patterns.
+
 ### Running Complete Analysis Pipeline
 
 Run analysis phases (2, 3a, 3b, 3c, and 3d) for a date range in one command. This script processes each day sequentially, running:

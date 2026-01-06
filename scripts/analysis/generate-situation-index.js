@@ -123,7 +123,13 @@ function buildMetarIndex(metarRecords) {
   for (const record of metarRecords) {
     if (!record.valid) continue;
     
-    const timestamp = new Date(record.valid).getTime();
+    // METAR times are UTC - ensure proper parsing by adding 'Z' or using 'T'
+    let validStr = record.valid;
+    if (!validStr.includes('T') && !validStr.endsWith('Z')) {
+      validStr = validStr.replace(' ', 'T') + 'Z';
+    }
+    
+    const timestamp = new Date(validStr).getTime();
     if (isNaN(timestamp)) continue;
     
     index.set(timestamp, record);

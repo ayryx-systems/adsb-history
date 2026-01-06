@@ -119,7 +119,17 @@ function utcToLocalTimeSlot(utcTimestamp, airport, dateStr) {
 function parseMetarTimestamp(valid) {
   if (!valid) return null;
   try {
-    const date = typeof valid === 'string' ? new Date(valid) : valid;
+    let dateStr = typeof valid === 'string' ? valid : valid.toISOString();
+    
+    // METAR times are UTC - ensure proper parsing by adding 'Z' or using 'T'
+    if (!dateStr.includes('T')) {
+      dateStr = dateStr.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})$/, '$1T$2');
+    }
+    if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-', 10)) {
+      dateStr += 'Z';
+    }
+    
+    const date = new Date(dateStr);
     if (isNaN(date.getTime())) {
       return null;
     }
@@ -427,6 +437,7 @@ async function main() {
 }
 
 main();
+
 
 
 
