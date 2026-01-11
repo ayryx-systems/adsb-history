@@ -12,7 +12,7 @@
  *   "airport": "ORD",
  *   "stats": {
  *     "08:00": {
- *       "VFR": { "matchCount": 45, "totalArrivals": 5000, "p10": 14.5, "p50": 18.2, "p90": 24.1 },
+ *       "VFR": { "matchCount": 45, "totalArrivals": 5000, "p10": 14.5, "p50": 18.2, "p90": 24.1, "p95": 26.5 },
  *       "MVFR": { ... },
  *       "IFR": { ... },
  *       "LIFR": { ... }
@@ -303,6 +303,7 @@ async function generateArrivalStatsIndex(airport, years, force) {
           p50: null,
           p75: null,
           p90: null,
+          p95: null,
         };
         continue;
       }
@@ -317,6 +318,7 @@ async function generateArrivalStatsIndex(airport, years, force) {
         p50: Math.round(percentile(data.durations, 50) * 10) / 10,
         p75: Math.round(percentile(data.durations, 75) * 10) / 10,
         p90: Math.round(percentile(data.durations, 90) * 10) / 10,
+        p95: Math.round(percentile(data.durations, 95) * 10) / 10,
       };
     }
   }
