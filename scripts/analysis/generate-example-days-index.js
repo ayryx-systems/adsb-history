@@ -7,7 +7,7 @@
  * time slot + weather category combination. Only stores:
  * - Date
  * - Weather category at the time slot
- * - Basic stats (arrival count, P50)
+ * - Basic stats (arrival count, P10, P50, P90, P95 at the time slot)
  * 
  * The full arrival data is fetched on-demand from the per-day l2-stats files.
  * 
@@ -102,27 +102,31 @@ function loadL2Stats(airport, year, month, day) {
   }
 }
 
-function getDayStats(l2Stats) {
+function getDayStats(l2Stats, timeSlot) {
   const durations = [];
   
   const bySlot = l2Stats?.overall?.byTouchdownTimeSlotLocal;
-  if (!bySlot) return { p50: null, count: 0 };
+  if (!bySlot) return { p10: null, p50: null, p90: null, p95: null, count: 0 };
   
-  for (const slotData of Object.values(bySlot)) {
-    const aircraft = slotData.aircraft || [];
-    for (const ac of aircraft) {
-      if (!ac.milestones?.timeFrom50nm) continue;
-      if (isSmallLightAircraft(ac.type)) continue;
-      durations.push(ac.milestones.timeFrom50nm / 60);
-    }
+  const slotData = bySlot[timeSlot];
+  if (!slotData) return { p10: null, p50: null, p90: null, p95: null, count: 0 };
+  
+  const aircraft = slotData.aircraft || [];
+  for (const ac of aircraft) {
+    if (!ac.milestones?.timeFrom50nm) continue;
+    if (isSmallLightAircraft(ac.type)) continue;
+    durations.push(ac.milestones.timeFrom50nm / 60);
   }
   
-  if (durations.length === 0) return { p50: null, count: 0 };
+  if (durations.length === 0) return { p10: null, p50: null, p90: null, p95: null, count: 0 };
   
   durations.sort((a, b) => a - b);
   
   return {
+    p10: Math.round(percentile(durations, 10) * 10) / 10,
     p50: Math.round(percentile(durations, 50) * 10) / 10,
+    p90: Math.round(percentile(durations, 90) * 10) / 10,
+    p95: Math.round(percentile(durations, 95) * 10) / 10,
     count: durations.length,
   };
 }
@@ -188,15 +192,18 @@ async function generateExampleDaysIndex(airport, years, force) {
         
         if (!l2Stats) continue;
         
-        const stats = getDayStats(l2Stats);
-        if (stats.count < 50) continue;
+        const stats = getDayStats(l2Stats, slot);
+        if (stats.count < 10) continue;
         
         const weatherTimeline = getWeatherTimelineForDay(daySituationIndex, dateStr);
         
         candidates.push({
           date: dateStr,
           category: cat,
+          p10: stats.p10,
           p50: stats.p50,
+          p90: stats.p90,
+          p95: stats.p95,
           arrivalCount: stats.count,
           weather: weatherTimeline,
         });
