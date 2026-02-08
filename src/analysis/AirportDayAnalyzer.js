@@ -390,7 +390,7 @@ class AirportDayAnalyzer {
     if (!extractDir) {
       throw new Error(
         `Extracted traces not found for ${airport} on ${date}. ` +
-        `Please run extraction first: node scripts/extraction/extract-all-airports.js --start-date ${date} --end-date ${date}`
+        `Please run extraction first: node scripts/extraction/identify-and-extract.js --all --start-date ${date} --end-date ${date}`
       );
     }
 

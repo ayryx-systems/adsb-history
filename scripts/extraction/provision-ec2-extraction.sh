@@ -1,6 +1,6 @@
 #!/bin/bash
-# Simple script to run trace extraction on EC2
-# Usage: ./scripts/extraction/run-on-ec2.sh --start-date 2025-01-01 --end-date 2025-01-31 [--airports KORD,KLGA] [--force]
+# Provision EC2 instance to run trace extraction (identification and extraction)
+# Usage: ./scripts/extraction/provision-ec2-extraction.sh --start-date 2025-01-01 --end-date 2025-01-31 [--airports KORD,KLGA] [--force]
 
 set -e
 
@@ -403,7 +403,11 @@ echo "=========================================="
 echo "Starting extraction: $START_DATE to $END_DATE"
 echo "=========================================="
 
-node --expose-gc --max-old-space-size=4096 scripts/extraction/extract-all-airports.js --start-date "$START_DATE" --end-date "$END_DATE" $AIRPORTS_ARG $FORCE_ARG
+if [ -z "$AIRPORTS_ARG" ]; then
+  node --expose-gc --max-old-space-size=4096 scripts/extraction/identify-and-extract.js --all --start-date "$START_DATE" --end-date "$END_DATE" $FORCE_ARG
+else
+  node --expose-gc --max-old-space-size=4096 scripts/extraction/identify-and-extract.js $AIRPORTS_ARG --start-date "$START_DATE" --end-date "$END_DATE" $FORCE_ARG
+fi
 
 EXIT_CODE=\$?
 

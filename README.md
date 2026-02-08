@@ -1,13 +1,13 @@
 # ADSB History Processing
 
-Pipeline to process ADSB historical data through three phases: ingestion, identification, and analysis.
+Pipeline to process ADSB historical data through three phases: ingestion, extraction, and analysis.
 
 ## Overview
 
 Three-phase pipeline:
 
 1. **Ingestion**: Download raw ADSB data from GitHub → S3
-2. **Identification**: Identify aircraft that were on the ground at airports
+2. **Extraction**: Identify aircraft that were on the ground at airports and extract their traces (combined phase)
 3. **Analysis**:
    - **3a. Flight Analysis**: Create detailed summaries with distance milestones
    - **3b. L1 Statistics**: Generate statistics (arrival times, aircraft types, milestones)
@@ -62,12 +62,12 @@ TEMP_DIR=/path/to/temp node scripts/analysis/analyze-airport-day.js --airport KL
 
 ### Cleaning Up Old Cache/Temp Directories
 
-If you've previously run scripts from subdirectories, you may have cache/temp directories in places like `scripts/analysis/cache/` or `scripts/identification/temp/`. These are safe to delete:
+If you've previously run scripts from subdirectories, you may have cache/temp directories in places like `scripts/analysis/cache/` or `scripts/extraction/temp/`. These are safe to delete:
 
 ```bash
 # Remove old cache/temp from script subdirectories
 rm -rf scripts/analysis/cache scripts/analysis/temp
-rm -rf scripts/identification/cache scripts/identification/temp
+rm -rf scripts/extraction/cache scripts/extraction/temp
 ```
 
 Going forward, all cache and temp files will be created in the project root (`./cache/` and `./temp/`) when you run scripts from the root directory.
@@ -103,48 +103,15 @@ node scripts/download-week.js --start-date 2025-11-08 --days 1
 
 **SSH Access**: Use `./scripts/ingestion/ssh-to-instance.sh INSTANCE_ID` to connect. View logs with `tail -f /var/log/user-data.log`.
 
-## Phase 2: Identification
+## Phase 2: Extraction
 
-Identify aircraft that were on the ground at airports.
+Identify aircraft that were on the ground at airports and extract their traces in a single combined pass. This phase downloads and extracts the raw tar file only once, making it much more efficient than running identification and extraction separately.
 
-**Input**: Raw ADSB data from Phase 1 (`s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`)  
-**Output**: `s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json` (list of ICAO codes that were on ground)
+**Input**: Raw ADSB data from Phase 1 (`s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`)
 
-### Local
-
-```bash
-# Single airport
-node scripts/identification/identify-ground-aircraft.js --airport KLGA --date 2025-11-08
-
-# Multiple airports
-node scripts/identification/identify-ground-aircraft.js --all --date 2025-11-08
-```
-
-**Requirements**: ~50GB disk space for extraction
-
-### EC2
-
-```bash
-# Process all enabled airports
-./scripts/identification/run-on-ec2.sh --date 2025-11-08
-
-# Process specific airports
-./scripts/identification/run-on-ec2.sh --date 2025-11-08 --airports KLGA,KSFO
-
-# Use specific AWS profile
-AWS_PROFILE=your-profile-name ./scripts/identification/run-on-ec2.sh --date 2025-11-08
-```
-
-## Phase 2.5: Extraction
-
-Extract traces for identified aircraft into per-airport tar files. This creates much smaller files (~50-200MB) that contain only the traces for aircraft that were on the ground at a specific airport, making downstream processing much more efficient.
-
-**Input**:
-
-- Ground aircraft list from Phase 2 (`s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json`)
-- Raw ADSB data from Phase 1 (`s3://ayryx-adsb-history/raw/YYYY/MM/DD/*.tar`)
-
-**Output**: `s3://ayryx-adsb-history/extracted/AIRPORT/YYYY/MM/AIRPORT-YYYY-MM-DD.tar` (tar file containing only traces for identified aircraft)
+**Output**:
+- `s3://ayryx-adsb-history/ground-aircraft/AIRPORT/YYYY/MM/DD.json` (list of ICAO codes that were on ground)
+- `s3://ayryx-adsb-history/extracted/AIRPORT/YYYY/MM/AIRPORT-YYYY-MM-DD.tar` (tar file containing only traces for identified aircraft)
 
 **Important**: This phase **must be completed** before Phase 3a. Downstream scripts will fail if extracted traces don't exist. Run extraction once for all dates and airports, then never download raw tar files again.
 
@@ -154,10 +121,10 @@ Extract traces for all enabled airports for a date range:
 
 ```bash
 # Extract all enabled airports for January 2025
-node scripts/extraction/extract-all-airports.js --start-date 2025-01-01 --end-date 2025-01-31
+node scripts/extraction/identify-and-extract.js --all --start-date 2025-01-01 --end-date 2025-01-31
 
 # Extract specific airports for a date range
-node scripts/extraction/extract-all-airports.js --start-date 2025-01-01 --end-date 2025-01-15 --airports KORD,KLGA
+node scripts/extraction/identify-and-extract.js --airports KORD,KLGA --start-date 2025-01-01 --end-date 2025-01-15
 ```
 
 **Requirements**: ~50GB disk space for extraction (processes one day at a time)
@@ -168,11 +135,19 @@ For processing a single airport:
 
 ```bash
 # Single date
-node scripts/extraction/extract-airport-traces.js --airport KORD --date 2025-01-15
+node scripts/extraction/identify-and-extract.js --airport KORD --date 2025-01-15
 
 # Date range
-node scripts/extraction/extract-airport-traces.js --airport KORD --start-date 2025-01-15 --days 7
+node scripts/extraction/identify-and-extract.js --airport KORD --start-date 2025-01-15 --days 7
+
+# Multiple airports, single date
+node scripts/extraction/identify-and-extract.js --airports KORD,KLGA --date 2025-01-15
+
+# All airports, date range
+node scripts/extraction/identify-and-extract.js --all --start-date 2025-01-01 --end-date 2025-01-31
 ```
+
+**Requirements**: ~50GB disk space for extraction
 
 ## Phase 3: Analysis
 
@@ -187,7 +162,7 @@ Analyze flights to create detailed summaries with distance milestones.
 - `s3://ayryx-adsb-history/flight-summaries/AIRPORT/YYYY/MM/DD.json` (detailed flight data with milestones, classifications, touchdown/takeoff points)
 - **Local cache**: `./cache/traces/AIRPORT/YYYY/MM/DD/ICAO.json` (simplified traces for visualization)
 
-**Important**: Extracted traces **must exist** before running this phase. Run `extract-all-airports.js` first. The script will fail if extracted traces are not found.
+**Important**: Extracted traces **must exist** before running this phase. Run `identify-and-extract.js` first. The script will fail if extracted traces are not found.
 
 **Simplified Traces**: As a side-effect of flight analysis, simplified trace files are automatically created for all arrivals and departures. These contain minimal position data optimized for map visualization. Traces are saved to `./cache/traces/AIRPORT/YYYY/MM/DD/ICAO.json` and can be loaded on-demand by the viewer when users click on scatter plot dots.
 
@@ -513,20 +488,19 @@ node scripts/upload-baseline-to-s3.js --airport KLGA --file day-situation-index.
 
 ### Running Complete Analysis Pipeline
 
-Run analysis phases (2, 3a, 3b, 3c, and 3d) for a date range in one command. This script processes each day sequentially, running:
+Run analysis phases (3a, 3b, 3c, and 3d) for a date range in one command. This script processes each day sequentially, running:
 
-1. Phase 2: Identify ground aircraft
-2. Phase 3a: Analyze flights (create flight summaries) - **requires extracted traces to exist**
-3. Phase 3b: Generate L1 statistics (UTC time slots)
-4. Phase 3c: Generate L2 statistics (local time slots)
-5. Phase 3d: Generate congestion statistics (local time slots)
+1. Phase 3a: Analyze flights (create flight summaries) - **requires extracted traces to exist**
+2. Phase 3b: Generate L1 statistics (UTC time slots)
+3. Phase 3c: Generate L2 statistics (local time slots)
+4. Phase 3d: Generate congestion statistics (local time slots)
 
 **Prerequisites**:
 
 - Raw ADSB data from Phase 1 (must be ingested first)
-- Extracted traces from Phase 2.5 (run `extract-all-airports.js` first)
+- Extracted traces from Phase 2 (run `identify-and-extract.js` first)
 
-**Output**: Complete analysis pipeline outputs (ground aircraft lists, flight summaries, L1 statistics, L2 statistics, and congestion statistics)
+**Output**: Complete analysis pipeline outputs (flight summaries, L1 statistics, L2 statistics, and congestion statistics)
 
 #### Local
 
@@ -543,6 +517,8 @@ node scripts/analysis/process-analysis-pipeline.js --airport KORD --start-date 2
 
 **Requirements**: ~50GB disk space for extraction (processes one day at a time to manage disk usage)
 
+**Note**: Phase 2 combines identification and extraction into a single pass, reducing time and cost by downloading and extracting the tar file only once. The ground aircraft JSON files are still stored on S3 for reference.
+
 #### EC2
 
 ```bash
@@ -556,9 +532,8 @@ node scripts/analysis/process-analysis-pipeline.js --airport KORD --start-date 2
 GitHub Releases
     ↓ (Phase 1: Ingestion)
 Raw ADSB Data (S3) ~2GB/day
-    ↓ (Phase 2: Identification)
+    ↓ (Phase 2: Extraction - Combined Identification & Extraction)
 Ground Aircraft List (S3) ~100KB/day
-    ↓ (Phase 2.5: Extraction - REQUIRED)
 Extracted Traces (S3) ~50-200MB/day per airport
     ↓ (Phase 3a: Flight Analysis)
 Flight Summaries (S3) ~1-10MB/day per airport
@@ -576,7 +551,7 @@ Weather Patterns (Local Cache)
 Daily Weather Summary (Local Cache)
 ```
 
-**Important**: Phase 2.5 (Extraction) **must be completed** before Phase 3a. Once extraction is done for a date range, you never need to download raw tar files again. Downstream scripts will fail if extracted traces don't exist.
+**Important**: Phase 2 (Extraction) **must be completed** before Phase 3a. Once extraction is done for a date range, you never need to download raw tar files again. Downstream scripts will fail if extracted traces don't exist.
 
 ## Architecture: Timezone Handling
 

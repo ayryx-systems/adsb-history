@@ -31,7 +31,7 @@ async function debugGoAround(icao, airport, date) {
   const extractDir = await traceReader.downloadExtractedTraces(airport, date);
   if (!extractDir) {
     console.error(`Extracted traces not found for ${airport} on ${date}`);
-    console.error(`Please run: node scripts/extraction/extract-all-airports.js --start-date ${date} --end-date ${date} --airports ${airport}`);
+    console.error(`Please run: node scripts/extraction/identify-and-extract.js --airport ${airport} --start-date ${date} --end-date ${date}`);
     process.exit(1);
   }
   

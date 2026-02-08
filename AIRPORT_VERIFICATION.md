@@ -1,10 +1,10 @@
 # Airport Configuration Verification
 
-This document lists all airports supported by the identification process and verifies their coordinates and elevations against official FAA/AirNav data.
+This document lists all airports supported by the extraction process and verifies their coordinates and elevations against official FAA/AirNav data.
 
 ## Supported Airports
 
-The identification script (`identify-ground-aircraft.js`) uses airport data from `config/airports.json`. The following airports are currently configured:
+The extraction script (`identify-and-extract.js`) uses airport data from `config/airports.json`. The following airports are currently configured:
 
 ### 1. KLAX - Los Angeles International Airport
 - **Status**: ✅ Enabled
@@ -166,9 +166,9 @@ The identification script (`identify-ground-aircraft.js`) uses airport data from
 - **Difference**: 0.3 ft
 - **Verification**: ✅ Coordinates and elevation match perfectly
 
-## Identification Process Details
+## Extraction Process Details
 
-The identification process checks if aircraft pass within:
+The extraction process (which combines identification and extraction) checks if aircraft pass within:
 - **Proximity Radius**: 2.0 nautical miles from airport coordinates
 - **Max Altitude AGL**: 800 feet Above Ground Level
 
@@ -176,14 +176,14 @@ The process converts AMSL (Above Mean Sea Level) altitudes from ADSB data to AGL
 
 ## Usage
 
-To run identification on all enabled airports:
+To run extraction on all enabled airports:
 ```bash
-./adsb-history/scripts/identification/run-on-ec2.sh --date YYYY-MM-DD --all
+node scripts/extraction/identify-and-extract.js --all --date YYYY-MM-DD
 ```
 
 To run on specific airports:
 ```bash
-./adsb-history/scripts/identification/run-on-ec2.sh --date YYYY-MM-DD --airports KLAX,KSFO,KJFK
+node scripts/extraction/identify-and-extract.js --airports KLAX,KSFO,KJFK --date YYYY-MM-DD
 ```
 
 ## Data Sources

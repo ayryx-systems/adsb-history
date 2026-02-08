@@ -1,30 +1,12 @@
 #!/usr/bin/env node
 
-/**
- * Identify aircraft that were on the ground at airports on given date(s)
- * 
- * Supports:
- * - Single or multiple airports (--airport, --airports, or --all)
- * - Single date or date range (--date or --start-date with --end-date/--days)
- * 
- * Usage:
- *   Single airport, single date:
- *     node scripts/identification/identify-ground-aircraft.js --airport KLGA --date 2025-11-08
- *   Single airport, date range:
- *     node scripts/identification/identify-ground-aircraft.js --airport KLGA --start-date 2025-11-08 --end-date 2025-11-15
- *   Multiple airports, single date:
- *     node scripts/identification/identify-ground-aircraft.js --airports KLGA,KJFK --date 2025-11-08
- *   All airports, date range:
- *     node scripts/identification/identify-ground-aircraft.js --all --start-date 2025-11-08 --days 7
- */
-
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import AirportGroundIdentifier from '../../src/processing/AirportGroundIdentifier.js';
-import GroundAircraftData from '../../src/processing/GroundAircraftData.js';
+import IdentificationAndExtraction from '../../src/extraction/IdentificationAndExtraction.js';
 import logger from '../../src/utils/logger.js';
+import { describeAwsError } from '../../src/utils/awsErrorUtils.js';
 
 dotenv.config();
 
@@ -74,21 +56,24 @@ function parseArgs() {
       options.parallel = true;
     } else if (arg === '--help' || arg === '-h') {
       console.log(`
-Identify aircraft on ground at airports
+Identify ground aircraft and extract traces (combined phase)
+
+This script combines identification and extraction into a single pass, reducing
+time and cost by downloading and extracting the tar file only once.
 
 Usage:
   Single airport, single date:
-    node scripts/identification/identify-ground-aircraft.js --airport ICAO --date YYYY-MM-DD
+    node scripts/extraction/identify-and-extract.js --airport ICAO --date YYYY-MM-DD
   
   Single airport, date range:
-    node scripts/identification/identify-ground-aircraft.js --airport ICAO --start-date YYYY-MM-DD --end-date YYYY-MM-DD
-    node scripts/identification/identify-ground-aircraft.js --airport ICAO --start-date YYYY-MM-DD --days N
+    node scripts/extraction/identify-and-extract.js --airport ICAO --start-date YYYY-MM-DD --end-date YYYY-MM-DD
+    node scripts/extraction/identify-and-extract.js --airport ICAO --start-date YYYY-MM-DD --days N
   
   Multiple airports, single date:
-    node scripts/identification/identify-ground-aircraft.js --airports ICAO,ICAO,... --date YYYY-MM-DD
+    node scripts/extraction/identify-and-extract.js --airports ICAO,ICAO,... --date YYYY-MM-DD
   
   All airports, date range:
-    node scripts/identification/identify-ground-aircraft.js --all --start-date YYYY-MM-DD --days N
+    node scripts/extraction/identify-and-extract.js --all --start-date YYYY-MM-DD --days N
 
 Options:
   Airport selection (one required):
@@ -109,25 +94,24 @@ Options:
 
 Examples:
   # Single airport, single date
-  node scripts/identification/identify-ground-aircraft.js --airport KLGA --date 2025-11-08
+  node scripts/extraction/identify-and-extract.js --airport KLGA --date 2025-11-08
   
   # Single airport, date range (7 days)
-  node scripts/identification/identify-ground-aircraft.js --airport KLGA --start-date 2025-11-08 --days 7
+  node scripts/extraction/identify-and-extract.js --airport KLGA --start-date 2025-11-08 --days 7
   
   # Multiple airports, single date
-  node scripts/identification/identify-ground-aircraft.js --airports KLGA,KJFK,KLAX --date 2025-11-08
+  node scripts/extraction/identify-and-extract.js --airports KLGA,KJFK,KLAX --date 2025-11-08
   
   # All airports, date range
-  node scripts/identification/identify-ground-aircraft.js --all --start-date 2025-11-08 --end-date 2025-11-15
+  node scripts/extraction/identify-and-extract.js --all --start-date 2025-11-08 --end-date 2025-11-15
   
   # Parallel processing (faster)
-  node scripts/identification/identify-ground-aircraft.js --all --date 2025-11-08 --parallel
+  node scripts/extraction/identify-and-extract.js --all --date 2025-11-08 --parallel
       `);
       process.exit(0);
     }
   }
 
-  // Validate airport selection
   const airportOptions = [options.airport, options.airports, options.all].filter(Boolean);
   if (airportOptions.length === 0) {
     console.error('Error: One of --airport, --airports, or --all is required');
@@ -140,7 +124,6 @@ Examples:
     process.exit(1);
   }
 
-  // Validate date selection
   if (!options.date && !options.startDate) {
     console.error('Error: Either --date or --start-date must be provided');
     console.error('Run with --help for usage information');
@@ -214,55 +197,62 @@ function generateDateRange(startDate, endDateOrDays) {
   return dates;
 }
 
-async function processAirportDate(airport, date, identifier, dataStore, force) {
+async function processAirportDate(airport, date, processor, force) {
+  const ExtractedTraceData = (await import('../../src/extraction/ExtractedTraceData.js')).default;
+  const GroundAircraftData = (await import('../../src/processing/GroundAircraftData.js')).default;
+  
+  const extractedTraceData = new ExtractedTraceData();
+  const groundAircraftData = new GroundAircraftData();
+
   if (!force) {
-    const exists = await dataStore.exists(airport.icao, date);
-    if (exists) {
-      logger.info('Data already exists, loading from storage', {
+    const extractedExists = await extractedTraceData.exists(airport.icao, date);
+    const groundExists = await groundAircraftData.exists(airport.icao, date);
+    
+    if (extractedExists && groundExists) {
+      logger.info('Data already exists, skipping', {
         airport: airport.icao,
         date,
       });
       
-      const aircraftIds = await dataStore.load(airport.icao, date);
+      const aircraftIds = await groundAircraftData.load(airport.icao, date);
       return { airport: airport.icao, date, count: aircraftIds.length, skipped: true };
     }
   }
 
-  logger.info('Starting identification', {
+  logger.info('Starting combined identification and extraction', {
     airport: airport.icao,
     date,
   });
 
-  const aircraftIds = await identifier.identifyGroundAircraft(date, airport);
+  try {
+    const result = await processor.identifyAndExtract(date, airport);
+    
+    logger.info('Combined processing complete', {
+      airport: airport.icao,
+      date,
+      count: result.aircraftIds.length,
+    });
 
-  logger.info('Saving results', {
-    airport: airport.icao,
-    date,
-    count: aircraftIds.length,
-  });
-  await dataStore.save(airport.icao, date, aircraftIds);
-
-  // Explicitly clean up trace reader for this date to free memory
-  if (identifier.traceReader && typeof identifier.traceReader.cleanup === 'function') {
-    identifier.traceReader.cleanup(date);
+    return { airport: airport.icao, date, count: result.aircraftIds.length, skipped: false };
+  } catch (error) {
+    logger.error('Failed to process airport/date', {
+      airport: airport.icao,
+      date,
+      error: error.message,
+      stack: error.stack,
+    });
+    throw error;
   }
-
-  // Clear the aircraftIds array reference to help GC
-  const count = aircraftIds.length;
-  aircraftIds.length = 0;
-
-  return { airport: airport.icao, date, count, skipped: false };
 }
 
 async function main() {
   const options = parseArgs();
 
-  logger.info('Identifying ground aircraft', options);
+  logger.info('Starting combined identification and extraction', options);
 
   try {
     const allAirports = loadAirportConfig();
     
-    // Determine which airports to process
     let airportsToProcess = [];
     if (options.all) {
       airportsToProcess = allAirports.filter(a => a.enabled);
@@ -291,7 +281,6 @@ async function main() {
       process.exit(1);
     }
 
-    // Determine dates to process
     let dates;
     if (options.date) {
       dates = [options.date];
@@ -316,81 +305,121 @@ async function main() {
       dates: dates.length === 1 ? dates[0] : `${dates[0]} to ${dates[dates.length - 1]}`,
     });
 
-    const identifier = new AirportGroundIdentifier();
-    const dataStore = new GroundAircraftData();
+    const processor = new IdentificationAndExtraction();
 
     const startTime = Date.now();
     const results = [];
 
-    // Process all combinations of airports and dates
     for (let dateIdx = 0; dateIdx < dates.length; dateIdx++) {
       const date = dates[dateIdx];
       console.log(`\n[Date ${dateIdx + 1}/${dates.length}] Processing ${date}...`);
       console.log('─'.repeat(60));
 
-      if (options.parallel && airportsToProcess.length > 1) {
-        logger.info('Processing airports in parallel', { date });
-        const promises = airportsToProcess.map(airport => 
-          processAirportDate(airport, date, identifier, dataStore, options.force)
-        );
-        const dateResults = await Promise.all(promises);
-        results.push(...dateResults);
-        
-        dateResults.forEach(r => {
-          if (r.error) {
-            console.log(`  ✗ ${r.airport}: ${r.error}`);
-          } else if (r.skipped) {
-            console.log(`  ⊘ ${r.airport}: ${r.count} aircraft (already processed)`);
+      if (airportsToProcess.length === 1) {
+        const airport = airportsToProcess[0];
+        try {
+          const result = await processAirportDate(airport, date, processor, options.force);
+          results.push(result);
+          
+          if (result.error) {
+            console.log(`  ✗ ${result.airport}: ${result.error}`);
+          } else if (result.skipped) {
+            console.log(`  ⊘ ${result.airport}: ${result.count} aircraft (already processed)`);
           } else {
-            console.log(`  ✓ ${r.airport}: ${r.count} aircraft`);
+            console.log(`  ✓ ${result.airport}: ${result.count} aircraft`);
           }
-        });
+        } catch (error) {
+          logger.error('Failed to process airport/date', {
+            airport: airport.icao,
+            date,
+            error: error.message,
+            stack: error.stack,
+          });
+          console.log(`  ✗ ${airport.icao}: Error - ${error.message}`);
+          results.push({ airport: airport.icao, date, error: error.message });
+        }
       } else {
-        logger.info('Processing airports sequentially', { date });
+        logger.info('Processing multiple airports efficiently (shared download/extract)', { 
+          date, 
+          airports: airportsToProcess.map(a => a.icao) 
+        });
+        
+        const ExtractedTraceData = (await import('../../src/extraction/ExtractedTraceData.js')).default;
+        const GroundAircraftData = (await import('../../src/processing/GroundAircraftData.js')).default;
+        
+        const extractedTraceData = new ExtractedTraceData();
+        const groundAircraftData = new GroundAircraftData();
+
+        const airportsToProcessForDate = [];
         for (const airport of airportsToProcess) {
-          try {
-            const result = await processAirportDate(airport, date, identifier, dataStore, options.force);
-            results.push(result);
+          if (!options.force) {
+            const extractedExists = await extractedTraceData.exists(airport.icao, date);
+            const groundExists = await groundAircraftData.exists(airport.icao, date);
             
-            if (result.error) {
-              console.log(`  ✗ ${result.airport}: ${result.error}`);
-            } else if (result.skipped) {
-              console.log(`  ⊘ ${result.airport}: ${result.count} aircraft (already processed)`);
-            } else {
-              console.log(`  ✓ ${result.airport}: ${result.count} aircraft`);
+            if (extractedExists && groundExists) {
+              const aircraftIds = await groundAircraftData.load(airport.icao, date);
+              results.push({ airport: airport.icao, date, count: aircraftIds.length, skipped: true });
+              console.log(`  ⊘ ${airport.icao}: ${aircraftIds.length} aircraft (already processed)`);
+              continue;
+            }
+          }
+          airportsToProcessForDate.push(airport);
+        }
+
+        if (airportsToProcessForDate.length > 0) {
+          try {
+            const dateResults = await processor.identifyAndExtractMultipleAirports(date, airportsToProcessForDate);
+            
+            for (const airport of airportsToProcessForDate) {
+              const result = dateResults[airport.icao];
+              if (result && result.tarPath) {
+                results.push({ 
+                  airport: airport.icao, 
+                  date, 
+                  count: result.aircraftIds.length, 
+                  skipped: false 
+                });
+                console.log(`  ✓ ${airport.icao}: ${result.aircraftIds.length} aircraft`);
+              } else {
+                results.push({ 
+                  airport: airport.icao, 
+                  date, 
+                  count: 0, 
+                  skipped: false 
+                });
+                console.log(`  ⊘ ${airport.icao}: No ground aircraft found`);
+              }
             }
           } catch (error) {
-            logger.error('Failed to process airport/date', {
-              airport: airport.icao,
+            logger.error('Failed to process multiple airports for date', {
               date,
+              airports: airportsToProcessForDate.map(a => a.icao),
               error: error.message,
               stack: error.stack,
             });
-            console.log(`  ✗ ${airport.icao}: Error - ${error.message}`);
-            results.push({ airport: airport.icao, date, error: error.message });
+            for (const airport of airportsToProcessForDate) {
+              console.log(`  ✗ ${airport.icao}: Error - ${error.message}`);
+              results.push({ airport: airport.icao, date, error: error.message });
+            }
           }
         }
       }
 
-      // Cleanup after each date to free memory
       if (dateIdx < dates.length - 1) {
         logger.info('Cleaning up after date', { date });
         console.log(`\n[Date ${dateIdx + 1}/${dates.length}] Cleanup: Freeing memory...`);
         
-        // Force garbage collection if available (requires --expose-gc flag)
         if (global.gc) {
           global.gc();
           logger.info('Garbage collection triggered', { date });
         }
         
-        // Small delay to allow GC to complete
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
     const duration = Date.now() - startTime;
 
-    // Summary
     console.log(`\n${'='.repeat(60)}`);
     console.log('SUMMARY');
     console.log('='.repeat(60));

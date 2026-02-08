@@ -10,7 +10,7 @@
  * 4. Phase 3d: Generate L2 statistics (generate-l2-stats.js) - time-of-day volumes
  * 5. Phase 3e: Generate yearly baseline (generate-yearly-baseline.js) - aggregates all days for the year
  * 
- * **Important**: Extracted traces must already exist (run extract-all-airports.js first).
+ * **Important**: Extracted traces must already exist (run identify-and-extract.js first).
  * This script will fail if extracted traces are not found - it does NOT download raw tar files.
  * 
  * Usage:
@@ -61,7 +61,7 @@ function parseArgs() {
       console.log(`
 Run analysis pipeline (Phase 3a, 3b, 3c, 3d, and 3e) for date range
 
-**Prerequisites**: Extracted traces must exist (run extract-all-airports.js first).
+**Prerequisites**: Extracted traces must exist (run identify-and-extract.js first).
 This script will fail if extracted traces are not found - it does NOT download raw tar files.
 
 Usage:
@@ -143,7 +143,7 @@ async function checkExtractedTraces(airport, dates) {
 
   if (missing.length > 0) {
     const errorMsg = `Extracted traces not found for ${airport} on ${missing.length} dates. ` +
-      `Please run extraction first: node scripts/extraction/extract-all-airports.js --start-date ${missing[0]} --end-date ${missing[missing.length - 1]} --airports ${airport}`;
+      `Please run extraction first: node scripts/extraction/identify-and-extract.js --airport ${airport} --start-date ${missing[0]} --end-date ${missing[missing.length - 1]}`;
     logger.error('Extracted traces not found', { airport, missing });
     throw new Error(errorMsg);
   }
