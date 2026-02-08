@@ -7,8 +7,8 @@ import logger from '../utils/logger.js';
  * Identifies aircraft that have been on the ground at a specific airport
  * 
  * Criteria:
- * - Within 1nm of airport coordinates
- * - Altitude below 500ft AGL (Above Ground Level) or "ground"
+ * - Within 2nm of airport coordinates
+ * - Altitude below 800ft AGL (Above Ground Level) or "ground"
  * 
  * Note: ADSB provides altitudes in AMSL (Above Mean Sea Level), so we convert
  * to AGL by subtracting the airport elevation.
@@ -16,8 +16,8 @@ import logger from '../utils/logger.js';
 class AirportGroundIdentifier {
   constructor(config = {}) {
     this.traceReader = new TraceReader(config);
-    this.proximityRadius = config.proximityRadius || 1.0; // nautical miles
-    this.maxAltitudeAGL = config.maxAltitudeAGL || 500; // feet AGL
+    this.proximityRadius = config.proximityRadius || 2.0; // nautical miles
+    this.maxAltitudeAGL = config.maxAltitudeAGL || 800; // feet AGL
   }
 
   /**
