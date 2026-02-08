@@ -303,6 +303,149 @@
           "length_ft": 10000
         }
       ]
+    },
+    {
+      "icao": "KBOS",
+      "name": "Boston Logan International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 42.3629,
+        "lon": -71.0064
+      },
+      "elevation_ft": 19,
+      "analysis_radius_nm": 150,
+      "timezone": "America/New_York",
+      "runways": []
+    },
+    {
+      "icao": "KDEN",
+      "name": "Denver International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 39.8617,
+        "lon": -104.6732
+      },
+      "elevation_ft": 5434,
+      "analysis_radius_nm": 150,
+      "timezone": "America/Denver",
+      "runways": []
+    },
+    {
+      "icao": "KPHL",
+      "name": "Philadelphia International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 39.8721,
+        "lon": -75.2407
+      },
+      "elevation_ft": 36,
+      "analysis_radius_nm": 150,
+      "timezone": "America/New_York",
+      "runways": []
+    },
+    {
+      "icao": "KIAD",
+      "name": "Washington Dulles International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 38.9475,
+        "lon": -77.4599
+      },
+      "elevation_ft": 312,
+      "analysis_radius_nm": 150,
+      "timezone": "America/New_York",
+      "runways": []
+    },
+    {
+      "icao": "KEWR",
+      "name": "Newark Liberty International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 40.6925,
+        "lon": -74.1687
+      },
+      "elevation_ft": 18,
+      "analysis_radius_nm": 150,
+      "timezone": "America/New_York",
+      "runways": []
+    },
+    {
+      "icao": "KBNA",
+      "name": "Nashville International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 36.1245,
+        "lon": -86.6782
+      },
+      "elevation_ft": 599,
+      "analysis_radius_nm": 150,
+      "timezone": "America/Chicago",
+      "runways": []
+    },
+    {
+      "icao": "KMSP",
+      "name": "Minneapolis-St Paul International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 44.8820,
+        "lon": -93.2218
+      },
+      "elevation_ft": 842,
+      "analysis_radius_nm": 150,
+      "timezone": "America/Chicago",
+      "runways": []
+    },
+    {
+      "icao": "KLAS",
+      "name": "Harry Reid International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 36.0803,
+        "lon": -115.1524
+      },
+      "elevation_ft": 2183,
+      "analysis_radius_nm": 150,
+      "timezone": "America/Los_Angeles",
+      "runways": []
+    },
+    {
+      "icao": "KSEA",
+      "name": "Seattle-Tacoma International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 47.4499,
+        "lon": -122.3118
+      },
+      "elevation_ft": 432,
+      "analysis_radius_nm": 150,
+      "timezone": "America/Los_Angeles",
+      "runways": []
+    },
+    {
+      "icao": "KMCO",
+      "name": "Orlando International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 28.4294,
+        "lon": -81.3090
+      },
+      "elevation_ft": 96,
+      "analysis_radius_nm": 150,
+      "timezone": "America/New_York",
+      "runways": []
+    },
+    {
+      "icao": "KMIA",
+      "name": "Miami International",
+      "enabled": true,
+      "coordinates": {
+        "lat": 25.7954,
+        "lon": -80.2901
+      },
+      "elevation_ft": 9,
+      "analysis_radius_nm": 150,
+      "timezone": "America/New_York",
+      "runways": []
     }
   ],
   
@@ -314,8 +457,8 @@
   },
   
   "metadata": {
-    "last_updated": "2025-01-27",
-    "version": "1.1",
+    "last_updated": "2026-02-08",
+    "version": "1.2",
     "notes": [
       "Runway data sourced from FAA ADIP and aviation databases",
       "Coordinates are for primary runway thresholds",
